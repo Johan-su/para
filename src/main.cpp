@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -49,6 +50,7 @@ do \
 } while (0);
 
 
+#define ARRAY_COUNT(array) sizeof(array) / sizeof(array[0])
 
 
 enum TokenType
@@ -59,11 +61,12 @@ enum TokenType
     OPERATOR_MULTIPLY,    
     OPERATOR_DIVIDE,
 
-    PARENTHESIS_RIGHT,
-    PARENTHESIS_LEFT,
+    OPEN_PARENTHESIS,
+    CLOSE_PARENTHESIS,
 
     NUMBER,
 
+    END_TOKEN,
 
     TOKEN_COUNT
 };
@@ -141,8 +144,8 @@ static void tokenize(Lexer *lexer, const char *source)
 {
     for (Usize i = 0; source[i] != '\0'; ++i)
     {
-             if (source[i] == '(') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = PARENTHESIS_RIGHT});
-        else if (source[i] == ')') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = PARENTHESIS_LEFT});
+             if (source[i] == '(') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = OPEN_PARENTHESIS});
+        else if (source[i] == ')') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = CLOSE_PARENTHESIS});
         else if (source[i] == '+') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = OPERATOR_PLUS});
         else if (source[i] == '-') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = OPERATOR_MINUS});
         else if (source[i] == '*') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = OPERATOR_MULTIPLY});
@@ -167,10 +170,11 @@ static void tokenize(Lexer *lexer, const char *source)
         else if (is_whitespace(source[i])) /*do nothing*/;
         else
         {
-            fprintf(stderr, "ERROR: unhandled token \"%c\"\n", source[i]);
-            assert(false && "unhandled token");
+            fprintf(stderr, "ERROR: unhandled character \"%c\"\n", source[i]);
+            assert(false && "unhandled character");
         }
     }
+    push_token(lexer, Token {.str_val = nullptr, .str_count = 0, .token_type = END_TOKEN});
 }
 
 
@@ -184,15 +188,17 @@ static const char *tokentype_to_str(TokenType tt)
         case OPERATOR_MINUS: return "OPERATOR_MINUS";    
         case OPERATOR_MULTIPLY: return "OPERATOR_MULTIPLY";    
         case OPERATOR_DIVIDE: return "OPERATOR_DIVIDE";
-        case PARENTHESIS_RIGHT: return "PARENTHESIS_RIGHT";
-        case PARENTHESIS_LEFT: return "PARENTHESIS_LEFT";
+        case OPEN_PARENTHESIS: return "OPEN_PARENTHESIS";
+        case CLOSE_PARENTHESIS: return "CLOSE_PARENTHESIS";
         case NUMBER: return "NUMBER";
+        case END_TOKEN: return "END_TOKEN";
         case TOKEN_COUNT: return "TOKEN_COUNT"; 
     }
     
     assert(false && "no string representation of token type found");
     return nullptr;
 }
+
 
 
 
@@ -221,11 +227,13 @@ enum ExprType
     EXPR_OPERATOR,
 };
 
+
+
+
 struct Expr
 {
     Expr *left;
     Expr *right;
-    Expr *parent;
     ExprType expr_type;
 };
 
@@ -237,7 +245,7 @@ struct Number
 };
 
 
-enum OperatorType
+enum BinOperatorType
 {
     PLUS,
     MINUS,
@@ -245,83 +253,273 @@ enum OperatorType
     DIVIDE,
 };
 
-struct Operator
+struct BinOperator
 {
     Expr expr;
-    OperatorType opt;
+    BinOperatorType opt;
 };
 
 
-static void parse_tokens(Lexer *lexer, Expr *root)
-{
-    Usize unmatched_par = 0;
-    for (Usize i = 0; i < lexer->count; ++i)
-    {
-        Expr *current_tree = root;
-        switch (lexer->tokens[i].token_type)
-        {
-            case INVALID_TOKEN:
-            {
-                assert(false);
-            } break;
-            case OPERATOR_PLUS:
-            {
-                //TODO(Johan): was here
-                if (current_tree->expr_type == EXPR_NUMBER)
-                {
 
-                }
-            } break;
-            case OPERATOR_MINUS:
+static const char *expr_to_str(Expr *e)
+{
+    //TODO(Johan): clean up num buffer
+    Usize num_buffer_len = 32;
+    char *num_buffer = alloc<char>(num_buffer_len);
+    memset(num_buffer, 0, num_buffer_len);
+    switch (e->expr_type)
+    { 
+        case EXPR: return "EXPR";
+        case EXPR_NUMBER:
+        {
+            snprintf(num_buffer, num_buffer_len, "%lld", ((Number *)e)->val);
+            return num_buffer;
+        } break;
+        case EXPR_OPERATOR: return ((BinOperator *)e)->opt == PLUS ? "+" : ((BinOperator *)e)->opt == MINUS ? "-" : ((BinOperator *)e)->opt == MULTIPLY ? "*" : ((BinOperator *)e)->opt == DIVIDE ? "/" : ""; 
+        default: assert(false);
+    }
+}
+
+static Token *peek(Lexer *lexer, Usize amount)
+{
+    if (amount >= MAX_TOKEN_CAP)
+    {
+        TODO("handle error token outside cap");
+        return nullptr;
+    }
+    return &lexer->tokens[amount];
+}
+
+
+
+static bool is_token(Token *token, TokenType tt)
+{
+    if (token->token_type == INVALID_TOKEN)
+    {
+        ;
+    }
+    assert(token->token_type != INVALID_TOKEN);
+    return token->token_type == tt;
+}
+
+
+
+static bool is_operator_token(Token *token)
+{
+    return is_token(token, OPERATOR_PLUS) ||
+    is_token(token, OPERATOR_MINUS) ||
+    is_token(token, OPERATOR_MULTIPLY) ||
+    is_token(token, OPERATOR_DIVIDE);
+}
+
+
+
+
+static Expr *parse_operator(Lexer *lexer, Usize *index)
+{
+    BinOperator *boperator = alloc<BinOperator>(1);
+    boperator->expr.expr_type = EXPR_OPERATOR;
+
+
+    if (is_token(peek(lexer, *index), OPERATOR_PLUS)) boperator->opt = PLUS;
+    else if (is_token(peek(lexer, *index), OPERATOR_MINUS)) boperator->opt = MINUS;
+    else if (is_token(peek(lexer, *index), OPERATOR_MULTIPLY)) boperator->opt = MULTIPLY;
+    else if (is_token(peek(lexer, *index), OPERATOR_DIVIDE)) boperator->opt = DIVIDE;
+    else
+    {
+        TODO("handle error expected operator but found none");
+    }
+
+    *index += 1;
+    return (Expr *)boperator;
+}
+
+
+
+static Expr *parse_number(Lexer *lexer, Usize *index)
+{
+    Expr *root = nullptr;
+
+    if (is_token(peek(lexer, *index), NUMBER))
+    {
+        if (is_token(peek(lexer, *index + 1), NUMBER))
+        {
+            TODO("unexpected number after number");
+        }
+        Number *number = alloc<Number>(1);
+        number->val = atoll(lexer->tokens[*index].str_val);
+        number->expr.expr_type = EXPR_NUMBER;
+        root = (Expr *)number;
+        *index += 1;
+    }
+
+    return root;
+}
+
+// <Expr> := <Expr> <BinOperator> <Expr> | (<Expr>) | <Number>
+
+
+// https://www.tutorialspoint.com/what-is-left-recursion-and-how-it-is-eliminated
+
+// not left recursion
+// <Expr> := (<Expr>) <Expr'> | <Number> <Expr'>
+// <Expr'> := {<BinOperator> <Expr> <Expr'>}*
+
+static Expr *parse_expr(Lexer *lexer, Usize *index);
+static Expr *parse_alt_expr(Lexer *lexer, Usize *index)
+{
+    Expr *root = nullptr;
+
+    if (is_token(peek(lexer, *index), END_TOKEN))
+    {
+        return nullptr;
+    }
+    if (is_operator_token(peek(lexer, *index)))
+    {
+        Expr *op = parse_operator(lexer, index);
+        Expr *expr = parse_expr(lexer, index);
+        Expr *alt_expr = parse_alt_expr(lexer, index); 
+
+
+        op->right = expr;
+
+        if (alt_expr != nullptr)
+        {
+            assert(alt_expr->expr_type == EXPR_OPERATOR);
+            alt_expr->left = op;
+            root = alt_expr;
+        }
+        else
+        {
+            root = op;
+        }
+    }
+
+
+    return root;
+}
+
+static Expr *parse_expr(Lexer *lexer, Usize *index)
+{
+    Expr *root = nullptr;
+
+    assert(lexer->tokens[*index].token_type != INVALID_TOKEN);
+
+    if (is_token(peek(lexer, *index), END_TOKEN))
+    {
+        return nullptr;
+    }
+    else if (is_token(peek(lexer, *index), OPEN_PARENTHESIS))
+    {
+        *index += 1;
+        Expr *expr = parse_expr(lexer, index);
+        if (!is_token(peek(lexer, *index), CLOSE_PARENTHESIS))
+        {
+            TODO("handle error right parens must match with left parens");
+        }
+        *index += 1;
+        Expr *alt_expr = parse_alt_expr(lexer, index);
+        if (alt_expr != nullptr)
+        {
+            alt_expr->left = expr;
+            root = alt_expr;
+        }
+        else
+        {
+            root = expr;
+        }
+    }
+    else if (is_token(peek(lexer, *index), NUMBER))
+    {
+        Expr *number = parse_number(lexer, index);
+
+        Expr *alt_expr = parse_alt_expr(lexer, index);
+
+        if (alt_expr != nullptr)
+        {
+            alt_expr->left = number;
+            root = alt_expr;
+        }
+        else
+        {
+            root = number;
+        }
+
+    }
+    else
+    {
+        assert(false && "unreachable");
+    }
+
+    return root;
+}
+
+
+static void print_expr(Expr *expr)
+{
+    switch (expr->expr_type)
+    {
+        case EXPR:
+        {
+            if (expr->left != nullptr) print_expr(expr->left);
+            if (expr->right != nullptr) print_expr(expr->right);
+        } break;
+        case EXPR_NUMBER:
+        {
+            Number *num = (Number *)expr;
+            printf("%lld", num->val);
+        } break;
+        case EXPR_OPERATOR:
+        {
+            BinOperator *op = (BinOperator *)expr;
+            printf("(");
+            print_expr(op->expr.left);
+            printf(" %s ", op->opt == PLUS ? "+" : op->opt == MINUS ? "-" : op->opt == MULTIPLY ? "*" : op->opt == DIVIDE ? "/" : nullptr);
+            print_expr(op->expr.right);
+            printf(")");
+        } break;
+    
+        default: assert(false);
+    }
+}
+
+static I64 eval_expr(Expr *e)
+{
+    switch (e->expr_type)
+    {
+        case EXPR:
+        {
+            assert(false);
+        } break; 
+        case EXPR_NUMBER:
+        {
+            return ((Number *)e)->val;
+        } break;   
+        case EXPR_OPERATOR:
+        {
+            BinOperator *b_op = (BinOperator *)e;
+            switch (b_op->opt)
             {
-                TODO("implement");
-            } break;
-            case OPERATOR_MULTIPLY:
-            {
-                TODO("implement");
-            } break;
-            case OPERATOR_DIVIDE:
-            {
-                TODO("implement");
-            } break;
-            case PARENTHESIS_RIGHT:
-            {
-                unmatched_par += 1;
-                current_tree->left = alloc<Expr>(1);
-                memset(current_tree->left, 0, sizeof(Expr));
-                current_tree->left->parent = current_tree;
-                current_tree = current_tree->left;
-            } break;
-            case PARENTHESIS_LEFT:
-            {
-                TODO("implement");
-            } break;
-            case NUMBER:
-            {
-                Number *number = alloc<Number>(1);
-                number->val = atoll(lexer->tokens[i].str_val);
-                if (current_tree->expr_type == EXPR_OPERATOR)
+                case PLUS:
                 {
-                    current_tree->right = (Expr *)number;
-                    current_tree->right->parent = current_tree;
-                    current_tree = current_tree->parent;
-                }
-                else
+                    return eval_expr(b_op->expr.left) + eval_expr(b_op->expr.right);
+                } break;
+                case MINUS:
                 {
-                    current_tree->left = (Expr *)number;
-                    current_tree->left->parent = current_tree;
-                }
-            } break;
-            case TOKEN_COUNT:
-            {
-                assert(false);
-            } break;
-            default:
-            {
-                fprintf(stderr, "ERROR: unknown token\n");
-                assert(false && "unknown token");
-            } break;
-        } 
+                    return eval_expr(b_op->expr.left) - eval_expr(b_op->expr.right);
+                } break;
+                case MULTIPLY:
+                {
+                    return eval_expr(b_op->expr.left) * eval_expr(b_op->expr.right);
+                } break;
+                case DIVIDE:
+                {
+                    return eval_expr(b_op->expr.left) / eval_expr(b_op->expr.right);
+                } break;
+            }
+        } break; 
+    
+        default: assert(false);
     }
 }
 
@@ -334,15 +532,23 @@ int main(int argc, const char *argv[])
         TODO("display usage when no argument is provided");
     }
 
-    const char *source = " ( 55+ 5) * (4 +4)";
+    // const char *source = " ( 55+ 5) * (4 +4)";
+    //const char *source = "((1 + (1)) + (1) + 1)";
+    const char *source = argv[1];
 
     tokenize(&g_lexer, source);
 
     print_tokens(&g_lexer);
 
-    Expr expression_tree = {};
+    Usize index = 0;
+    Expr *expression_tree = parse_expr(&g_lexer, &index);
 
-    parse_tokens(&g_lexer, &expression_tree);
+    Expr expression_tree = {};
+    printf("-------------\n");
+
+    print_expr(expression_tree);
+    printf(" = %lld", eval_expr(expression_tree));
+
 
 
     return 0;
