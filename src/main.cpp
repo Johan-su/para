@@ -524,6 +524,39 @@ static I64 eval_expr(Expr *e)
 }
 
 
+static void create_image_from_exprtree(Expr *tree)
+{
+    {
+        FILE *f = fopen("input.dot", "w");
+
+        fprintf(f, "digraph G {\n");
+
+        {
+            Expr *stack[512] = {0};
+            Usize stack_index = ARRAY_COUNT(stack);
+            stack[--stack_index] = tree;
+            while (stack_index < ARRAY_COUNT(stack))
+            {
+                Expr *poped_tree = stack[stack_index++];
+                assert(poped_tree != nullptr);
+                fprintf(f, "n%llu [label=\"%s\"];\n", (Usize)poped_tree, expr_to_str(poped_tree));
+
+                if (poped_tree->left != nullptr)
+                {
+                    stack[--stack_index] = poped_tree->left;
+                    fprintf(f, "n%llu -> n%llu;\n", (Usize)poped_tree, (Usize)poped_tree->left);
+                }
+                if (poped_tree->right != nullptr)
+                {
+                    stack[--stack_index] = poped_tree->right;
+                    fprintf(f, "n%llu -> n%llu;\n", (Usize)poped_tree, (Usize)poped_tree->right);
+                }
+            }
+        }
+        fprintf(f, "}");
+        fclose(f);
+    }
+}
 
 int main(int argc, const char *argv[])
 {
@@ -543,7 +576,7 @@ int main(int argc, const char *argv[])
     Usize index = 0;
     Expr *expression_tree = parse_expr(&g_lexer, &index);
 
-    Expr expression_tree = {};
+    create_image_from_exprtree(expression_tree);
     printf("-------------\n");
 
     print_expr(expression_tree);
