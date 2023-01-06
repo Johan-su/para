@@ -566,8 +566,8 @@ int main(int argc, const char *argv[])
     }
 
     // const char *source = " ( 55+ 5) * (4 +4)";
-    //const char *source = "((1 + (1)) + (1) + 1)";
-    const char *source = argv[1];
+    const char *source = "5 * 5 + 5";
+    // const char *source = argv[1];
 
     tokenize(&g_lexer, source);
 
@@ -580,7 +580,7 @@ int main(int argc, const char *argv[])
     printf("-------------\n");
 
     print_expr(expression_tree);
-    printf(" = %lld", eval_expr(expression_tree));
+    printf(" = %lld\n", eval_expr(expression_tree));
 
 
 
