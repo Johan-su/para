@@ -222,9 +222,10 @@ static T *alloc(Usize count)
 
 enum ExprType
 {
-    EXPR = 0,
     EXPR_NUMBER,  
+    EXPR_ALT,
     EXPR_OPERATOR,
+    EXPR_EMPTY,
 };
 
 
@@ -269,7 +270,6 @@ static const char *expr_to_str(Expr *e)
     memset(num_buffer, 0, num_buffer_len);
     switch (e->expr_type)
     { 
-        case EXPR: return "EXPR";
         case EXPR_NUMBER:
         {
             snprintf(num_buffer, num_buffer_len, "%lld", ((Number *)e)->val);
@@ -461,11 +461,6 @@ static void print_expr(Expr *expr)
 {
     switch (expr->expr_type)
     {
-        case EXPR:
-        {
-            if (expr->left != nullptr) print_expr(expr->left);
-            if (expr->right != nullptr) print_expr(expr->right);
-        } break;
         case EXPR_NUMBER:
         {
             Number *num = (Number *)expr;
@@ -489,10 +484,6 @@ static I64 eval_expr(Expr *e)
 {
     switch (e->expr_type)
     {
-        case EXPR:
-        {
-            assert(false);
-        } break; 
         case EXPR_NUMBER:
         {
             return ((Number *)e)->val;
@@ -565,14 +556,43 @@ static void create_image_from_exprtree(Expr *tree)
 namespace BottomUpParser
 {
 
+// <S> := <Expr>
+// <Expr> := (<Expr>) <Expr'>
+// <Expr> := <Number> <Expr'>
+// <Expr'> := <BinOperator> <Expr> <Expr'>
+// <Expr'> := <>
 
+/*
+
+    1:
+    <S>     := . <Expr> $
+    <Expr>  := . (<Expr>) <Expr'>
+    <Expr>  := . <Number> <Expr'>
+    <Expr'> := . <BinOperator> <Expr> <Expr'>
+    <Expr'> := . <>
+
+
+*/
+
+
+
+
+
+
+// https://boxbase.org/entries/2019/oct/14/lr1-parsing-tables/
+// https://fileadmin.cs.lth.se/cs/Education/EDAN65/2021/lectures/L06A.pdf
 
 #define PARSE_STACK_CAP 4096
 
 struct ExprOrToken
 {
-    Token *t;
-    Expr *e;
+    bool is_token;
+
+    union
+    {
+        Expr *e;
+        Token *t;
+    };
 };  
 
 
@@ -582,7 +602,7 @@ struct ParseStack
     Usize index;
 };
 
-// https://boxbase.org/entries/2019/oct/14/lr1-parsing-tables/
+
 
 
 
@@ -623,61 +643,35 @@ static Token *peek(Lexer *lexer)
 }
 
 
-enum ParseState
+
+static action[][]
+
+
+static void shift(ParseStack *stack, Lexer *lexer, U64 k)
 {
-    START,
-    SHIFT,
-    REDUCE,
-    ERROR,
-};
-
-
-
-
-
-
-static ParseState g_current_state = START;
-
-
-static void set_next_action(ParseStack *stack, Token *look_ahead)
-{
-    
+    Token *t = peek(lexer);
+    next_token(lexer);
+    ExprOrToken eot = {
+        .is_token = true,
+        .t = t,
+    };
+    push(stack, eot);
 }
+
+
+static void reduce()
+{
+
+}
+
 
 static Expr *parse_expr(Lexer *lexer)
 {
-    ParseStack stack = {
-    .data = {},
-    .index = PARSE_STACK_CAP,
+    ParseStack g_stack = {
+        .data = {},
+        .index = PARSE_STACK_CAP,
     };
-    while (true)
-    {
-        switch (g_current_state)
-        {
-            case START:
-            {
-                push(&stack, {.t = nullptr, .e = nullptr});
-            } break;
-            case SHIFT:
-            {
-                ExprOrToken eot = {
-                    .t = peek(lexer),
-                    .e = nullptr, 
-                };
-                push(&stack, eot);
-            } break;
-            case REDUCE:
-            {
 
-            } break;
-            case ERROR:
-            {
-
-            } break;            
-        
-        default: assert(false);
-        }
-    }
 }
 
 
