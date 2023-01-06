@@ -313,7 +313,8 @@ static bool is_operator_token(Token *token)
 }
 
 
-
+namespace TopDownParser
+{
 
 static Expr *parse_operator(Lexer *lexer, Usize *index)
 {
@@ -454,6 +455,7 @@ static Expr *parse_expr(Lexer *lexer, Usize *index)
     return root;
 }
 
+} // namespace TopDownParser
 
 static void print_expr(Expr *expr)
 {
@@ -558,6 +560,146 @@ static void create_image_from_exprtree(Expr *tree)
     }
 }
 
+
+
+namespace BottomUpParser
+{
+
+
+
+#define PARSE_STACK_CAP 4096
+
+struct ExprOrToken
+{
+    Token *t;
+    Expr *e;
+};  
+
+
+struct ParseStack
+{
+    ExprOrToken data[PARSE_STACK_CAP];
+    Usize index;
+};
+
+
+
+
+
+static ExprOrToken pop(ParseStack *s)
+{
+    if (s->index >= PARSE_STACK_CAP)
+    {
+        TODO("handle error tried to pop from empty stack");
+    }
+    return s->data[s->index++];
+}
+
+static void push(ParseStack *s, ExprOrToken t)
+{
+    if (s->index <= 0)
+    {
+        TODO("handle error push to full stack");
+    }
+    s->data[--s->index] = t;
+}
+
+
+
+static Usize g_token_index = 0;
+
+
+static void next_token(Lexer *lexer)
+{
+    if (g_token_index < lexer->count)
+    {
+        g_token_index += 1;
+    }
+}
+
+static Token *peek(Lexer *lexer)
+{
+    return &lexer->tokens[g_token_index];
+}
+
+
+enum ParseState
+{
+    START,
+    SHIFT,
+    REDUCE,
+    ERROR,
+};
+
+
+
+
+
+
+static ParseState g_current_state = START;
+
+
+static void set_next_action(ParseStack *stack, Token *look_ahead)
+{
+    
+}
+
+static Expr *parse_expr(Lexer *lexer)
+{
+    ParseStack stack = {
+    .data = {},
+    .index = PARSE_STACK_CAP,
+    };
+    while (true)
+    {
+        switch (g_current_state)
+        {
+            case START:
+            {
+                push(&stack, {.t = nullptr, .e = nullptr});
+            } break;
+            case SHIFT:
+            {
+                ExprOrToken eot = {
+                    .t = peek(lexer),
+                    .e = nullptr, 
+                };
+                push(&stack, eot);
+            } break;
+            case REDUCE:
+            {
+
+            } break;
+            case ERROR:
+            {
+
+            } break;            
+        
+        default: assert(false);
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+} // namespace BottomUpParser
+
+
+
+
+
 int main(int argc, const char *argv[])
 {
     if (argc < 2)
@@ -574,7 +716,7 @@ int main(int argc, const char *argv[])
     print_tokens(&g_lexer);
 
     Usize index = 0;
-    Expr *expression_tree = parse_expr(&g_lexer, &index);
+    Expr *expression_tree = TopDownParser::parse_expr(&g_lexer, &index);
 
     create_image_from_exprtree(expression_tree);
     printf("-------------\n");
