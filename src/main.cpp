@@ -620,7 +620,7 @@ static void make_tree(NumberStack *nst, OperatorStack *ost)
         } break;
         case DIVIDE:
         {
-            TODO("implement");
+            make_binoperator_expr(nst, ost, BinOperatorType::DIVIDE);
         } break;
         case UNARY_PLUS:
         {
@@ -714,7 +714,7 @@ static Expr *parse_expr(Lexer *lexer)
             }
             else
             {
-                TODO("implement");
+                make_tree(&n_stack, &o_stack);
             }
         }
         else if (peek(lexer)->token_type == OPERATOR_DIVIDE)
@@ -1040,7 +1040,7 @@ int main(int argc, const char *argv[])
     Usize index = 0;
     Expr *expression_tree = TopDownParser2::parse_expr(&g_lexer);
 
-    // create_image_from_exprtree(expression_tree);
+    create_image_from_exprtree(expression_tree);
     printf("-------------\n");
 
     print_expr(expression_tree);
