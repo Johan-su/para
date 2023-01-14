@@ -457,6 +457,290 @@ static Expr *parse_expr(Lexer *lexer, Usize *index)
 
 } // namespace TopDownParser
 
+
+namespace TopDownParser2
+{
+
+
+enum ParseState
+{
+    ERROR = 0,
+    START,
+    EXPR,
+    EXPR_ALT,
+    UNARY,
+    BINARY_OPERATOR,
+    NUMBER,
+};
+
+
+enum OperatorLevel
+{
+    SENTINEL = 0,
+    OPEN_PARENTHESIS,
+    PLUS,
+    MINUS,
+    MULTIPLY,
+    DIVIDE,
+    UNARY_PLUS,
+    UNARY_MINUS,
+    EXPONENT,
+    CLOSE_PARENTHESIS = 100000,
+};
+
+
+#define STACK_SIZE 256
+
+
+
+
+struct NumOrExpr 
+{
+    bool is_num;
+    union 
+    {
+        I64 n;
+        Expr *e;
+    };
+};
+
+
+
+struct NumberStack
+{
+    NumOrExpr stack[STACK_SIZE];
+    Usize index;
+};
+
+struct OperatorStack
+{
+    OperatorLevel stack[STACK_SIZE];
+    Usize index;
+};
+
+
+static NumberStack n_stack = {
+    .stack = {},
+    .index = STACK_SIZE,
+};
+
+static OperatorStack o_stack = {
+    .stack = {},
+    .index = STACK_SIZE,
+};
+
+static Usize g_token_index = 0;
+
+static void next_token(Lexer *lexer)
+{
+    if (g_token_index < lexer->count)
+    {
+        g_token_index += 1;
+    }
+}
+
+static Token *peek(Lexer *lexer)
+{
+    return &lexer->tokens[g_token_index];
+}
+
+//TODO(Johan): https://www.engr.mun.ca/~theo/Misc/exp_parsing.htm
+
+
+static OperatorLevel read_stack(OperatorStack *st)
+{
+    if (st->index >= STACK_SIZE)
+    {
+        return OperatorLevel::SENTINEL;
+    }
+
+    return st->stack[st->index];
+}
+
+
+static void make_binoperator_expr(NumberStack *nst, OperatorStack *ost, BinOperatorType b_type)
+{
+    BinOperator *b_op = alloc<BinOperator>(1);
+    b_op->opt = b_type;
+    b_op->expr.expr_type = EXPR_OPERATOR;
+
+
+    if (nst->stack[nst->index].is_num == true)
+    {
+        Number *num_right = alloc<Number>(1);
+        num_right->expr.expr_type = EXPR_NUMBER;
+        num_right->val = nst->stack[nst->index].n;
+        b_op->expr.right = (Expr *)num_right;
+    }
+    else
+    {
+        b_op->expr.right = nst->stack[nst->index].e;
+    }
+    memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
+
+
+    if (nst->stack[nst->index].is_num == true)
+    {
+        Number *num_left = alloc<Number>(1);
+        num_left->expr.expr_type = EXPR_NUMBER;
+        num_left->val = nst->stack[nst->index].n;
+        b_op->expr.left = (Expr *)num_left;
+    }
+    else
+    {
+        b_op->expr.left = nst->stack[nst->index].e;
+    }
+    memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
+
+    nst->stack[--nst->index] = NumOrExpr {.is_num = false, .e = (Expr *)b_op};
+
+    ost->stack[ost->index++] = TopDownParser2::SENTINEL;
+}
+
+
+static void make_tree(NumberStack *nst, OperatorStack *ost)
+{
+    switch (read_stack(ost))
+    {
+        case SENTINEL:
+        {
+            assert(false);
+        } break;
+        case PLUS:
+        {
+            make_binoperator_expr(nst, ost, BinOperatorType::PLUS);
+        } break;
+        case MINUS:
+        {
+            make_binoperator_expr(nst, ost, BinOperatorType::MINUS);
+        } break;
+        case MULTIPLY:
+        {
+            make_binoperator_expr(nst, ost, BinOperatorType::MULTIPLY);
+        } break;
+        case DIVIDE:
+        {
+            TODO("implement");
+        } break;
+        case UNARY_PLUS:
+        {
+            TODO("implement");
+        } break;
+        case UNARY_MINUS:
+        {
+            TODO("implement");
+        } break;
+        case EXPONENT:
+        {
+            TODO("implement");
+        } break;
+        case OPEN_PARENTHESIS:
+        {
+            ost->stack[ost->index++] = TopDownParser2::SENTINEL;
+        } break;
+        case CLOSE_PARENTHESIS:
+        {
+            TODO("implement");
+        } break;
+        default: assert(false && "unreachable");
+    }
+}
+
+
+static Expr *parse_expr(Lexer *lexer)
+{
+    while (true)
+    {
+        if (peek(lexer)->token_type == TokenType::END_TOKEN)
+        {
+            while (n_stack.index < STACK_SIZE && o_stack.index != STACK_SIZE)
+            {
+                make_tree(&n_stack, &o_stack);
+            }
+            break;
+        }
+        else if (peek(lexer)->token_type == TokenType::OPEN_PARENTHESIS)
+        {
+            o_stack.stack[--o_stack.index] = OperatorLevel::OPEN_PARENTHESIS;
+            next_token(lexer);
+        }
+        else if (peek(lexer)->token_type == TokenType::CLOSE_PARENTHESIS)
+        {
+            while (read_stack(&o_stack) != OperatorLevel::OPEN_PARENTHESIS)
+            {
+                make_tree(&n_stack, &o_stack);
+            }
+            next_token(lexer);
+        }
+        else if (peek(lexer)->token_type == TokenType::NUMBER)
+        {
+            NumOrExpr nor = {
+                .is_num = true,
+                .n = atoll(peek(lexer)->str_val),
+            };
+            n_stack.stack[--n_stack.index] = nor;
+            next_token(lexer);
+        }
+        else if (peek(lexer)->token_type == OPERATOR_PLUS)
+        {
+            if (read_stack(&o_stack) < PLUS)
+            {
+                o_stack.stack[--o_stack.index] = PLUS;
+                next_token(lexer);
+            }
+            else
+            {
+                make_tree(&n_stack, &o_stack);
+            }
+        }
+        else if (peek(lexer)->token_type == OPERATOR_MINUS)
+        {
+            if (read_stack(&o_stack) < MINUS)
+            {
+                o_stack.stack[--o_stack.index] = MINUS;
+                next_token(lexer);
+            }
+            else
+            {
+                make_tree(&n_stack, &o_stack);
+            }
+        }
+        else if (peek(lexer)->token_type == OPERATOR_MULTIPLY)
+        {
+            if (read_stack(&o_stack) < MULTIPLY)
+            {
+                o_stack.stack[--o_stack.index] = MULTIPLY;
+                next_token(lexer);
+            }
+            else
+            {
+                TODO("implement");
+            }
+        }
+        else if (peek(lexer)->token_type == OPERATOR_DIVIDE)
+        {
+            if (read_stack(&o_stack) < DIVIDE)
+            {
+                o_stack.stack[--o_stack.index] = DIVIDE;
+                next_token(lexer);
+            }
+            else
+            {
+                TODO("implement");
+            }
+        }
+        else
+        {
+            assert(false);
+        }
+    }
+    return n_stack.stack[n_stack.index].e;
+}
+    
+} // namespace TopDownParser2
+
+
+
 static void print_expr(Expr *expr)
 {
     switch (expr->expr_type)
@@ -521,6 +805,10 @@ static void create_image_from_exprtree(Expr *tree)
 {
     {
         FILE *f = fopen("input.dot", "w");
+        if (f == nullptr)
+        {
+            TODO("handle failed to open file");
+        }
 
         fprintf(f, "digraph G {\n");
 
@@ -552,15 +840,26 @@ static void create_image_from_exprtree(Expr *tree)
 }
 
 
+// <S> := <Expr>
+// <Expr> := (<Expr>) <Expr'>
+// <Expr> := <Number> <Expr'>
+// <Expr> := <U><Expr>
+// <Expr'> := <BinOperator> <Expr> <Expr'>
+// <Expr'> := <>
 
-namespace BottomUpParser
-{
+
 
 // <S> := <Expr>
 // <Expr> := (<Expr>) <Expr'>
 // <Expr> := <Number> <Expr'>
 // <Expr'> := <BinOperator> <Expr> <Expr'>
 // <Expr'> := <>
+
+
+namespace BottomUpParser
+{
+
+
 
 /*
 
@@ -644,7 +943,7 @@ static Token *peek(Lexer *lexer)
 
 
 
-static action[][]
+//static action[][]
 
 
 static void shift(ParseStack *stack, Lexer *lexer, U64 k)
@@ -672,6 +971,7 @@ static Expr *parse_expr(Lexer *lexer)
         .index = PARSE_STACK_CAP,
     };
 
+    return nullptr;
 }
 
 
@@ -692,27 +992,55 @@ static Expr *parse_expr(Lexer *lexer)
 
 
 
+static void usage(const char *program)
+{
 
+    printf("USAGE: %s <expr>\n example %s (5 + 5) * 5\n only works with + - * ( )\n WILL CRASH AT ANY ERROR", program, program);
+    exit(1);
+}
 
 int main(int argc, const char *argv[])
 {
     if (argc < 2)
     {
-        TODO("display usage when no argument is provided");
+        usage(argv[0]);
     }
 
     // const char *source = " ( 55+ 5) * (4 +4)";
-    const char *source = "5 * 5 + 5";
+    // const char *source = "5 + 5 * 5 - 5";
     // const char *source = argv[1];
+    const char *source;
+    {
+        Usize total_strlen = 0;
+        {
+            for (Usize i = 1; argv[i] != nullptr; ++i)
+            {
+                total_strlen += strlen(argv[i]);
+            }
+        }
+        char *source_from_args = alloc<char>(total_strlen + 1);
+        {
+            Usize copy_index = 0;
+            for (Usize i = 1; argv[i] != nullptr; ++i)
+            {
+                Usize str_len = strlen(argv[i]);
+                memcpy(&source_from_args[copy_index], argv[i], str_len);
+                copy_index += str_len;
+            }
+            source_from_args[copy_index] = '\0';
+        }
+        source = source_from_args;
+    }
+
 
     tokenize(&g_lexer, source);
 
     print_tokens(&g_lexer);
 
     Usize index = 0;
-    Expr *expression_tree = TopDownParser::parse_expr(&g_lexer, &index);
+    Expr *expression_tree = TopDownParser2::parse_expr(&g_lexer);
 
-    create_image_from_exprtree(expression_tree);
+    // create_image_from_exprtree(expression_tree);
     printf("-------------\n");
 
     print_expr(expression_tree);
