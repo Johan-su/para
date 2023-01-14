@@ -727,6 +727,7 @@ static Expr *parse_expr(Lexer *lexer)
             {
                 make_tree(&n_stack, &o_stack);
             }
+            memset(&o_stack.stack[o_stack.index++], 0, sizeof(o_stack.stack[0]));
             next_token(lexer);
         }
         else if (peek(lexer)->token_type == TokenType::NUMBER)
