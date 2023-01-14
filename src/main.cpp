@@ -224,7 +224,8 @@ enum ExprType
 {
     EXPR_NUMBER,  
     EXPR_ALT,
-    EXPR_OPERATOR,
+    EXPR_BIN_OPERATOR,
+    EXPR_UNARY_OPERATOR,
     EXPR_EMPTY,
 };
 
@@ -246,12 +247,13 @@ struct Number
 };
 
 
-enum BinOperatorType
+enum class BinOperatorType
 {
     PLUS,
     MINUS,
     MULTIPLY,
     DIVIDE,
+    EXPONENT,
 };
 
 struct BinOperator
@@ -260,6 +262,18 @@ struct BinOperator
     BinOperatorType opt;
 };
 
+
+enum class UnaryOperatorType
+{
+    PLUS,
+    MINUS,
+};
+
+struct UnaryOperator
+{
+    Expr expr;
+    UnaryOperatorType uot;
+};
 
 
 static const char *expr_to_str(Expr *e)
@@ -275,7 +289,11 @@ static const char *expr_to_str(Expr *e)
             snprintf(num_buffer, num_buffer_len, "%lld", ((Number *)e)->val);
             return num_buffer;
         } break;
-        case EXPR_OPERATOR: return ((BinOperator *)e)->opt == PLUS ? "+" : ((BinOperator *)e)->opt == MINUS ? "-" : ((BinOperator *)e)->opt == MULTIPLY ? "*" : ((BinOperator *)e)->opt == DIVIDE ? "/" : ""; 
+        case EXPR_BIN_OPERATOR: return ((BinOperator *)e)->opt == BinOperatorType::PLUS ? "+" : ((BinOperator *)e)->opt == BinOperatorType::MINUS ? "-" : ((BinOperator *)e)->opt == BinOperatorType::MULTIPLY ? "*" : ((BinOperator *)e)->opt == BinOperatorType::DIVIDE ? "/" : ""; 
+
+        
+        case EXPR_UNARY_OPERATOR: return ((UnaryOperator *)e)->uot == UnaryOperatorType::PLUS ? "+" : ((UnaryOperator *)e)->uot == UnaryOperatorType::MINUS ? "-" : "";
+
         default: assert(false);
     }
 }
@@ -319,13 +337,13 @@ namespace TopDownParser
 static Expr *parse_operator(Lexer *lexer, Usize *index)
 {
     BinOperator *boperator = alloc<BinOperator>(1);
-    boperator->expr.expr_type = EXPR_OPERATOR;
+    boperator->expr.expr_type = EXPR_BIN_OPERATOR;
 
 
-    if (is_token(peek(lexer, *index), OPERATOR_PLUS)) boperator->opt = PLUS;
-    else if (is_token(peek(lexer, *index), OPERATOR_MINUS)) boperator->opt = MINUS;
-    else if (is_token(peek(lexer, *index), OPERATOR_MULTIPLY)) boperator->opt = MULTIPLY;
-    else if (is_token(peek(lexer, *index), OPERATOR_DIVIDE)) boperator->opt = DIVIDE;
+    if (is_token(peek(lexer, *index), OPERATOR_PLUS)) boperator->opt = BinOperatorType::PLUS;
+    else if (is_token(peek(lexer, *index), OPERATOR_MINUS)) boperator->opt = BinOperatorType::MINUS;
+    else if (is_token(peek(lexer, *index), OPERATOR_MULTIPLY)) boperator->opt = BinOperatorType::MULTIPLY;
+    else if (is_token(peek(lexer, *index), OPERATOR_DIVIDE)) boperator->opt = BinOperatorType::DIVIDE;
     else
     {
         TODO("handle error expected operator but found none");
@@ -386,7 +404,7 @@ static Expr *parse_alt_expr(Lexer *lexer, Usize *index)
 
         if (alt_expr != nullptr)
         {
-            assert(alt_expr->expr_type == EXPR_OPERATOR);
+            assert(alt_expr->expr_type == EXPR_BIN_OPERATOR);
             alt_expr->left = op;
             root = alt_expr;
         }
@@ -541,7 +559,16 @@ static void next_token(Lexer *lexer)
 
 static Token *peek(Lexer *lexer)
 {
-    return &lexer->tokens[g_token_index];
+    return &lexer->tokens[g_token_index]; 
+}
+
+static Token *peek_before(Lexer *lexer)
+{
+    if (g_token_index <= 0)
+    {
+        return nullptr;
+    }
+    return &lexer->tokens[g_token_index - 1];
 }
 
 //TODO(Johan): https://www.engr.mun.ca/~theo/Misc/exp_parsing.htm
@@ -562,12 +589,13 @@ static void make_binoperator_expr(NumberStack *nst, OperatorStack *ost, BinOpera
 {
     BinOperator *b_op = alloc<BinOperator>(1);
     b_op->opt = b_type;
-    b_op->expr.expr_type = EXPR_OPERATOR;
+    b_op->expr.expr_type = EXPR_BIN_OPERATOR;
 
 
     if (nst->stack[nst->index].is_num == true)
     {
         Number *num_right = alloc<Number>(1);
+        memset(num_right, 0, sizeof(*num_right));
         num_right->expr.expr_type = EXPR_NUMBER;
         num_right->val = nst->stack[nst->index].n;
         b_op->expr.right = (Expr *)num_right;
@@ -582,6 +610,7 @@ static void make_binoperator_expr(NumberStack *nst, OperatorStack *ost, BinOpera
     if (nst->stack[nst->index].is_num == true)
     {
         Number *num_left = alloc<Number>(1);
+        memset(num_left, 0, sizeof(*num_left));
         num_left->expr.expr_type = EXPR_NUMBER;
         num_left->val = nst->stack[nst->index].n;
         b_op->expr.left = (Expr *)num_left;
@@ -597,6 +626,33 @@ static void make_binoperator_expr(NumberStack *nst, OperatorStack *ost, BinOpera
     ost->stack[ost->index++] = TopDownParser2::SENTINEL;
 }
 
+
+static void make_unoperator_expr(NumberStack *nst, OperatorStack *ost, UnaryOperatorType u_type)
+{
+    UnaryOperator *u_op = alloc<UnaryOperator>(1);
+    memset(u_op, 0, sizeof(*u_op));
+
+    u_op->uot = u_type;
+    u_op->expr.expr_type = EXPR_UNARY_OPERATOR;
+
+    if (nst->stack[nst->index].is_num == true)
+    {
+        Number *num = alloc<Number>(1);
+        memset(num, 0, sizeof(*num));
+        num->expr.expr_type = EXPR_NUMBER;
+        num->val = nst->stack[nst->index].n;
+        u_op->expr.right = (Expr *)num;
+    }
+    else
+    {
+        u_op->expr.right = nst->stack[nst->index].e;
+    }
+
+    memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
+    nst->stack[--nst->index] = NumOrExpr {.is_num = false, .e = (Expr *)u_op};
+    ost->stack[ost->index++] = TopDownParser2::SENTINEL;
+
+}
 
 static void make_tree(NumberStack *nst, OperatorStack *ost)
 {
@@ -624,11 +680,11 @@ static void make_tree(NumberStack *nst, OperatorStack *ost)
         } break;
         case UNARY_PLUS:
         {
-            TODO("implement");
+            make_unoperator_expr(nst, ost, UnaryOperatorType::PLUS);
         } break;
         case UNARY_MINUS:
         {
-            TODO("implement");
+            make_unoperator_expr(nst, ost, UnaryOperatorType::MINUS);
         } break;
         case EXPONENT:
         {
@@ -645,6 +701,7 @@ static void make_tree(NumberStack *nst, OperatorStack *ost)
         default: assert(false && "unreachable");
     }
 }
+
 
 
 static Expr *parse_expr(Lexer *lexer)
@@ -683,26 +740,58 @@ static Expr *parse_expr(Lexer *lexer)
         }
         else if (peek(lexer)->token_type == OPERATOR_PLUS)
         {
-            if (read_stack(&o_stack) < PLUS)
+            if (peek_before(lexer) == nullptr ||
+                (peek_before(lexer)->token_type != TokenType::NUMBER && peek_before(lexer)->token_type != TokenType::CLOSE_PARENTHESIS))
             {
-                o_stack.stack[--o_stack.index] = PLUS;
-                next_token(lexer);
+                if (read_stack(&o_stack) <= UNARY_PLUS)
+                {
+                    o_stack.stack[--o_stack.index] = UNARY_PLUS;
+                    next_token(lexer);
+                }
+                else
+                {
+                    make_tree(&n_stack, &o_stack);
+                }
             }
             else
             {
-                make_tree(&n_stack, &o_stack);
+                if (read_stack(&o_stack) < PLUS)
+                {
+                    o_stack.stack[--o_stack.index] = PLUS;
+                    next_token(lexer);
+                }
+                else
+                {
+                    make_tree(&n_stack, &o_stack);
+                }
             }
         }
         else if (peek(lexer)->token_type == OPERATOR_MINUS)
         {
-            if (read_stack(&o_stack) < MINUS)
+            if (peek_before(lexer) == nullptr ||
+                (peek_before(lexer)->token_type != TokenType::NUMBER && peek_before(lexer)->token_type != TokenType::CLOSE_PARENTHESIS))
             {
-                o_stack.stack[--o_stack.index] = MINUS;
-                next_token(lexer);
+                if (read_stack(&o_stack) <= UNARY_MINUS)
+                {
+                    o_stack.stack[--o_stack.index] = UNARY_MINUS;
+                    next_token(lexer);
+                }
+                else
+                {
+                    make_tree(&n_stack, &o_stack);
+                }
             }
             else
             {
-                make_tree(&n_stack, &o_stack);
+                if (read_stack(&o_stack) < MINUS)
+                {
+                    o_stack.stack[--o_stack.index] = MINUS;
+                    next_token(lexer);
+                }
+                else
+                {
+                    make_tree(&n_stack, &o_stack);
+                }
             }
         }
         else if (peek(lexer)->token_type == OPERATOR_MULTIPLY)
@@ -726,7 +815,7 @@ static Expr *parse_expr(Lexer *lexer)
             }
             else
             {
-                TODO("implement");
+                make_tree(&n_stack, &o_stack);
             }
         }
         else
@@ -750,14 +839,24 @@ static void print_expr(Expr *expr)
             Number *num = (Number *)expr;
             printf("%lld", num->val);
         } break;
-        case EXPR_OPERATOR:
+        case EXPR_BIN_OPERATOR:
         {
             BinOperator *op = (BinOperator *)expr;
             printf("(");
             print_expr(op->expr.left);
-            printf(" %s ", op->opt == PLUS ? "+" : op->opt == MINUS ? "-" : op->opt == MULTIPLY ? "*" : op->opt == DIVIDE ? "/" : nullptr);
+            printf(" %s ", expr_to_str(expr));
             print_expr(op->expr.right);
             printf(")");
+        } break;
+        case EXPR_UNARY_OPERATOR:
+        {
+            UnaryOperator *op = (UnaryOperator *)expr;
+
+            printf("(");
+            printf("%s", expr_to_str(expr));
+            print_expr(op->expr.right);
+            printf(")");
+
         } break;
     
         default: assert(false);
@@ -772,29 +871,47 @@ static I64 eval_expr(Expr *e)
         {
             return ((Number *)e)->val;
         } break;   
-        case EXPR_OPERATOR:
+        case EXPR_BIN_OPERATOR:
         {
             BinOperator *b_op = (BinOperator *)e;
             switch (b_op->opt)
             {
-                case PLUS:
+                case BinOperatorType::PLUS:
                 {
                     return eval_expr(b_op->expr.left) + eval_expr(b_op->expr.right);
                 } break;
-                case MINUS:
+                case BinOperatorType::MINUS:
                 {
                     return eval_expr(b_op->expr.left) - eval_expr(b_op->expr.right);
                 } break;
-                case MULTIPLY:
+                case BinOperatorType::MULTIPLY:
                 {
                     return eval_expr(b_op->expr.left) * eval_expr(b_op->expr.right);
                 } break;
-                case DIVIDE:
+                case BinOperatorType::DIVIDE:
                 {
                     return eval_expr(b_op->expr.left) / eval_expr(b_op->expr.right);
                 } break;
+                default: assert(false);
             }
         } break; 
+        case EXPR_UNARY_OPERATOR:
+        {
+            UnaryOperator *u_op = (UnaryOperator *)e;
+            switch (u_op->uot)
+            {
+                case UnaryOperatorType::PLUS:
+                {
+                    return eval_expr(u_op->expr.right);
+                } break;
+                case UnaryOperatorType::MINUS:
+                {
+                    return -eval_expr(u_op->expr.right);
+                } break;
+
+                default: assert(false);
+            }
+        } break;
     
         default: assert(false);
     }
