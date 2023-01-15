@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 typedef uint8_t U8;
 typedef uint16_t U16;
@@ -70,6 +71,8 @@ enum TokenType
     CLOSE_PARENTHESIS,
 
     NUMBER,
+
+    IDENTIFIER,
 
     END_TOKEN,
 
@@ -144,6 +147,11 @@ static bool is_whitespace(char n)
     return false;
 }
 
+static bool is_letter(char n)
+{
+    return (n >= 'A' && n <= 'Z') || (n >= 'a' && n <= 'z');
+}
+
 
 static void tokenize(Lexer *lexer, const char *source)
 {
@@ -181,6 +189,22 @@ static void tokenize(Lexer *lexer, const char *source)
             push_token(lexer, number_token);
         }
         else if (is_whitespace(source[i])) /*do nothing*/;
+        else if (is_letter(source[i]))
+        {
+            Token id_token = {};
+            id_token.str_val = &source[i];
+            id_token.token_type = TokenType::IDENTIFIER;
+
+            Usize count = 1;
+            while (is_letter(source[i + count]))
+            {
+                count += 1;
+            }
+            id_token.str_count = count;
+            i += count - 1;
+
+            push_token(lexer, id_token);
+        }
         else
         {
             fprintf(stderr, "ERROR: unhandled character \"%c\"\n", source[i]);
@@ -204,6 +228,7 @@ static const char *tokentype_to_str(TokenType tt)
         case OPEN_PARENTHESIS: return "OPEN_PARENTHESIS";
         case CLOSE_PARENTHESIS: return "CLOSE_PARENTHESIS";
         case NUMBER: return "NUMBER";
+        case IDENTIFIER: return "IDENTIFIER";
         case END_TOKEN: return "END_TOKEN";
         case TOKEN_COUNT: return "TOKEN_COUNT"; 
     }
@@ -239,6 +264,7 @@ enum ExprType
     EXPR_ALT,
     EXPR_BIN_OPERATOR,
     EXPR_UNARY_OPERATOR,
+    EXPR_FUNCTION,
     EXPR_EMPTY,
 };
 
@@ -289,6 +315,25 @@ struct UnaryOperator
 };
 
 
+enum FunctionType
+{
+    INVALID,
+    COS,
+    SIN,
+    TAN,
+    SQUARE_ROOT,
+    ABSOLUTE,
+    LOG,
+    E_EXPONENTIAL,
+};
+
+struct Function
+{
+    Expr expr;
+    FunctionType ft;
+};
+
+
 static const char *expr_to_str(Expr *e)
 {
     //TODO(Johan): clean up num buffer
@@ -306,6 +351,24 @@ static const char *expr_to_str(Expr *e)
 
         
         case EXPR_UNARY_OPERATOR: return ((UnaryOperator *)e)->uot == UnaryOperatorType::PLUS ? "+" : ((UnaryOperator *)e)->uot == UnaryOperatorType::MINUS ? "-" : "";
+
+
+        case EXPR_FUNCTION:
+        {
+            switch (((Function *)e)->ft)
+            {
+                case INVALID: assert(false);
+                case COS: return "cos";
+                case SIN: return "sin";
+                case TAN: return "tan";
+                case SQUARE_ROOT: return "sqrt";
+                case ABSOLUTE: return "abs";
+                case LOG: return "log";
+                case E_EXPONENTIAL: return "exp";
+            
+                default: assert(false);
+            }
+        }
 
         default: assert(false);
     }
@@ -516,9 +579,16 @@ enum OperatorLevel
     UNARY_PLUS,
     UNARY_MINUS,
     EXPONENT,
+    FUNCTION,
     CLOSE_PARENTHESIS = 100000,
 };
 
+
+struct Operator
+{
+    OperatorLevel ol;
+    Token *context_token;
+};
 
 #define STACK_SIZE 256
 
@@ -545,7 +615,7 @@ struct NumberStack
 
 struct OperatorStack
 {
-    OperatorLevel stack[STACK_SIZE];
+    Operator stack[STACK_SIZE];
     Usize index;
 };
 
@@ -587,11 +657,11 @@ static Token *peek_before(Lexer *lexer)
 //TODO(Johan): https://www.engr.mun.ca/~theo/Misc/exp_parsing.htm
 
 
-static OperatorLevel read_stack(OperatorStack *st)
+static Operator read_stack(OperatorStack *st)
 {
     if (st->index >= STACK_SIZE)
     {
-        return OperatorLevel::SENTINEL;
+        return Operator {};
     }
 
     return st->stack[st->index];
@@ -636,7 +706,7 @@ static void make_binoperator_expr(NumberStack *nst, OperatorStack *ost, BinOpera
 
     nst->stack[--nst->index] = NumOrExpr {.is_num = false, .e = (Expr *)b_op};
 
-    ost->stack[ost->index++] = TopDownParser2::SENTINEL;
+    ost->stack[ost->index++] = Operator {TopDownParser2::SENTINEL, nullptr};
 }
 
 
@@ -663,17 +733,81 @@ static void make_unoperator_expr(NumberStack *nst, OperatorStack *ost, UnaryOper
 
     memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
     nst->stack[--nst->index] = NumOrExpr {.is_num = false, .e = (Expr *)u_op};
-    ost->stack[ost->index++] = TopDownParser2::SENTINEL;
+    ost->stack[ost->index++] = Operator {TopDownParser2::SENTINEL, nullptr};
 
 }
 
+
+
+
+
+static double abs(double n)
+{
+    if (n < 0.0 || n == -0.0) return -n;
+    return n;
+}
+
+
+
+static bool is_str(const char *str, Usize str_count, const char *str2)
+{
+    Usize str2_len = strlen(str2);
+
+    if (str_count != str2_len)
+    {
+        return false;
+    }
+    
+    for (Usize count = 0; count < str_count; ++count)
+    {
+        if (str[count] != str2[count])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+struct StrToFunc
+{
+    const char *str;
+    FunctionType ft;
+};
+
+static StrToFunc function_list[] = {
+    {"cos", COS},
+    {"sin", SIN},
+    {"tan", TAN},
+    {"sqrt", SQUARE_ROOT},
+    {"abs", ABSOLUTE},
+    {"log", LOG},
+    {"exp", E_EXPONENTIAL},
+};
+
+static FunctionType func_from_str(const char *str, Usize str_count)
+{
+    for (Usize i = 0; i < ARRAY_COUNT(function_list); ++i)
+    {
+        if (is_str(str, str_count, function_list[i].str))
+        {
+            return function_list[i].ft;
+        }
+    }
+    return FunctionType::INVALID;
+}
+
+
 static void make_tree(NumberStack *nst, OperatorStack *ost)
 {
-    switch (read_stack(ost))
+    switch (read_stack(ost).ol)
     {
         case SENTINEL:
         {
             assert(false);
+        } break;
+        case OPEN_PARENTHESIS:
+        {
+            ost->stack[ost->index++] = Operator {TopDownParser2::SENTINEL, nullptr};
         } break;
         case PLUS:
         {
@@ -703,9 +837,35 @@ static void make_tree(NumberStack *nst, OperatorStack *ost)
         {
             TODO("implement");
         } break;
-        case OPEN_PARENTHESIS:
+        case FUNCTION:
         {
-            ost->stack[ost->index++] = TopDownParser2::SENTINEL;
+            Function *func = alloc<Function>(1);
+            memset(func, 0, sizeof(*func));
+
+            Token *context_token = read_stack(ost).context_token;
+            
+            assert(context_token != nullptr);
+
+            func->ft = func_from_str(context_token->str_val, context_token->str_count);
+            func->expr.expr_type = EXPR_FUNCTION;
+
+            if (nst->stack[nst->index].is_num == true)
+            {
+                Number *num = alloc<Number>(1);
+                memset(num, 0, sizeof(*num));
+                num->expr.expr_type = EXPR_NUMBER;
+                num->val = nst->stack[nst->index].n;
+                func->expr.right = (Expr *)num;
+            }
+            else
+            {
+                func->expr.right = nst->stack[nst->index].e;
+            }
+
+            memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
+            nst->stack[--nst->index] = NumOrExpr {.is_num = false, .e = (Expr *)func};
+            ost->stack[ost->index++] = Operator {TopDownParser2::SENTINEL, nullptr};
+
         } break;
         case CLOSE_PARENTHESIS:
         {
@@ -729,14 +889,34 @@ static Expr *parse_expr(Lexer *lexer)
             }
             break;
         }
+        else if (peek(lexer)->token_type == TokenType::IDENTIFIER)
+        {
+            Token *id_token = peek(lexer);
+
+            if (read_stack(&o_stack).ol <= FUNCTION)
+            {
+                o_stack.stack[--o_stack.index] = Operator {FUNCTION, id_token};
+                next_token(lexer);
+                if (peek(lexer)->token_type != TokenType::OPEN_PARENTHESIS)
+                {
+                    fprintf(stderr, "ERROR: incorrect function syntax\n");
+                    exit(1);
+                }
+            }
+            else
+            {
+                make_tree(&n_stack, &o_stack);
+            }
+
+        }
         else if (peek(lexer)->token_type == TokenType::OPEN_PARENTHESIS)
         {
-            o_stack.stack[--o_stack.index] = OperatorLevel::OPEN_PARENTHESIS;
+            o_stack.stack[--o_stack.index] = Operator {OperatorLevel::OPEN_PARENTHESIS, nullptr};
             next_token(lexer);
         }
         else if (peek(lexer)->token_type == TokenType::CLOSE_PARENTHESIS)
         {
-            while (read_stack(&o_stack) != OperatorLevel::OPEN_PARENTHESIS)
+            while (read_stack(&o_stack).ol != OperatorLevel::OPEN_PARENTHESIS)
             {
                 make_tree(&n_stack, &o_stack);
             }
@@ -757,9 +937,9 @@ static Expr *parse_expr(Lexer *lexer)
             if (peek_before(lexer) == nullptr ||
                 (peek_before(lexer)->token_type != TokenType::NUMBER && peek_before(lexer)->token_type != TokenType::CLOSE_PARENTHESIS))
             {
-                if (read_stack(&o_stack) <= UNARY_PLUS)
+                if (read_stack(&o_stack).ol <= UNARY_PLUS)
                 {
-                    o_stack.stack[--o_stack.index] = UNARY_PLUS;
+                    o_stack.stack[--o_stack.index] = Operator {UNARY_PLUS, nullptr};
                     next_token(lexer);
                 }
                 else
@@ -769,9 +949,9 @@ static Expr *parse_expr(Lexer *lexer)
             }
             else
             {
-                if (read_stack(&o_stack) < PLUS)
+                if (read_stack(&o_stack).ol < PLUS)
                 {
-                    o_stack.stack[--o_stack.index] = PLUS;
+                    o_stack.stack[--o_stack.index] = Operator {PLUS, nullptr};
                     next_token(lexer);
                 }
                 else
@@ -785,9 +965,9 @@ static Expr *parse_expr(Lexer *lexer)
             if (peek_before(lexer) == nullptr ||
                 (peek_before(lexer)->token_type != TokenType::NUMBER && peek_before(lexer)->token_type != TokenType::CLOSE_PARENTHESIS))
             {
-                if (read_stack(&o_stack) <= UNARY_MINUS)
+                if (read_stack(&o_stack).ol <= UNARY_MINUS)
                 {
-                    o_stack.stack[--o_stack.index] = UNARY_MINUS;
+                    o_stack.stack[--o_stack.index] = Operator {UNARY_MINUS, nullptr};
                     next_token(lexer);
                 }
                 else
@@ -797,9 +977,9 @@ static Expr *parse_expr(Lexer *lexer)
             }
             else
             {
-                if (read_stack(&o_stack) < MINUS)
+                if (read_stack(&o_stack).ol < MINUS)
                 {
-                    o_stack.stack[--o_stack.index] = MINUS;
+                    o_stack.stack[--o_stack.index] = Operator {MINUS, nullptr};
                     next_token(lexer);
                 }
                 else
@@ -810,9 +990,9 @@ static Expr *parse_expr(Lexer *lexer)
         }
         else if (peek(lexer)->token_type == OPERATOR_MULTIPLY)
         {
-            if (read_stack(&o_stack) < MULTIPLY)
+            if (read_stack(&o_stack).ol < MULTIPLY)
             {
-                o_stack.stack[--o_stack.index] = MULTIPLY;
+                o_stack.stack[--o_stack.index] = Operator {MULTIPLY, nullptr};
                 next_token(lexer);
             }
             else
@@ -822,9 +1002,9 @@ static Expr *parse_expr(Lexer *lexer)
         }
         else if (peek(lexer)->token_type == OPERATOR_DIVIDE)
         {
-            if (read_stack(&o_stack) < DIVIDE)
+            if (read_stack(&o_stack).ol < DIVIDE)
             {
-                o_stack.stack[--o_stack.index] = DIVIDE;
+                o_stack.stack[--o_stack.index] = Operator {DIVIDE, nullptr};
                 next_token(lexer);
             }
             else
@@ -872,7 +1052,16 @@ static void print_expr(Expr *expr)
             printf(")");
 
         } break;
-    
+        case EXPR_FUNCTION:
+        {
+            Function *op = (Function *)expr;
+
+            printf("%s", expr_to_str(expr));
+            printf("(");
+            print_expr(op->expr.right);
+            printf(")");
+        } break;
+
         default: assert(false);
     }
 }
@@ -926,7 +1115,47 @@ static F64 eval_expr(Expr *e)
                 default: assert(false);
             }
         } break;
-    
+        case EXPR_FUNCTION:
+        {
+            Function *func = (Function *)e;
+            switch (func->ft)
+            {
+                case INVALID:
+                {
+                    assert(false);
+                } break;
+                case COS:
+                {
+                    return cos(eval_expr(func->expr.right));
+                } break;
+                case SIN:
+                {
+                    return sin(eval_expr(func->expr.right));
+                } break;
+                case TAN:
+                {
+                    return tan(eval_expr(func->expr.right));
+                } break;
+                case SQUARE_ROOT:
+                {
+                    return sqrt(eval_expr(func->expr.right));
+                } break;
+                case ABSOLUTE:
+                {
+                    return TopDownParser2::abs(eval_expr(func->expr.right));
+                } break;
+                case LOG:
+                {
+                    return log(eval_expr(func->expr.right));
+                } break;
+                case E_EXPONENTIAL:
+                {
+                    return exp(eval_expr(func->expr.right));
+                } break;
+            
+                default: assert(false);
+            }
+        }  break;
         default: assert(false);
     }
 }
