@@ -59,7 +59,7 @@ do \
 #define ARRAY_COUNT(array) sizeof(array) / sizeof(array[0])
 
 
-enum TokenType
+enum class TokenType
 {
     INVALID_TOKEN = 0,
     OPERATOR_PLUS,    
@@ -157,18 +157,18 @@ static void tokenize(Lexer *lexer, const char *source)
 {
     for (Usize i = 0; source[i] != '\0'; ++i)
     {
-             if (source[i] == '(') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = OPEN_PARENTHESIS});
-        else if (source[i] == ')') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = CLOSE_PARENTHESIS});
-        else if (source[i] == '+') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = OPERATOR_PLUS});
-        else if (source[i] == '-') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = OPERATOR_MINUS});
-        else if (source[i] == '*') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = OPERATOR_MULTIPLY});
-        else if (source[i] == '/') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = OPERATOR_DIVIDE});
+             if (source[i] == '(') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPEN_PARENTHESIS});
+        else if (source[i] == ')') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::CLOSE_PARENTHESIS});
+        else if (source[i] == '+') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPERATOR_PLUS});
+        else if (source[i] == '-') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPERATOR_MINUS});
+        else if (source[i] == '*') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPERATOR_MULTIPLY});
+        else if (source[i] == '/') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPERATOR_DIVIDE});
         else if (is_digit(source[i]))
         {
             Token number_token = {};
             {
                 number_token.str_val = &source[i];
-                number_token.token_type = NUMBER;
+                number_token.token_type = TokenType::NUMBER;
 
                 Usize count = 1;
                 while (is_digit(source[i + count]))
@@ -211,7 +211,7 @@ static void tokenize(Lexer *lexer, const char *source)
             assert(false && "unhandled character");
         }
     }
-    push_token(lexer, Token {.str_val = nullptr, .str_count = 0, .token_type = END_TOKEN});
+    push_token(lexer, Token {.str_val = nullptr, .str_count = 0, .token_type = TokenType::END_TOKEN});
 }
 
 
@@ -220,17 +220,17 @@ static const char *tokentype_to_str(TokenType tt)
 {
     switch (tt)
     {
-        case INVALID_TOKEN: return "INVALID_TOKEN";
-        case OPERATOR_PLUS: return "OPERATOR_PLUS";    
-        case OPERATOR_MINUS: return "OPERATOR_MINUS";    
-        case OPERATOR_MULTIPLY: return "OPERATOR_MULTIPLY";    
-        case OPERATOR_DIVIDE: return "OPERATOR_DIVIDE";
-        case OPEN_PARENTHESIS: return "OPEN_PARENTHESIS";
-        case CLOSE_PARENTHESIS: return "CLOSE_PARENTHESIS";
-        case NUMBER: return "NUMBER";
-        case IDENTIFIER: return "IDENTIFIER";
-        case END_TOKEN: return "END_TOKEN";
-        case TOKEN_COUNT: return "TOKEN_COUNT"; 
+        case TokenType::INVALID_TOKEN: return "INVALID_TOKEN";
+        case TokenType::OPERATOR_PLUS: return "OPERATOR_PLUS";    
+        case TokenType::OPERATOR_MINUS: return "OPERATOR_MINUS";    
+        case TokenType::OPERATOR_MULTIPLY: return "OPERATOR_MULTIPLY";    
+        case TokenType::OPERATOR_DIVIDE: return "OPERATOR_DIVIDE";
+        case TokenType::OPEN_PARENTHESIS: return "OPEN_PARENTHESIS";
+        case TokenType::CLOSE_PARENTHESIS: return "CLOSE_PARENTHESIS";
+        case TokenType::NUMBER: return "NUMBER";
+        case TokenType::IDENTIFIER: return "IDENTIFIER";
+        case TokenType::END_TOKEN: return "END_TOKEN";
+        case TokenType::TOKEN_COUNT: return "TOKEN_COUNT"; 
     }
     
     assert(false && "no string representation of token type found");
@@ -258,14 +258,13 @@ static T *alloc(Usize count)
 
 
 
-enum ExprType
+enum class ExprType
 {
-    EXPR_NUMBER,  
-    EXPR_ALT,
-    EXPR_BIN_OPERATOR,
-    EXPR_UNARY_OPERATOR,
-    EXPR_FUNCTION,
-    EXPR_EMPTY,
+    INVALID = 0,
+    NUMBER,  
+    BIN_OPERATOR,
+    UNARY_OPERATOR,
+    FUNCTION,
 };
 
 
@@ -315,7 +314,7 @@ struct UnaryOperator
 };
 
 
-enum FunctionType
+enum class FunctionType
 {
     INVALID,
     COS,
@@ -342,29 +341,29 @@ static const char *expr_to_str(Expr *e)
     memset(num_buffer, 0, num_buffer_len);
     switch (e->expr_type)
     { 
-        case EXPR_NUMBER:
+        case ExprType::NUMBER:
         {
             snprintf(num_buffer, num_buffer_len, "%g", ((Number *)e)->val);
             return num_buffer;
         } break;
-        case EXPR_BIN_OPERATOR: return ((BinOperator *)e)->opt == BinOperatorType::PLUS ? "+" : ((BinOperator *)e)->opt == BinOperatorType::MINUS ? "-" : ((BinOperator *)e)->opt == BinOperatorType::MULTIPLY ? "*" : ((BinOperator *)e)->opt == BinOperatorType::DIVIDE ? "/" : ""; 
+        case ExprType::BIN_OPERATOR: return ((BinOperator *)e)->opt == BinOperatorType::PLUS ? "+" : ((BinOperator *)e)->opt == BinOperatorType::MINUS ? "-" : ((BinOperator *)e)->opt == BinOperatorType::MULTIPLY ? "*" : ((BinOperator *)e)->opt == BinOperatorType::DIVIDE ? "/" : ""; 
 
         
-        case EXPR_UNARY_OPERATOR: return ((UnaryOperator *)e)->uot == UnaryOperatorType::PLUS ? "+" : ((UnaryOperator *)e)->uot == UnaryOperatorType::MINUS ? "-" : "";
+        case ExprType::UNARY_OPERATOR: return ((UnaryOperator *)e)->uot == UnaryOperatorType::PLUS ? "+" : ((UnaryOperator *)e)->uot == UnaryOperatorType::MINUS ? "-" : "";
 
 
-        case EXPR_FUNCTION:
+        case ExprType::FUNCTION:
         {
             switch (((Function *)e)->ft)
             {
-                case INVALID: assert(false);
-                case COS: return "cos";
-                case SIN: return "sin";
-                case TAN: return "tan";
-                case SQUARE_ROOT: return "sqrt";
-                case ABSOLUTE: return "abs";
-                case LOG: return "log";
-                case E_EXPONENTIAL: return "exp";
+                case FunctionType::INVALID: assert(false);
+                case FunctionType::COS: return "cos";
+                case FunctionType::SIN: return "sin";
+                case FunctionType::TAN: return "tan";
+                case FunctionType::SQUARE_ROOT: return "sqrt";
+                case FunctionType::ABSOLUTE: return "abs";
+                case FunctionType::LOG: return "log";
+                case FunctionType::E_EXPONENTIAL: return "exp";
             
                 default: assert(false);
             }
@@ -373,22 +372,6 @@ static const char *expr_to_str(Expr *e)
         default: assert(false);
     }
 }
-
-
-namespace ShuntingYardParser
-{
-
-
-enum ParseState
-{
-    ERROR = 0,
-    START,
-    EXPR,
-    EXPR_ALT,
-    UNARY,
-    BINARY_OPERATOR,
-    NUMBER,
-};
 
 
 enum OperatorLevel
@@ -485,7 +468,7 @@ static void make_binoperator_expr(ExprStack *nst, OperatorStack *ost, BinOperato
 {
     BinOperator *b_op = alloc<BinOperator>(1);
     b_op->opt = b_type;
-    b_op->expr.expr_type = EXPR_BIN_OPERATOR;
+    b_op->expr.expr_type = ExprType::BIN_OPERATOR;
 
     b_op->expr.right = nst->stack[nst->index];
     memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
@@ -495,7 +478,7 @@ static void make_binoperator_expr(ExprStack *nst, OperatorStack *ost, BinOperato
 
     nst->stack[--nst->index] = (Expr *)b_op;
 
-    ost->stack[ost->index++] = Operator {ShuntingYardParser::SENTINEL, nullptr};
+    ost->stack[ost->index++] = Operator {OperatorLevel::SENTINEL, nullptr};
 }
 
 
@@ -505,14 +488,14 @@ static void make_unoperator_expr(ExprStack *nst, OperatorStack *ost, UnaryOperat
     memset(u_op, 0, sizeof(*u_op));
 
     u_op->uot = u_type;
-    u_op->expr.expr_type = EXPR_UNARY_OPERATOR;
+    u_op->expr.expr_type = ExprType::UNARY_OPERATOR;
 
 
     u_op->expr.right = nst->stack[nst->index];
     memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
 
     nst->stack[--nst->index] = (Expr *)u_op;
-    ost->stack[ost->index++] = Operator {ShuntingYardParser::SENTINEL, nullptr};
+    ost->stack[ost->index++] = Operator {OperatorLevel::SENTINEL, nullptr};
 
 }
 
@@ -520,7 +503,7 @@ static void make_unoperator_expr(ExprStack *nst, OperatorStack *ost, UnaryOperat
 
 
 
-static double abs(double n)
+static double my_abs(double n)
 {
     if (n < 0.0 || n == -0.0) return -n;
     return n;
@@ -554,13 +537,13 @@ struct StrToFunc
 };
 
 static StrToFunc function_list[] = {
-    {"cos", COS},
-    {"sin", SIN},
-    {"tan", TAN},
-    {"sqrt", SQUARE_ROOT},
-    {"abs", ABSOLUTE},
-    {"log", LOG},
-    {"exp", E_EXPONENTIAL},
+    {"cos", FunctionType::COS},
+    {"sin", FunctionType::SIN},
+    {"tan", FunctionType::TAN},
+    {"sqrt", FunctionType::SQUARE_ROOT},
+    {"abs", FunctionType::ABSOLUTE},
+    {"log", FunctionType::LOG},
+    {"exp", FunctionType::E_EXPONENTIAL},
 };
 
 static FunctionType func_from_str(const char *str, Usize str_count)
@@ -586,7 +569,7 @@ static void make_tree(ExprStack *nst, OperatorStack *ost)
         } break;
         case OPEN_PARENTHESIS:
         {
-            ost->stack[ost->index++] = Operator {ShuntingYardParser::SENTINEL, nullptr};
+            ost->stack[ost->index++] = Operator {OperatorLevel::SENTINEL, nullptr};
         } break;
         case PLUS:
         {
@@ -626,13 +609,13 @@ static void make_tree(ExprStack *nst, OperatorStack *ost)
             assert(context_token != nullptr);
 
             func->ft = func_from_str(context_token->str_val, context_token->str_count);
-            func->expr.expr_type = EXPR_FUNCTION;
+            func->expr.expr_type = ExprType::FUNCTION;
 
             func->expr.right = nst->stack[nst->index];
             memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
 
             nst->stack[--nst->index] = (Expr *)func;
-            ost->stack[ost->index++] = Operator {ShuntingYardParser::SENTINEL, nullptr};
+            ost->stack[ost->index++] = Operator {OperatorLevel::SENTINEL, nullptr};
 
         } break;
         case CLOSE_PARENTHESIS:
@@ -661,9 +644,9 @@ static Expr *parse_expr(Lexer *lexer)
         {
             Token *id_token = peek(lexer);
 
-            if (read_stack(&o_stack).ol <= FUNCTION)
+            if (read_stack(&o_stack).ol <= OperatorLevel::FUNCTION)
             {
-                o_stack.stack[--o_stack.index] = Operator {FUNCTION, id_token};
+                o_stack.stack[--o_stack.index] = Operator {OperatorLevel::FUNCTION, id_token};
                 next_token(lexer);
                 if (peek(lexer)->token_type != TokenType::OPEN_PARENTHESIS)
                 {
@@ -696,13 +679,13 @@ static Expr *parse_expr(Lexer *lexer)
             Number *num = alloc<Number>(1);
             memset(num, 0, sizeof(*num));
             
-            num->expr.expr_type = EXPR_NUMBER;
+            num->expr.expr_type = ExprType::NUMBER;
             num->val = atof(peek(lexer)->str_val);
 
             n_stack.stack[--n_stack.index] = (Expr *)num;
             next_token(lexer);
         }
-        else if (peek(lexer)->token_type == OPERATOR_PLUS)
+        else if (peek(lexer)->token_type == TokenType::OPERATOR_PLUS)
         {
             if (peek_before(lexer) == nullptr ||
                 (peek_before(lexer)->token_type != TokenType::NUMBER && peek_before(lexer)->token_type != TokenType::CLOSE_PARENTHESIS))
@@ -730,14 +713,14 @@ static Expr *parse_expr(Lexer *lexer)
                 }
             }
         }
-        else if (peek(lexer)->token_type == OPERATOR_MINUS)
+        else if (peek(lexer)->token_type == TokenType::OPERATOR_MINUS)
         {
             if (peek_before(lexer) == nullptr ||
                 (peek_before(lexer)->token_type != TokenType::NUMBER && peek_before(lexer)->token_type != TokenType::CLOSE_PARENTHESIS))
             {
                 if (read_stack(&o_stack).ol <= UNARY_MINUS)
                 {
-                    o_stack.stack[--o_stack.index] = Operator {UNARY_MINUS, nullptr};
+                    o_stack.stack[--o_stack.index] = Operator {OperatorLevel::UNARY_MINUS, nullptr};
                     next_token(lexer);
                 }
                 else
@@ -749,7 +732,7 @@ static Expr *parse_expr(Lexer *lexer)
             {
                 if (read_stack(&o_stack).ol < MINUS)
                 {
-                    o_stack.stack[--o_stack.index] = Operator {MINUS, nullptr};
+                    o_stack.stack[--o_stack.index] = Operator {OperatorLevel::MINUS, nullptr};
                     next_token(lexer);
                 }
                 else
@@ -758,11 +741,11 @@ static Expr *parse_expr(Lexer *lexer)
                 }
             }
         }
-        else if (peek(lexer)->token_type == OPERATOR_MULTIPLY)
+        else if (peek(lexer)->token_type == TokenType::OPERATOR_MULTIPLY)
         {
             if (read_stack(&o_stack).ol < MULTIPLY)
             {
-                o_stack.stack[--o_stack.index] = Operator {MULTIPLY, nullptr};
+                o_stack.stack[--o_stack.index] = Operator {OperatorLevel::MULTIPLY, nullptr};
                 next_token(lexer);
             }
             else
@@ -770,11 +753,11 @@ static Expr *parse_expr(Lexer *lexer)
                 make_tree(&n_stack, &o_stack);
             }
         }
-        else if (peek(lexer)->token_type == OPERATOR_DIVIDE)
+        else if (peek(lexer)->token_type == TokenType::OPERATOR_DIVIDE)
         {
             if (read_stack(&o_stack).ol < DIVIDE)
             {
-                o_stack.stack[--o_stack.index] = Operator {DIVIDE, nullptr};
+                o_stack.stack[--o_stack.index] = Operator {OperatorLevel::DIVIDE, nullptr};
                 next_token(lexer);
             }
             else
@@ -790,8 +773,6 @@ static Expr *parse_expr(Lexer *lexer)
 
     return n_stack.stack[n_stack.index];
 }
-    
-} // namespace ShuntingYardParser
 
 
 
@@ -799,12 +780,12 @@ static void print_expr(Expr *expr)
 {
     switch (expr->expr_type)
     {
-        case EXPR_NUMBER:
+        case ExprType::NUMBER:
         {
             Number *num = (Number *)expr;
             printf("%g", num->val);
         } break;
-        case EXPR_BIN_OPERATOR:
+        case ExprType::BIN_OPERATOR:
         {
             BinOperator *op = (BinOperator *)expr;
             printf("(");
@@ -813,7 +794,7 @@ static void print_expr(Expr *expr)
             print_expr(op->expr.right);
             printf(")");
         } break;
-        case EXPR_UNARY_OPERATOR:
+        case ExprType::UNARY_OPERATOR:
         {
             UnaryOperator *op = (UnaryOperator *)expr;
 
@@ -823,7 +804,7 @@ static void print_expr(Expr *expr)
             printf(")");
 
         } break;
-        case EXPR_FUNCTION:
+        case ExprType::FUNCTION:
         {
             Function *op = (Function *)expr;
 
@@ -841,11 +822,11 @@ static F64 eval_expr(Expr *e)
 {
     switch (e->expr_type)
     {
-        case EXPR_NUMBER:
+        case ExprType::NUMBER:
         {
             return ((Number *)e)->val;
         } break;   
-        case EXPR_BIN_OPERATOR:
+        case ExprType::BIN_OPERATOR:
         {
             BinOperator *b_op = (BinOperator *)e;
             switch (b_op->opt)
@@ -869,7 +850,7 @@ static F64 eval_expr(Expr *e)
                 default: assert(false);
             }
         } break; 
-        case EXPR_UNARY_OPERATOR:
+        case ExprType::UNARY_OPERATOR:
         {
             UnaryOperator *u_op = (UnaryOperator *)e;
             switch (u_op->uot)
@@ -886,40 +867,40 @@ static F64 eval_expr(Expr *e)
                 default: assert(false);
             }
         } break;
-        case EXPR_FUNCTION:
+        case ExprType::FUNCTION:
         {
             Function *func = (Function *)e;
             switch (func->ft)
             {
-                case INVALID:
+                case FunctionType::INVALID:
                 {
                     assert(false);
                 } break;
-                case COS:
+                case FunctionType::COS:
                 {
                     return cos(eval_expr(func->expr.right));
                 } break;
-                case SIN:
+                case FunctionType::SIN:
                 {
                     return sin(eval_expr(func->expr.right));
                 } break;
-                case TAN:
+                case FunctionType::TAN:
                 {
                     return tan(eval_expr(func->expr.right));
                 } break;
-                case SQUARE_ROOT:
+                case FunctionType::SQUARE_ROOT:
                 {
                     return sqrt(eval_expr(func->expr.right));
                 } break;
-                case ABSOLUTE:
+                case FunctionType::ABSOLUTE:
                 {
-                    return ShuntingYardParser::abs(eval_expr(func->expr.right));
+                    return my_abs(eval_expr(func->expr.right));
                 } break;
-                case LOG:
+                case FunctionType::LOG:
                 {
                     return log(eval_expr(func->expr.right));
                 } break;
-                case E_EXPONENTIAL:
+                case FunctionType::E_EXPONENTIAL:
                 {
                     return exp(eval_expr(func->expr.right));
                 } break;
@@ -1036,7 +1017,7 @@ int main(int argc, const char *argv[])
 
     print_tokens(&g_lexer);
 
-    Expr *expression_tree = ShuntingYardParser::parse_expr(&g_lexer);
+    Expr *expression_tree = parse_expr(&g_lexer);
 
     create_image_from_exprtree(expression_tree);
     printf("-------------\n");
