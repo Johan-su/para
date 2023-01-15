@@ -79,6 +79,7 @@ static bool is_whitespace(char n)
     switch (n)
     {
         case ' ': return true;
+        case '\n': return true;
     }
     return false;
 }
@@ -141,9 +142,10 @@ static void tokenize(Lexer *lexer, const char *source)
 
             push_token(lexer, id_token);
         }
+        else if (is_whitespace(source[i])) /*do nothing*/;
         else
         {
-            fprintf(stderr, "ERROR: unhandled character \"%c\"\n", source[i]);
+            fprintf(stderr, "ERROR: unhandled character %c\n", source[i]);
             assert(false && "unhandled character");
         }
     }
@@ -282,10 +284,10 @@ static const char *expr_to_str(Expr *e)
             snprintf(num_buffer, num_buffer_len, "%g", ((Number *)e)->val);
             return num_buffer;
         } break;
-        case ExprType::BIN_OPERATOR: return ((BinOperator *)e)->opt == BinOperatorType::PLUS ? "+" : ((BinOperator *)e)->opt == BinOperatorType::MINUS ? "-" : ((BinOperator *)e)->opt == BinOperatorType::MULTIPLY ? "*" : ((BinOperator *)e)->opt == BinOperatorType::DIVIDE ? "/" : ""; 
+        case ExprType::BIN_OPERATOR: return ((BinOperator *)e)->opt == BinOperatorType::PLUS ? "+" : ((BinOperator *)e)->opt == BinOperatorType::MINUS ? "-" : ((BinOperator *)e)->opt == BinOperatorType::MULTIPLY ? "*" : ((BinOperator *)e)->opt == BinOperatorType::DIVIDE ? "/" : nullptr; 
 
         
-        case ExprType::UNARY_OPERATOR: return ((UnaryOperator *)e)->uot == UnaryOperatorType::PLUS ? "+" : ((UnaryOperator *)e)->uot == UnaryOperatorType::MINUS ? "-" : "";
+        case ExprType::UNARY_OPERATOR: return ((UnaryOperator *)e)->uot == UnaryOperatorType::PLUS ? "+" : ((UnaryOperator *)e)->uot == UnaryOperatorType::MINUS ? "-" : nullptr;
 
 
         case ExprType::FUNCTION:
@@ -377,14 +379,16 @@ static Token *peek(Lexer *lexer)
     return &lexer->tokens[g_token_index]; 
 }
 
-static Token *peek_before(Lexer *lexer)
+
+static Token *peek_amount(Lexer *lexer, I64 amount)
 {
-    if (g_token_index <= 0)
+    if (g_token_index >= lexer->count)
     {
         return nullptr;
     }
-    return &lexer->tokens[g_token_index - 1];
+    return &lexer->tokens[(I64)g_token_index + amount];
 }
+
 
 //TODO(Johan): https://www.engr.mun.ca/~theo/Misc/exp_parsing.htm
 
@@ -499,43 +503,43 @@ static void make_tree(ExprStack *nst, OperatorStack *ost)
 {
     switch (read_stack(ost).ol)
     {
-        case SENTINEL:
+        case OperatorLevel::SENTINEL:
         {
             assert(false);
         } break;
-        case OPEN_PARENTHESIS:
+        case OperatorLevel::OPEN_PARENTHESIS:
         {
             ost->stack[ost->index++] = Operator {OperatorLevel::SENTINEL, nullptr};
         } break;
-        case PLUS:
+        case OperatorLevel::PLUS:
         {
             make_binoperator_expr(nst, ost, BinOperatorType::PLUS);
         } break;
-        case MINUS:
+        case OperatorLevel::MINUS:
         {
             make_binoperator_expr(nst, ost, BinOperatorType::MINUS);
         } break;
-        case MULTIPLY:
+        case OperatorLevel::MULTIPLY:
         {
             make_binoperator_expr(nst, ost, BinOperatorType::MULTIPLY);
         } break;
-        case DIVIDE:
+        case OperatorLevel::DIVIDE:
         {
             make_binoperator_expr(nst, ost, BinOperatorType::DIVIDE);
         } break;
-        case UNARY_PLUS:
+        case OperatorLevel::UNARY_PLUS:
         {
             make_unoperator_expr(nst, ost, UnaryOperatorType::PLUS);
         } break;
-        case UNARY_MINUS:
+        case OperatorLevel::UNARY_MINUS:
         {
             make_unoperator_expr(nst, ost, UnaryOperatorType::MINUS);
         } break;
-        case EXPONENT:
+        case OperatorLevel::EXPONENT:
         {
             TODO("implement");
         } break;
-        case FUNCTION:
+        case OperatorLevel::FUNCTION:
         {
             Function *func = alloc<Function>(1);
             memset(func, 0, sizeof(*func));
@@ -554,7 +558,7 @@ static void make_tree(ExprStack *nst, OperatorStack *ost)
             ost->stack[ost->index++] = Operator {OperatorLevel::SENTINEL, nullptr};
 
         } break;
-        case CLOSE_PARENTHESIS:
+        case OperatorLevel::CLOSE_PARENTHESIS:
         {
             TODO("implement");
         } break;
@@ -579,22 +583,18 @@ static Expr *parse_expr(Lexer *lexer)
         else if (peek(lexer)->token_type == TokenType::IDENTIFIER)
         {
             Token *id_token = peek(lexer);
-
-            if (read_stack(&o_stack).ol <= OperatorLevel::FUNCTION)
+            if (peek_amount(lexer, 1)->token_type == TokenType::OPEN_PARENTHESIS)
             {
-                o_stack.stack[--o_stack.index] = Operator {OperatorLevel::FUNCTION, id_token};
-                next_token(lexer);
-                if (peek(lexer)->token_type != TokenType::OPEN_PARENTHESIS)
+                if (read_stack(&o_stack).ol <= OperatorLevel::FUNCTION)
                 {
-                    fprintf(stderr, "ERROR: incorrect function syntax\n");
-                    exit(1);
+                    o_stack.stack[--o_stack.index] = Operator {OperatorLevel::FUNCTION, id_token};
+                    next_token(lexer);
+                }
+                else
+                {
+                    make_tree(&n_stack, &o_stack);
                 }
             }
-            else
-            {
-                make_tree(&n_stack, &o_stack);
-            }
-
         }
         else if (peek(lexer)->token_type == TokenType::OPEN_PARENTHESIS)
         {
@@ -623,8 +623,8 @@ static Expr *parse_expr(Lexer *lexer)
         }
         else if (peek(lexer)->token_type == TokenType::OPERATOR_PLUS)
         {
-            if (peek_before(lexer) == nullptr ||
-                (peek_before(lexer)->token_type != TokenType::NUMBER && peek_before(lexer)->token_type != TokenType::CLOSE_PARENTHESIS))
+            if (peek_amount(lexer, -1) == nullptr ||
+                (peek_amount(lexer, -1)->token_type != TokenType::NUMBER && peek_amount(lexer, -1)->token_type != TokenType::CLOSE_PARENTHESIS))
             {
                 if (read_stack(&o_stack).ol <= UNARY_PLUS)
                 {
@@ -651,8 +651,8 @@ static Expr *parse_expr(Lexer *lexer)
         }
         else if (peek(lexer)->token_type == TokenType::OPERATOR_MINUS)
         {
-            if (peek_before(lexer) == nullptr ||
-                (peek_before(lexer)->token_type != TokenType::NUMBER && peek_before(lexer)->token_type != TokenType::CLOSE_PARENTHESIS))
+            if (peek_amount(lexer, -1) == nullptr ||
+                (peek_amount(lexer, -1)->token_type != TokenType::NUMBER && peek_amount(lexer, -1)->token_type != TokenType::CLOSE_PARENTHESIS))
             {
                 if (read_stack(&o_stack).ol <= UNARY_MINUS)
                 {
@@ -907,13 +907,18 @@ static void create_image_from_exprtree(Expr *tree)
 static void usage(const char *program)
 {
 
-    printf("USAGE: %s <expr>\n" 
+    printf("USAGE: %s (-g) <expr>\n"
+    "-g starts interface\n" 
     "example %s (5 + 5) * 5 + sqrt(5 * 5)\n" 
     "operators + - * / ( )\n"
     "functions cos, sin tan, sqrt, abs, log, exp\n"
     "WILL CRASH AT ANY ERROR\n", program, program);
     exit(1);
 }
+
+
+static char command_buffer[2048] = {};
+
 
 int main(int argc, const char *argv[])
 {
@@ -922,44 +927,63 @@ int main(int argc, const char *argv[])
         usage(argv[0]);
     }
 
-    // const char *source = " ( 55+ 5) * (4 +4)";
-    // const char *source = "5 + 5 * 5 - 5";
-    // const char *source = argv[1];
-    const char *source = nullptr;
+    if (!is_str(argv[1], 2, "-g"))
+    {   
+        const char *source = nullptr;
+        {
+            Usize total_strlen = 0;
+            {
+                for (Usize i = 1; argv[i] != nullptr; ++i)
+                {
+                    total_strlen += strlen(argv[i]);
+                }
+            }
+            char *source_from_args = alloc<char>(total_strlen + 1);
+            {
+                Usize copy_index = 0;
+                for (Usize i = 1; argv[i] != nullptr; ++i)
+                {
+                    Usize str_len = strlen(argv[i]);
+                    memcpy(&source_from_args[copy_index], argv[i], str_len);
+                    copy_index += str_len;
+                }
+                source_from_args[copy_index] = '\0';
+            }
+            source = source_from_args;
+        }
+
+        tokenize(&g_lexer, source);
+        print_tokens(&g_lexer);
+
+        Expr *expression_tree = parse_expr(&g_lexer);
+        create_image_from_exprtree(expression_tree);
+        printf("-------------\n");
+
+        print_expr(expression_tree);
+        printf(" = %g\n", eval_expr(expression_tree));
+    }
+    else
     {
-        Usize total_strlen = 0;
+        while (true)
         {
-            for (Usize i = 1; argv[i] != nullptr; ++i)
-            {
-                total_strlen += strlen(argv[i]);
-            }
+            fgets(command_buffer, ARRAY_COUNT(command_buffer), stdin);
+            if (command_buffer[0] == 'q') break;
+
+            const char *source = command_buffer;
+            memset(&g_lexer, 0, sizeof(g_lexer));
+            tokenize(&g_lexer, source);
+            print_tokens(&g_lexer);
+
+            Expr *expr_tree = parse_expr(&g_lexer);
+            print_expr(expr_tree);
+            printf(" = %g\n", eval_expr(expr_tree));
         }
-        char *source_from_args = alloc<char>(total_strlen + 1);
-        {
-            Usize copy_index = 0;
-            for (Usize i = 1; argv[i] != nullptr; ++i)
-            {
-                Usize str_len = strlen(argv[i]);
-                memcpy(&source_from_args[copy_index], argv[i], str_len);
-                copy_index += str_len;
-            }
-            source_from_args[copy_index] = '\0';
-        }
-        source = source_from_args;
     }
 
 
-    tokenize(&g_lexer, source);
 
-    print_tokens(&g_lexer);
 
-    Expr *expression_tree = parse_expr(&g_lexer);
 
-    create_image_from_exprtree(expression_tree);
-    printf("-------------\n");
-
-    print_expr(expression_tree);
-    printf(" = %g\n", eval_expr(expression_tree));
 
 
 
