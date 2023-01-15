@@ -595,21 +595,11 @@ struct Operator
 
 
 
-struct NumOrExpr 
+
+
+struct ExprStack
 {
-    bool is_num;
-    union 
-    {
-        F64 n;
-        Expr *e;
-    };
-};
-
-
-
-struct NumberStack
-{
-    NumOrExpr stack[STACK_SIZE];
+    Expr *stack[STACK_SIZE];
     Usize index;
 };
 
@@ -620,7 +610,7 @@ struct OperatorStack
 };
 
 
-static NumberStack n_stack = {
+static ExprStack n_stack = {
     .stack = {},
     .index = STACK_SIZE,
 };
@@ -668,49 +658,25 @@ static Operator read_stack(OperatorStack *st)
 }
 
 
-static void make_binoperator_expr(NumberStack *nst, OperatorStack *ost, BinOperatorType b_type)
+static void make_binoperator_expr(ExprStack *nst, OperatorStack *ost, BinOperatorType b_type)
 {
     BinOperator *b_op = alloc<BinOperator>(1);
     b_op->opt = b_type;
     b_op->expr.expr_type = EXPR_BIN_OPERATOR;
 
-
-    if (nst->stack[nst->index].is_num == true)
-    {
-        Number *num_right = alloc<Number>(1);
-        memset(num_right, 0, sizeof(*num_right));
-        num_right->expr.expr_type = EXPR_NUMBER;
-        num_right->val = nst->stack[nst->index].n;
-        b_op->expr.right = (Expr *)num_right;
-    }
-    else
-    {
-        b_op->expr.right = nst->stack[nst->index].e;
-    }
+    b_op->expr.right = nst->stack[nst->index];
     memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
 
-
-    if (nst->stack[nst->index].is_num == true)
-    {
-        Number *num_left = alloc<Number>(1);
-        memset(num_left, 0, sizeof(*num_left));
-        num_left->expr.expr_type = EXPR_NUMBER;
-        num_left->val = nst->stack[nst->index].n;
-        b_op->expr.left = (Expr *)num_left;
-    }
-    else
-    {
-        b_op->expr.left = nst->stack[nst->index].e;
-    }
+    b_op->expr.left = nst->stack[nst->index];
     memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
 
-    nst->stack[--nst->index] = NumOrExpr {.is_num = false, .e = (Expr *)b_op};
+    nst->stack[--nst->index] = (Expr *)b_op;
 
     ost->stack[ost->index++] = Operator {TopDownParser2::SENTINEL, nullptr};
 }
 
 
-static void make_unoperator_expr(NumberStack *nst, OperatorStack *ost, UnaryOperatorType u_type)
+static void make_unoperator_expr(ExprStack *nst, OperatorStack *ost, UnaryOperatorType u_type)
 {
     UnaryOperator *u_op = alloc<UnaryOperator>(1);
     memset(u_op, 0, sizeof(*u_op));
@@ -718,21 +684,11 @@ static void make_unoperator_expr(NumberStack *nst, OperatorStack *ost, UnaryOper
     u_op->uot = u_type;
     u_op->expr.expr_type = EXPR_UNARY_OPERATOR;
 
-    if (nst->stack[nst->index].is_num == true)
-    {
-        Number *num = alloc<Number>(1);
-        memset(num, 0, sizeof(*num));
-        num->expr.expr_type = EXPR_NUMBER;
-        num->val = nst->stack[nst->index].n;
-        u_op->expr.right = (Expr *)num;
-    }
-    else
-    {
-        u_op->expr.right = nst->stack[nst->index].e;
-    }
 
+    u_op->expr.right = nst->stack[nst->index];
     memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
-    nst->stack[--nst->index] = NumOrExpr {.is_num = false, .e = (Expr *)u_op};
+
+    nst->stack[--nst->index] = (Expr *)u_op;
     ost->stack[ost->index++] = Operator {TopDownParser2::SENTINEL, nullptr};
 
 }
@@ -797,7 +753,7 @@ static FunctionType func_from_str(const char *str, Usize str_count)
 }
 
 
-static void make_tree(NumberStack *nst, OperatorStack *ost)
+static void make_tree(ExprStack *nst, OperatorStack *ost)
 {
     switch (read_stack(ost).ol)
     {
@@ -849,21 +805,10 @@ static void make_tree(NumberStack *nst, OperatorStack *ost)
             func->ft = func_from_str(context_token->str_val, context_token->str_count);
             func->expr.expr_type = EXPR_FUNCTION;
 
-            if (nst->stack[nst->index].is_num == true)
-            {
-                Number *num = alloc<Number>(1);
-                memset(num, 0, sizeof(*num));
-                num->expr.expr_type = EXPR_NUMBER;
-                num->val = nst->stack[nst->index].n;
-                func->expr.right = (Expr *)num;
-            }
-            else
-            {
-                func->expr.right = nst->stack[nst->index].e;
-            }
-
+            func->expr.right = nst->stack[nst->index];
             memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
-            nst->stack[--nst->index] = NumOrExpr {.is_num = false, .e = (Expr *)func};
+
+            nst->stack[--nst->index] = (Expr *)func;
             ost->stack[ost->index++] = Operator {TopDownParser2::SENTINEL, nullptr};
 
         } break;
@@ -925,11 +870,13 @@ static Expr *parse_expr(Lexer *lexer)
         }
         else if (peek(lexer)->token_type == TokenType::NUMBER)
         {
-            NumOrExpr nor = {
-                .is_num = true,
-                .n = atof(peek(lexer)->str_val),
-            };
-            n_stack.stack[--n_stack.index] = nor;
+            Number *num = alloc<Number>(1);
+            memset(num, 0, sizeof(*num));
+            
+            num->expr.expr_type = EXPR_NUMBER;
+            num->val = atof(peek(lexer)->str_val);
+
+            n_stack.stack[--n_stack.index] = (Expr *)num;
             next_token(lexer);
         }
         else if (peek(lexer)->token_type == OPERATOR_PLUS)
@@ -1017,7 +964,8 @@ static Expr *parse_expr(Lexer *lexer)
             assert(false);
         }
     }
-    return n_stack.stack[n_stack.index].e;
+
+    return n_stack.stack[n_stack.index];
 }
     
 } // namespace TopDownParser2
