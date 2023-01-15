@@ -787,7 +787,9 @@ static Expr *parse_expr(Lexer *lexer)
         else if (peek(lexer)->token_type == TokenType::OPERATOR_PLUS)
         {
             if (peek_amount(lexer, -1) == nullptr ||
-                (peek_amount(lexer, -1)->token_type != TokenType::NUMBER && peek_amount(lexer, -1)->token_type != TokenType::CLOSE_PARENTHESIS))
+                (peek_amount(lexer, -1)->token_type != TokenType::NUMBER && 
+                peek_amount(lexer, -1)->token_type != TokenType::CLOSE_PARENTHESIS && 
+                peek_amount(lexer, -1)->token_type != TokenType::IDENTIFIER))
             {
                 if (read_stack(&o_stack).ol <= UNARY_PLUS)
                 {
@@ -815,7 +817,9 @@ static Expr *parse_expr(Lexer *lexer)
         else if (peek(lexer)->token_type == TokenType::OPERATOR_MINUS)
         {
             if (peek_amount(lexer, -1) == nullptr ||
-                (peek_amount(lexer, -1)->token_type != TokenType::NUMBER && peek_amount(lexer, -1)->token_type != TokenType::CLOSE_PARENTHESIS))
+                (peek_amount(lexer, -1)->token_type != TokenType::NUMBER && 
+                peek_amount(lexer, -1)->token_type != TokenType::CLOSE_PARENTHESIS && 
+                peek_amount(lexer, -1)->token_type != TokenType::IDENTIFIER))
             {
                 if (read_stack(&o_stack).ol <= UNARY_MINUS)
                 {
