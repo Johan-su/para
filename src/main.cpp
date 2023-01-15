@@ -1355,7 +1355,11 @@ static Expr *parse_expr(Lexer *lexer)
 static void usage(const char *program)
 {
 
-    printf("USAGE: %s <expr>\n example %s (5 + 5) * 5\n only works with + - * ( )\n WILL CRASH AT ANY ERROR", program, program);
+    printf("USAGE: %s <expr>\n" 
+    "example %s (5 + 5) * 5 + sqrt(5 * 5)\n" 
+    "operators + - * / ( )\n"
+    "funtions cos, sin tan, sqrt, abs, log, exp\n"
+    "WILL CRASH AT ANY ERROR\n", program, program);
     exit(1);
 }
 
