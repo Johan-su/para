@@ -1085,7 +1085,8 @@ static void usage(const char *program)
 {
 
     printf("USAGE: %s (-g) <expr>\n"
-    "-g starts interface\n" 
+    "-g starts interface, 'q' to quit in interface\n" 
+    "define variables <name> = <expr>, example X = sqrt(5) then on the next line X * X will yield 5\n"
     "example %s (5 + 5) * 5 + sqrt(5 * 5)\n" 
     "operators + - * / ( )\n"
     "functions cos, sin tan, sqrt, abs, log, exp\n"
