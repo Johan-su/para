@@ -595,6 +595,10 @@ static Expr *parse_expr(Lexer *lexer)
                     make_tree(&n_stack, &o_stack);
                 }
             }
+            else
+            {
+                next_token(lexer);
+            }
         }
         else if (peek(lexer)->token_type == TokenType::OPEN_PARENTHESIS)
         {
