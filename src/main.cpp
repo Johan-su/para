@@ -347,11 +347,25 @@ struct UnaryOperator
 
 
 
-struct Function
+enum class FunctionType
+{
+    INVALID,
+    COS,
+    SIN,
+    TAN,
+    SQUARE_ROOT,
+    ABSOLUTE,
+    LOG,
+    E_EXPONENTIAL,
+};
+
+struct Function // TODO(Johan): change to INTERNAL_FUNCTION and USER_FUNCTION or similar
 {
     Expr expr;
-    Token *context_token;
+    FunctionType ft;
 };
+
+
 
 
 struct Variable
@@ -377,7 +391,19 @@ static const char *expr_to_str(Expr *e)
         case ExprType::UNARY_OPERATOR: return ((UnaryOperator *)e)->uot == UnaryOperatorType::PLUS ? "+" : ((UnaryOperator *)e)->uot == UnaryOperatorType::MINUS ? "-" : nullptr;
         case ExprType::FUNCTION:
         {
-            TODO("Implement");
+            switch (((Function *)e)->ft)
+            {
+                case FunctionType::INVALID: assert(false);
+                case FunctionType::COS: return "cos";
+                case FunctionType::SIN: return "sin";
+                case FunctionType::TAN: return "tan";
+                case FunctionType::SQUARE_ROOT: return "sqrt";
+                case FunctionType::ABSOLUTE: return "abs";
+                case FunctionType::LOG: return "log";
+                case FunctionType::E_EXPONENTIAL: return "exp";
+            
+                default: assert(false);
+            }
         } break;
         case ExprType::VARIABLE:
         {
@@ -572,15 +598,11 @@ static bool is_str(const char *str, Usize str_count, const char *str2)
     return true;
 }
 
-/*
 struct StrToFunc
 {
     const char *str;
     FunctionType ft;
 };
-
-
-
 
 static StrToFunc function_list[] = {
     {"cos", FunctionType::COS},
@@ -592,7 +614,17 @@ static StrToFunc function_list[] = {
     {"exp", FunctionType::E_EXPONENTIAL},
 };
 
-*/
+static FunctionType func_from_str(const char *str, Usize str_count)
+{
+    for (Usize i = 0; i < ARRAY_SIZE(function_list); ++i)
+    {
+        if (is_str(str, str_count, function_list[i].str))
+        {
+            return function_list[i].ft;
+        }
+    }
+    return FunctionType::INVALID;
+}
 
 
 
@@ -642,8 +674,6 @@ static void make_tree(ExprStack *nst, OperatorStack *ost)
         } break;
         case OperatorLevel::FUNCTION:
         {
-            TODO("Implement");
-            /*
             Function *func = alloc<Function>(1);
             memset(func, 0, sizeof(*func));
 
@@ -659,8 +689,6 @@ static void make_tree(ExprStack *nst, OperatorStack *ost)
 
             nst->stack[--nst->index] = (Expr *)func;
             ost->stack[ost->index++] = Operator {OperatorLevel::SENTINEL, nullptr};
-
-            */
 
         } break;
         case OperatorLevel::CLOSE_PARENTHESIS:
@@ -945,7 +973,44 @@ static F64 eval_expr(Expr *e)
         } break;
         case ExprType::FUNCTION:
         {
-            TODO("Implement");
+            Function *func = (Function *)e;
+            switch (func->ft)
+            {
+                case FunctionType::INVALID:
+                {
+                    assert(false);
+                } break;
+                case FunctionType::COS:
+                {
+                    return cos(eval_expr(func->expr.right));
+                } break;
+                case FunctionType::SIN:
+                {
+                    return sin(eval_expr(func->expr.right));
+                } break;
+                case FunctionType::TAN:
+                {
+                    return tan(eval_expr(func->expr.right));
+                } break;
+                case FunctionType::SQUARE_ROOT:
+                {
+                    return sqrt(eval_expr(func->expr.right));
+                } break;
+                case FunctionType::ABSOLUTE:
+                {
+                    return my_abs(eval_expr(func->expr.right));
+                } break;
+                case FunctionType::LOG:
+                {
+                    return log(eval_expr(func->expr.right));
+                } break;
+                case FunctionType::E_EXPONENTIAL:
+                {
+                    return exp(eval_expr(func->expr.right));
+                } break;
+            
+                default: assert(false);
+            }
         }  break;
         case ExprType::VARIABLE:
         {
