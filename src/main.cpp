@@ -8,6 +8,96 @@
 #include "helper.hpp"
 
 
+
+struct Expr;
+
+
+
+struct MapEntry
+{
+    bool active;
+    U64 key;
+    Expr *e;
+};
+
+struct HashMap
+{
+    MapEntry data[4096];
+};
+
+
+static HashMap g_map = {
+    .data = {},
+};
+
+
+static U64 hash_string(const char *str, Usize len)
+{
+    Usize p = 53;
+    Usize hash = (Usize)str[0];
+    for (Usize i = 1; i < len; ++i)
+    {
+        Usize term = (Usize)str[i];        
+        for (Usize j = i; j != 0; --j)
+        {
+            term *= j;
+        }
+        hash += term;
+    }
+    return hash;
+}
+
+
+static void hashmap_add(HashMap *map, const char *name, Usize name_len, Expr *e)
+{
+    U64 hash = hash_string(name, name_len);
+
+    MapEntry me = {
+        .active = true,
+        .key = hash,
+        .e = e,
+    };
+
+    Usize pos = hash % ARRAY_SIZE(map->data);
+
+    for (Usize i = 0; i < ARRAY_SIZE(map->data); ++i)
+    {
+        if (!map->data[pos].active || map->data[pos].key == hash)
+        {
+            map->data[pos] = me; 
+            return;
+        }
+        else
+        {
+            pos = (hash % ARRAY_SIZE(map->data) + (i + 1)) % ARRAY_SIZE(map->data);
+        }
+    }
+    assert(false);
+}
+
+
+static Expr *hashmap_get(HashMap *map, const char *name, Usize name_len)
+{
+    U64 hash = hash_string(name, name_len);
+
+    Usize pos = hash % ARRAY_SIZE(map->data);
+    for (Usize i = 0; i < ARRAY_SIZE(map->data); ++i)
+    {
+        if (map->data[pos].active && map->data[pos].key == hash)
+        { 
+            return map->data[pos].e;
+        }
+        else
+        {
+            pos = (hash % ARRAY_SIZE(map->data) + (i + 1)) % ARRAY_SIZE(map->data);
+        }
+    }
+    return nullptr;
+}
+
+
+
+
 enum class TokenType
 {
     INVALID_TOKEN = 0,
@@ -22,6 +112,7 @@ enum class TokenType
     NUMBER,
 
     IDENTIFIER,
+    EQUAL,
 
     END_TOKEN,
 
@@ -100,6 +191,7 @@ static void tokenize(Lexer *lexer, const char *source)
         else if (source[i] == '-') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPERATOR_MINUS});
         else if (source[i] == '*') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPERATOR_MULTIPLY});
         else if (source[i] == '/') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPERATOR_DIVIDE});
+        else if (source[i] == '=') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::EQUAL});
         else if (is_digit(source[i]))
         {
             Token number_token = {};
@@ -125,7 +217,6 @@ static void tokenize(Lexer *lexer, const char *source)
             }
             push_token(lexer, number_token);
         }
-        else if (is_whitespace(source[i])) /*do nothing*/;
         else if (is_letter(source[i]))
         {
             Token id_token = {};
@@ -167,6 +258,7 @@ static const char *tokentype_to_str(TokenType tt)
         case TokenType::CLOSE_PARENTHESIS: return "CLOSE_PARENTHESIS";
         case TokenType::NUMBER: return "NUMBER";
         case TokenType::IDENTIFIER: return "IDENTIFIER";
+        case TokenType::EQUAL: return "EQUAL";
         case TokenType::END_TOKEN: return "END_TOKEN";
         case TokenType::TOKEN_COUNT: return "TOKEN_COUNT"; 
     }
@@ -202,7 +294,9 @@ enum class ExprType
     NUMBER,  
     BIN_OPERATOR,
     UNARY_OPERATOR,
+    INTERNAL_FUNCTION,
     FUNCTION,
+    VARIABLE,
 };
 
 
@@ -252,69 +346,59 @@ struct UnaryOperator
 };
 
 
-enum class FunctionType
-{
-    INVALID,
-    COS,
-    SIN,
-    TAN,
-    SQUARE_ROOT,
-    ABSOLUTE,
-    LOG,
-    E_EXPONENTIAL,
-};
 
 struct Function
 {
     Expr expr;
-    FunctionType ft;
+    Token *context_token;
+};
+
+
+struct Variable
+{
+    Expr expr;
+    Token *context_token;
 };
 
 
 static const char *expr_to_str(Expr *e)
 {
-    //TODO(Johan): clean up num buffer
-    Usize num_buffer_len = 32;
-    char *num_buffer = alloc<char>(num_buffer_len);
-    memset(num_buffer, 0, num_buffer_len);
+    Usize char_buffer_len = 64;
+    char *char_buffer = alloc<char>(char_buffer_len);
+    memset(char_buffer, 0, char_buffer_len);
     switch (e->expr_type)
     { 
         case ExprType::NUMBER:
         {
-            snprintf(num_buffer, num_buffer_len, "%g", ((Number *)e)->val);
-            return num_buffer;
+            snprintf(char_buffer, char_buffer_len, "%g", ((Number *)e)->val);
+            return char_buffer;
         } break;
         case ExprType::BIN_OPERATOR: return ((BinOperator *)e)->opt == BinOperatorType::PLUS ? "+" : ((BinOperator *)e)->opt == BinOperatorType::MINUS ? "-" : ((BinOperator *)e)->opt == BinOperatorType::MULTIPLY ? "*" : ((BinOperator *)e)->opt == BinOperatorType::DIVIDE ? "/" : nullptr; 
-
-        
         case ExprType::UNARY_OPERATOR: return ((UnaryOperator *)e)->uot == UnaryOperatorType::PLUS ? "+" : ((UnaryOperator *)e)->uot == UnaryOperatorType::MINUS ? "-" : nullptr;
-
-
         case ExprType::FUNCTION:
         {
-            switch (((Function *)e)->ft)
-            {
-                case FunctionType::INVALID: assert(false);
-                case FunctionType::COS: return "cos";
-                case FunctionType::SIN: return "sin";
-                case FunctionType::TAN: return "tan";
-                case FunctionType::SQUARE_ROOT: return "sqrt";
-                case FunctionType::ABSOLUTE: return "abs";
-                case FunctionType::LOG: return "log";
-                case FunctionType::E_EXPONENTIAL: return "exp";
-            
-                default: assert(false);
-            }
-        }
+            TODO("Implement");
+        } break;
+        case ExprType::VARIABLE:
+        {
+            Variable *v = (Variable *)e;
+            snprintf(char_buffer, char_buffer_len, "%.*s", (int)v->context_token->str_count, v->context_token->str_val);
+            return char_buffer;
+        } break;
+
+
 
         default: assert(false);
     }
+    assert(false);
+    return nullptr;
 }
 
 
 enum OperatorLevel
 {
     SENTINEL = 0,
+    EQUAL,
     OPEN_PARENTHESIS,
     PLUS,
     MINUS,
@@ -407,6 +491,7 @@ static Operator read_stack(OperatorStack *st)
 static void make_binoperator_expr(ExprStack *nst, OperatorStack *ost, BinOperatorType b_type)
 {
     BinOperator *b_op = alloc<BinOperator>(1);
+    memset(b_op, 0, sizeof(*b_op));
     b_op->opt = b_type;
     b_op->expr.expr_type = ExprType::BIN_OPERATOR;
 
@@ -420,6 +505,23 @@ static void make_binoperator_expr(ExprStack *nst, OperatorStack *ost, BinOperato
 
     ost->stack[ost->index++] = Operator {OperatorLevel::SENTINEL, nullptr};
 }
+
+static void make_equal_declaration(ExprStack *nst, OperatorStack *ost)
+{
+    Expr *right = nst->stack[nst->index];
+
+
+    Variable *left_var = (Variable *)nst->stack[nst->index + 1];
+    assert(left_var->expr.expr_type == ExprType::VARIABLE);
+    
+    hashmap_add(&g_map, left_var->context_token->str_val, left_var->context_token->str_count, right);
+
+    memset(&nst->stack[nst->index++], 0, sizeof(nst->stack[0]));
+
+
+    ost->stack[ost->index++] = Operator {OperatorLevel::SENTINEL, nullptr};
+}
+
 
 
 static void make_unoperator_expr(ExprStack *nst, OperatorStack *ost, UnaryOperatorType u_type)
@@ -470,11 +572,15 @@ static bool is_str(const char *str, Usize str_count, const char *str2)
     return true;
 }
 
+/*
 struct StrToFunc
 {
     const char *str;
     FunctionType ft;
 };
+
+
+
 
 static StrToFunc function_list[] = {
     {"cos", FunctionType::COS},
@@ -486,17 +592,8 @@ static StrToFunc function_list[] = {
     {"exp", FunctionType::E_EXPONENTIAL},
 };
 
-static FunctionType func_from_str(const char *str, Usize str_count)
-{
-    for (Usize i = 0; i < ARRAY_COUNT(function_list); ++i)
-    {
-        if (is_str(str, str_count, function_list[i].str))
-        {
-            return function_list[i].ft;
-        }
-    }
-    return FunctionType::INVALID;
-}
+*/
+
 
 
 static void make_tree(ExprStack *nst, OperatorStack *ost)
@@ -506,6 +603,10 @@ static void make_tree(ExprStack *nst, OperatorStack *ost)
         case OperatorLevel::SENTINEL:
         {
             assert(false);
+        } break;
+        case OperatorLevel::EQUAL:
+        {
+            make_equal_declaration(nst, ost);
         } break;
         case OperatorLevel::OPEN_PARENTHESIS:
         {
@@ -541,6 +642,8 @@ static void make_tree(ExprStack *nst, OperatorStack *ost)
         } break;
         case OperatorLevel::FUNCTION:
         {
+            TODO("Implement");
+            /*
             Function *func = alloc<Function>(1);
             memset(func, 0, sizeof(*func));
 
@@ -556,6 +659,8 @@ static void make_tree(ExprStack *nst, OperatorStack *ost)
 
             nst->stack[--nst->index] = (Expr *)func;
             ost->stack[ost->index++] = Operator {OperatorLevel::SENTINEL, nullptr};
+
+            */
 
         } break;
         case OperatorLevel::CLOSE_PARENTHESIS:
@@ -597,6 +702,13 @@ static Expr *parse_expr(Lexer *lexer)
             }
             else
             {
+                Variable *var = alloc<Variable>(1);
+                memset(var, 0, sizeof(*var));
+                
+                var->expr.expr_type = ExprType::VARIABLE;
+                var->context_token = id_token;
+
+                n_stack.stack[--n_stack.index] = (Expr *)var;
                 next_token(lexer);
             }
         }
@@ -624,6 +736,25 @@ static Expr *parse_expr(Lexer *lexer)
 
             n_stack.stack[--n_stack.index] = (Expr *)num;
             next_token(lexer);
+        }
+        else if(peek(lexer)->token_type == TokenType::EQUAL)
+        {
+            if (peek_amount(lexer, -1)->token_type != TokenType::IDENTIFIER)
+            {
+                fprintf(stderr, "Identifier has to be before equal sign\n");
+                assert(false);
+            }
+
+            if (read_stack(&o_stack).ol <= OperatorLevel::EQUAL)
+            {
+                o_stack.stack[--o_stack.index] = Operator {OperatorLevel::EQUAL, nullptr};
+                next_token(lexer);
+            }
+            else
+            {
+                make_tree(&n_stack, &o_stack);
+            }
+
         }
         else if (peek(lexer)->token_type == TokenType::OPERATOR_PLUS)
         {
@@ -753,6 +884,11 @@ static void print_expr(Expr *expr)
             print_expr(op->expr.right);
             printf(")");
         } break;
+        case ExprType::VARIABLE:
+        {
+            Variable *var = (Variable *)expr;
+            printf("%.*s", (int)var->context_token->str_count, var->context_token->str_val);
+        } break;
 
         default: assert(false);
     }
@@ -809,47 +945,19 @@ static F64 eval_expr(Expr *e)
         } break;
         case ExprType::FUNCTION:
         {
-            Function *func = (Function *)e;
-            switch (func->ft)
-            {
-                case FunctionType::INVALID:
-                {
-                    assert(false);
-                } break;
-                case FunctionType::COS:
-                {
-                    return cos(eval_expr(func->expr.right));
-                } break;
-                case FunctionType::SIN:
-                {
-                    return sin(eval_expr(func->expr.right));
-                } break;
-                case FunctionType::TAN:
-                {
-                    return tan(eval_expr(func->expr.right));
-                } break;
-                case FunctionType::SQUARE_ROOT:
-                {
-                    return sqrt(eval_expr(func->expr.right));
-                } break;
-                case FunctionType::ABSOLUTE:
-                {
-                    return my_abs(eval_expr(func->expr.right));
-                } break;
-                case FunctionType::LOG:
-                {
-                    return log(eval_expr(func->expr.right));
-                } break;
-                case FunctionType::E_EXPONENTIAL:
-                {
-                    return exp(eval_expr(func->expr.right));
-                } break;
-            
-                default: assert(false);
-            }
+            TODO("Implement");
         }  break;
+        case ExprType::VARIABLE:
+        {
+            Variable *var = (Variable *)e;
+            Expr *expr = hashmap_get(&g_map, var->context_token->str_val, var->context_token->str_count);
+            assert(expr != nullptr);
+            return eval_expr(expr);
+        } break;
         default: assert(false);
     }
+    assert(false && "unreachable");
+    return NAN;
 }
 
 
@@ -866,9 +974,9 @@ static void create_image_from_exprtree(Expr *tree)
 
         {
             Expr *stack[512] = {0};
-            Usize stack_index = ARRAY_COUNT(stack);
+            Usize stack_index = ARRAY_SIZE(stack);
             stack[--stack_index] = tree;
-            while (stack_index < ARRAY_COUNT(stack))
+            while (stack_index < ARRAY_SIZE(stack))
             {
                 Expr *poped_tree = stack[stack_index++];
                 assert(poped_tree != nullptr);
@@ -970,11 +1078,12 @@ int main(int argc, const char *argv[])
     {
         while (true)
         {
-            fgets(command_buffer, ARRAY_COUNT(command_buffer), stdin);
+            fgets(command_buffer, ARRAY_SIZE(command_buffer), stdin);
             if (command_buffer[0] == 'q') break;
 
             const char *source = command_buffer;
             memset(&g_lexer, 0, sizeof(g_lexer));
+            g_token_index = 0;
             tokenize(&g_lexer, source);
             print_tokens(&g_lexer);
 
