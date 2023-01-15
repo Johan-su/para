@@ -15,6 +15,8 @@ typedef int16_t I16;
 typedef int32_t I32;
 typedef int64_t I64;
 
+typedef float F32;
+typedef double F64;
 
 static_assert(sizeof(U8) == 1);
 static_assert(sizeof(U16) == 2);
@@ -26,6 +28,9 @@ static_assert(sizeof(I16) == 2);
 static_assert(sizeof(I32) == 4);
 static_assert(sizeof(I64) == 8);
 
+static_assert(sizeof(F32) == 4);
+static_assert(sizeof(F64) == 8);
+
 #define DEBUG_ASSERTS
 
 #ifdef DEBUG_ASSERTS
@@ -34,7 +39,7 @@ static_assert(sizeof(I64) == 8);
     {                                                                                                       \
         if (!(expression))                                                                                  \
         {                                                                                                   \
-            fprintf(stderr, "ERROR: assertion failed %s, at %s:%d in \n", #expression, __FILE__, __LINE__); \
+            fprintf(stderr, "ERROR: assertion failed %s, at %s:%d\n", #expression, __FILE__, __LINE__); \
             exit(1);                                                                                        \
         }                                                                                                   \
     } while (0)
@@ -45,7 +50,7 @@ static_assert(sizeof(I64) == 8);
 #define TODO(message) \
 do \
 { \
-    fprintf(stderr, "ERROR: TODO %s, at %s:%d in \n", message, __FILE__, __LINE__); \
+    fprintf(stderr, "ERROR: TODO %s, at %s:%d\n", message, __FILE__, __LINE__); \
     exit(1); \
 } while (0);
 
@@ -150,7 +155,7 @@ static void tokenize(Lexer *lexer, const char *source)
         else if (source[i] == '-') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = OPERATOR_MINUS});
         else if (source[i] == '*') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = OPERATOR_MULTIPLY});
         else if (source[i] == '/') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = OPERATOR_DIVIDE});
-        else if (is_digit(source[i])) // TODO(Johan): add handling for decimal numbers
+        else if (is_digit(source[i]))
         {
             Token number_token = {};
             {
@@ -161,6 +166,14 @@ static void tokenize(Lexer *lexer, const char *source)
                 while (is_digit(source[i + count]))
                 {
                     count += 1;
+                }
+                if (source[i + count] == '.')
+                {
+                    count += 1;
+                    while (is_digit(source[i + count]))
+                    {
+                        count += 1;
+                    }
                 }
                 number_token.str_count = count;
                 i += count - 1;
@@ -243,7 +256,7 @@ struct Expr
 struct Number
 {
     Expr expr;
-    I64 val;
+    F64 val;
 };
 
 
@@ -286,7 +299,7 @@ static const char *expr_to_str(Expr *e)
     { 
         case EXPR_NUMBER:
         {
-            snprintf(num_buffer, num_buffer_len, "%lld", ((Number *)e)->val);
+            snprintf(num_buffer, num_buffer_len, "%g", ((Number *)e)->val);
             return num_buffer;
         } break;
         case EXPR_BIN_OPERATOR: return ((BinOperator *)e)->opt == BinOperatorType::PLUS ? "+" : ((BinOperator *)e)->opt == BinOperatorType::MINUS ? "-" : ((BinOperator *)e)->opt == BinOperatorType::MULTIPLY ? "*" : ((BinOperator *)e)->opt == BinOperatorType::DIVIDE ? "/" : ""; 
@@ -366,7 +379,7 @@ static Expr *parse_number(Lexer *lexer, Usize *index)
             TODO("unexpected number after number");
         }
         Number *number = alloc<Number>(1);
-        number->val = atoll(lexer->tokens[*index].str_val);
+        number->val = atof(lexer->tokens[*index].str_val);
         number->expr.expr_type = EXPR_NUMBER;
         root = (Expr *)number;
         *index += 1;
@@ -517,7 +530,7 @@ struct NumOrExpr
     bool is_num;
     union 
     {
-        I64 n;
+        F64 n;
         Expr *e;
     };
 };
@@ -734,7 +747,7 @@ static Expr *parse_expr(Lexer *lexer)
         {
             NumOrExpr nor = {
                 .is_num = true,
-                .n = atoll(peek(lexer)->str_val),
+                .n = atof(peek(lexer)->str_val),
             };
             n_stack.stack[--n_stack.index] = nor;
             next_token(lexer);
@@ -838,7 +851,7 @@ static void print_expr(Expr *expr)
         case EXPR_NUMBER:
         {
             Number *num = (Number *)expr;
-            printf("%lld", num->val);
+            printf("%g", num->val);
         } break;
         case EXPR_BIN_OPERATOR:
         {
@@ -864,7 +877,7 @@ static void print_expr(Expr *expr)
     }
 }
 
-static I64 eval_expr(Expr *e)
+static F64 eval_expr(Expr *e)
 {
     switch (e->expr_type)
     {
@@ -1162,7 +1175,7 @@ int main(int argc, const char *argv[])
     printf("-------------\n");
 
     print_expr(expression_tree);
-    printf(" = %lld\n", eval_expr(expression_tree));
+    printf(" = %g\n", eval_expr(expression_tree));
 
 
 
