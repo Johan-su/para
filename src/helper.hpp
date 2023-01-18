@@ -37,7 +37,7 @@ static_assert(sizeof(F64) == 8);
     {                                                                                                       \
         if (!(expression))                                                                                  \
         {                                                                                                   \
-            fprintf(stderr, "ERROR: assertion failed %s, at %s:%d\n", #expression, __FILE__, __LINE__); \
+            fprintf(stderr, "ERROR: assertion failed %s, at %s:%d\n", #expression, __FILE__, __LINE__);     \
             exit(1);                                                                                        \
         }                                                                                                   \
     } while (0)
@@ -54,3 +54,9 @@ do \
 
 
 #define ARRAY_SIZE(array) sizeof(array) / sizeof(array[0])
+
+template<typename T>
+static T *alloc(Usize count)
+{
+    return (T *)malloc(sizeof(T) * count);
+}
