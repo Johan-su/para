@@ -32,7 +32,7 @@ static U64 hash_string(const char *str, Usize len)
         Usize term = (Usize)str[i];        
         for (Usize j = i; j != 0; --j)
         {
-            term *= j;
+            term *= p;
         }
         hash += term;
     }
@@ -590,7 +590,7 @@ static Expr *parse_expr(Lexer *lexer)
             }
 
         }
-        else if (peek(lexer)->token_type == TokenType::OPERATOR_PLUS)
+        else if (peek(lexer)->token_type == TokenType::PLUS)
         {
             if (peek_amount(lexer, -1) == nullptr ||
                 (peek_amount(lexer, -1)->token_type != TokenType::NUMBER && 
@@ -620,7 +620,7 @@ static Expr *parse_expr(Lexer *lexer)
                 }
             }
         }
-        else if (peek(lexer)->token_type == TokenType::OPERATOR_MINUS)
+        else if (peek(lexer)->token_type == TokenType::MINUS)
         {
             if (peek_amount(lexer, -1) == nullptr ||
                 (peek_amount(lexer, -1)->token_type != TokenType::NUMBER && 
@@ -650,7 +650,7 @@ static Expr *parse_expr(Lexer *lexer)
                 }
             }
         }
-        else if (peek(lexer)->token_type == TokenType::OPERATOR_MULTIPLY)
+        else if (peek(lexer)->token_type == TokenType::MULTIPLY)
         {
             if (read_stack(&o_stack).ol < MULTIPLY)
             {
@@ -662,7 +662,7 @@ static Expr *parse_expr(Lexer *lexer)
                 make_tree(&n_stack, &o_stack);
             }
         }
-        else if (peek(lexer)->token_type == TokenType::OPERATOR_DIVIDE)
+        else if (peek(lexer)->token_type == TokenType::DIVIDE)
         {
             if (read_stack(&o_stack).ol < DIVIDE)
             {
@@ -891,6 +891,12 @@ static void usage(const char *program)
     "WILL CRASH AT ANY ERROR\n", program, program);
     exit(1);
 }
+
+
+static Lexer g_lexer = {
+    .tokens = {},
+    .count = 0,
+};
 
 static char command_buffer[2048] = {};
 

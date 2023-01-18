@@ -3,11 +3,12 @@
 
 enum class TokenType
 {
-    INVALID_TOKEN = 0,
-    OPERATOR_PLUS,    
-    OPERATOR_MINUS,    
-    OPERATOR_MULTIPLY,    
-    OPERATOR_DIVIDE,
+    INVALID = 0,
+    PLUS,    
+    MINUS,    
+    MULTIPLY,    
+    DIVIDE,
+    EQUAL,
 
     OPEN_PARENTHESIS,
     CLOSE_PARENTHESIS,
@@ -15,7 +16,6 @@ enum class TokenType
     NUMBER,
 
     IDENTIFIER,
-    EQUAL,
 
     END_TOKEN,
 
@@ -52,11 +52,6 @@ static void print_tokens(Lexer *lexer);
 // ---------------------
 #ifdef LEXER_HPP_IMPLEMENTATION
 #undef LEXER_HPP_IMPLEMENTATION
-
-static Lexer g_lexer = {
-    .tokens = {},
-    .count = 0,
-};
 
 
 
@@ -104,10 +99,10 @@ static void tokenize(Lexer *lexer, const char *source)
     {
              if (source[i] == '(') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPEN_PARENTHESIS});
         else if (source[i] == ')') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::CLOSE_PARENTHESIS});
-        else if (source[i] == '+') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPERATOR_PLUS});
-        else if (source[i] == '-') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPERATOR_MINUS});
-        else if (source[i] == '*') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPERATOR_MULTIPLY});
-        else if (source[i] == '/') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPERATOR_DIVIDE});
+        else if (source[i] == '+') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::PLUS});
+        else if (source[i] == '-') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::MINUS});
+        else if (source[i] == '*') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::MULTIPLY});
+        else if (source[i] == '/') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::DIVIDE});
         else if (source[i] == '=') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::EQUAL});
         else if (is_digit(source[i]))
         {
@@ -166,16 +161,16 @@ static const char *tokentype_to_str(TokenType tt)
 {
     switch (tt)
     {
-        case TokenType::INVALID_TOKEN: return "INVALID_TOKEN";
-        case TokenType::OPERATOR_PLUS: return "OPERATOR_PLUS";    
-        case TokenType::OPERATOR_MINUS: return "OPERATOR_MINUS";    
-        case TokenType::OPERATOR_MULTIPLY: return "OPERATOR_MULTIPLY";    
-        case TokenType::OPERATOR_DIVIDE: return "OPERATOR_DIVIDE";
+        case TokenType::INVALID: return "INVALID";
+        case TokenType::PLUS: return "PLUS";    
+        case TokenType::MINUS: return "MINUS";    
+        case TokenType::MULTIPLY: return "MULTIPLY";    
+        case TokenType::DIVIDE: return "DIVIDE";
+        case TokenType::EQUAL: return "EQUAL";
         case TokenType::OPEN_PARENTHESIS: return "OPEN_PARENTHESIS";
         case TokenType::CLOSE_PARENTHESIS: return "CLOSE_PARENTHESIS";
         case TokenType::NUMBER: return "NUMBER";
         case TokenType::IDENTIFIER: return "IDENTIFIER";
-        case TokenType::EQUAL: return "EQUAL";
         case TokenType::END_TOKEN: return "END_TOKEN";
         case TokenType::TOKEN_COUNT: return "TOKEN_COUNT"; 
     }
