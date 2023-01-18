@@ -14,30 +14,12 @@
 
 
 
-#include "shunting_yard_parser.cpp"
+// #include "shunting_yard_parser.cpp"
+
+#include "LALR.cpp"
 
 
 
-
-
-
-
-
-
-// <S> := <Expr>
-// <Expr> := (<Expr>) <Expr'>
-// <Expr> := <Number> <Expr'>
-// <Expr> := <U><Expr>
-// <Expr'> := <BinOperator> <Expr> <Expr'>
-// <Expr'> := <>
-
-
-
-// <S> := <Expr>
-// <Expr> := (<Expr>) <Expr'>
-// <Expr> := <Number> <Expr'>
-// <Expr'> := <BinOperator> <Expr> <Expr'>
-// <Expr'> := <>
 
 
 
