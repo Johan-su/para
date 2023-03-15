@@ -1,32 +1,34 @@
 #ifndef LEXER_HPP
 #define LEXER_HPP
 
+#include "helper.hpp"
+#include <stdio.h>
+#include <stdlib.h>
+
+
 enum class TokenType
 {
-    INVALID = 0,
     PLUS,    
     MINUS,    
     MULTIPLY,    
     DIVIDE,
     EQUAL,
-
     OPEN_PARENTHESIS,
     CLOSE_PARENTHESIS,
-
     NUMBER,
-
     IDENTIFIER,
-
     END_TOKEN,
-
-    TOKEN_COUNT
 };
 
+struct String
+{
+    const char *data;
+    Usize length;
+};
 
 struct Token
 {
-    const char *str_val;
-    Usize str_count;
+    String str;
     TokenType token_type;
 };
 
@@ -40,6 +42,8 @@ struct Lexer
     Usize count;
 };
 
+static Usize str_len(const char *cstr);
+static String make_string(const char *cstr);
 static void push_token(Lexer *lexer, Token token);
 static bool is_digit(char n);
 static bool is_whitespace(char n);
@@ -54,6 +58,20 @@ static void print_tokens(Lexer *lexer);
 #undef LEXER_HPP_IMPLEMENTATION
 
 
+static Usize str_len(const char *cstr)
+{
+    Usize c = 0;
+
+    while (cstr[c] != '\0') c += 1;
+
+    return c;
+}
+
+static String make_string(const char *cstr)
+{
+    return String {cstr, str_len(cstr)};
+}
+
 
 static void push_token(Lexer *lexer, Token token)
 {
@@ -65,7 +83,6 @@ static void push_token(Lexer *lexer, Token token)
     lexer->tokens[lexer->count] = token;
     lexer->count += 1;
 }
-
 
 
 static bool is_digit(char n)
@@ -97,18 +114,18 @@ static void tokenize(Lexer *lexer, const char *source)
 {
     for (Usize i = 0; source[i] != '\0'; ++i)
     {
-             if (source[i] == '(') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::OPEN_PARENTHESIS});
-        else if (source[i] == ')') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::CLOSE_PARENTHESIS});
-        else if (source[i] == '+') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::PLUS});
-        else if (source[i] == '-') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::MINUS});
-        else if (source[i] == '*') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::MULTIPLY});
-        else if (source[i] == '/') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::DIVIDE});
-        else if (source[i] == '=') push_token(lexer, Token {.str_val = &source[i], .str_count = 1, .token_type = TokenType::EQUAL});
+             if (source[i] == '(') push_token(lexer, Token {.str = make_string("("), .token_type = TokenType::OPEN_PARENTHESIS});
+        else if (source[i] == ')') push_token(lexer, Token {.str = make_string(")"), .token_type = TokenType::CLOSE_PARENTHESIS});
+        else if (source[i] == '+') push_token(lexer, Token {.str = make_string("+"), .token_type = TokenType::PLUS});
+        else if (source[i] == '-') push_token(lexer, Token {.str = make_string("-"), .token_type = TokenType::MINUS});
+        else if (source[i] == '*') push_token(lexer, Token {.str = make_string("*"), .token_type = TokenType::MULTIPLY});
+        else if (source[i] == '/') push_token(lexer, Token {.str = make_string("/"), .token_type = TokenType::DIVIDE});
+        else if (source[i] == '=') push_token(lexer, Token {.str = make_string("="), .token_type = TokenType::EQUAL});
         else if (is_digit(source[i]))
         {
             Token number_token = {};
             {
-                number_token.str_val = &source[i];
+                number_token.str.data = &source[i];
                 number_token.token_type = TokenType::NUMBER;
 
                 Usize count = 1;
@@ -124,7 +141,7 @@ static void tokenize(Lexer *lexer, const char *source)
                         count += 1;
                     }
                 }
-                number_token.str_count = count;
+                number_token.str.length = count;
                 i += count - 1;
             }
             push_token(lexer, number_token);
@@ -132,7 +149,7 @@ static void tokenize(Lexer *lexer, const char *source)
         else if (is_letter(source[i]))
         {
             Token id_token = {};
-            id_token.str_val = &source[i];
+            id_token.str.data = &source[i];
             id_token.token_type = TokenType::IDENTIFIER;
 
             Usize count = 1;
@@ -140,7 +157,7 @@ static void tokenize(Lexer *lexer, const char *source)
             {
                 count += 1;
             }
-            id_token.str_count = count;
+            id_token.str.length = count;
             i += count - 1;
 
             push_token(lexer, id_token);
@@ -149,10 +166,10 @@ static void tokenize(Lexer *lexer, const char *source)
         else
         {
             fprintf(stderr, "ERROR: unhandled character %c\n", source[i]);
-            assert(false && "unhandled character");
+            exit(1);
         }
     }
-    push_token(lexer, Token {.str_val = nullptr, .str_count = 0, .token_type = TokenType::END_TOKEN});
+    push_token(lexer, Token {.str = make_string(""), .token_type = TokenType::END_TOKEN});
 }
 
 
@@ -161,7 +178,6 @@ static const char *tokentype_to_str(TokenType tt)
 {
     switch (tt)
     {
-        case TokenType::INVALID: return "INVALID";
         case TokenType::PLUS: return "PLUS";    
         case TokenType::MINUS: return "MINUS";    
         case TokenType::MULTIPLY: return "MULTIPLY";    
@@ -172,7 +188,6 @@ static const char *tokentype_to_str(TokenType tt)
         case TokenType::NUMBER: return "NUMBER";
         case TokenType::IDENTIFIER: return "IDENTIFIER";
         case TokenType::END_TOKEN: return "END_TOKEN";
-        case TokenType::TOKEN_COUNT: return "TOKEN_COUNT"; 
     }
     
     assert(false && "no string representation of token type found");
@@ -187,7 +202,7 @@ static void print_tokens(Lexer *lexer)
     for (Usize i = 0; i < lexer->count; ++i)
     {
         Token *token = &lexer->tokens[i];
-        printf("%s VALUE: %.*s\n", tokentype_to_str(token->token_type), (int)token->str_count, token->str_val);
+        printf("%s : %.*s\n", tokentype_to_str(token->token_type), (int)token->str.length, token->str.data);
     }
 }
 #endif

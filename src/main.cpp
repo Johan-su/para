@@ -1,4 +1,3 @@
-#define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +15,6 @@
 
 // #include "shunting_yard_parser.cpp"
 
-#include "LALR.cpp"
 
 
 
@@ -27,11 +25,17 @@
 
 
 
-int main(int argc, const char *argv[])
+static Lexer g_lexer = {};
+
+static const char *src = "f(x) = 5 * 5 + 4"; 
+
+int main(void)
 {
-    run_parser(argc, argv);
+    tokenize(&g_lexer, src);
+    print_tokens(&g_lexer);
 
 
+    
 
     return 0;
 }

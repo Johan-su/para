@@ -1,0 +1,35 @@
+TOKENS
++;
+-;
+*;
+/;
+=;
+(;
+);
+Number;
+Id;
+End;
+:
+BNF
+<S> := <S'>;
+<S'> := <FuncDecl>;
+<S'> := <VarDecl>;
+<S'> := <E>;
+<S'> := ;
+<FuncDecl> := 'Id' '('<E>')' '=' <E>;
+<VarDecl> := 'Id' '=' <E>;
+<E> := '('<E>')';
+<E> := 'Number';
+<E> := <Var>;
+<E> := <FuncCall>;
+<E> := '-'<E>;
+<E> := '+'<E>;
+<E> := <E> '/' <E>;
+<E> := <E> '*' <E>;
+<E> := <E> '-' <E>;
+<E> := <E> '+' <E>;
+<FuncCall> := 'Id''('<E>')';
+<Var> := 'Id';
+:
+
+
