@@ -42,7 +42,7 @@ fn main()
 
     }
 
-    let lexer = unsafe{create_lexer_from_bnf(b"test".as_ptr())};
+    let lexer = unsafe{create_lexer_from_bnf(b"test\0".as_ptr())};
 
     println!("hello world");
 }
