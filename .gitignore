@@ -4,3 +4,7 @@
 *.pdb
 *.png
 *.dot
+
+# Added by cargo
+
+/target
