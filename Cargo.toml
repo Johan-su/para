@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 
 [[bin]]
-name = "Para"
-path = "src/Para.rs"
+name = "para"
+path = "src/para.rs"

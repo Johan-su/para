@@ -4,6 +4,7 @@
 *.pdb
 *.png
 *.dot
+*.svg
 
 # Added by cargo
 
