@@ -10,7 +10,9 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::env;
+use std::mem::transmute;
 use std::process::exit;
+use std::result;
 
 use crate::ptg_header::*;
 
@@ -28,7 +30,6 @@ enum LR_Type
     TokenNumber,
     TokenId,
     TokenEnd,
-    ExprS,
     ExpraltS,
     ExprFuncDecl,
     ExprVarDecl,
@@ -39,6 +40,7 @@ enum LR_Type
 
 fn i64_to_TokenType(token_type: i64) -> Result<LR_Type, &'static str>
 {
+    dbg!(token_type);
     match token_type
     {
         0 => Ok(LR_Type::TokenPlus),
@@ -51,45 +53,102 @@ fn i64_to_TokenType(token_type: i64) -> Result<LR_Type, &'static str>
         7 => Ok(LR_Type::TokenNumber),
         8 => Ok(LR_Type::TokenId),
         9 => Ok(LR_Type::TokenEnd),
-        10 => Ok(LR_Type::ExprS),
-        11 => Ok(LR_Type::ExpraltS),
-        12 => Ok(LR_Type::ExprFuncDecl),
-        13 => Ok(LR_Type::ExprVarDecl),
-        14 => Ok(LR_Type::ExprE),
-        15 => Ok(LR_Type::ExprFuncCall),
-        16 => Ok(LR_Type::ExprVar),
+        10 => Ok(LR_Type::ExpraltS),
+        11 => Ok(LR_Type::ExprFuncDecl),
+        12 => Ok(LR_Type::ExprVarDecl),
+        13 => Ok(LR_Type::ExprE),
+        14 => Ok(LR_Type::ExprFuncCall),
+        15 => Ok(LR_Type::ExprVar),
         _ => Err("Invalid token type"),
     }
+}
+
+unsafe fn parse_number(data: *const i8, data_length: u32) -> i64
+{
+    let mut result: i64 = 0;
+
+    for i in (0..data_length).rev()
+    {
+        let val = *(data.offset(i.try_into().unwrap())) as u8 as char; 
+        match val
+        {
+            '0' => {result += 0 * i as i64}
+            '1' => {result += 1 * i as i64}
+            '2' => {result += 2 * i as i64}
+            '3' => {result += 3 * i as i64}
+            '4' => {result += 4 * i as i64}
+            '5' => {result += 5 * i as i64}
+            '6' => {result += 6 * i as i64}
+            '7' => {result += 7 * i as i64}
+            '8' => {result += 8 * i as i64}
+            '9' => {result += 9 * i as i64}
+            _ => {panic!("invalid number, got {}", val)}
+        }
+
+    }
+    return result;
+}
+
+
+unsafe fn get_expr_in_array(expr: *const Expr, index: isize) -> *const Expr
+{
+    let exprs: *const *const Expr = transmute(expr.offset(1));
+    return *exprs.offset(index);   
 }
 
 
 unsafe fn eval_tree(expr: *const Expr) -> i64
 {
+    dbg!(&*expr);
+    match i64_to_TokenType((*expr).token.token_type).unwrap() 
     {
-        match i64_to_TokenType((*expr).token.token_type).unwrap() 
-        {
-            LR_Type::TokenPlus => {
-                assert_eq!((*expr).expr_count, 3);
-                return (*expr).exprs[0] + (*expr).exprs[2]; 
-            }
-            LR_Type::TokenMinus => {}
-            LR_Type::TokenTimes => {}
-            LR_Type::TokenDivide => {}
-            LR_Type::TokenEquals => {}
-            LR_Type::TokenOpen => {}
-            LR_Type::TokenClose => {}
-            LR_Type::TokenNumber => {}
-            LR_Type::TokenId => {}
-            LR_Type::TokenEnd => {panic!("unreachable")}
-            LR_Type::ExprS => {panic!("unreachable")}
-            LR_Type::ExpraltS => {}
-            LR_Type::ExprFuncDecl => {}
-            LR_Type::ExprVarDecl => {}
-            LR_Type::ExprE => {}
-            LR_Type::ExprFuncCall => {}
-            LR_Type::ExprVar => {}
-        
+        LR_Type::TokenPlus => {panic!("unreachable")}
+        LR_Type::TokenMinus => {panic!("unreachable")}
+        LR_Type::TokenTimes => {panic!("unreachable")}
+        LR_Type::TokenDivide => {panic!("unreachable")}
+        LR_Type::TokenEquals => {
+            assert_eq!((*expr).expr_count, 3);
+            return eval_tree(get_expr_in_array(expr, 2));
         }
+        LR_Type::TokenOpen => {todo!("not implemented")}
+        LR_Type::TokenClose => {todo!("not implemented")}
+        LR_Type::TokenNumber => {return parse_number((*expr).token.data, (*expr).token.length)}
+        LR_Type::TokenId => {todo!("not implemented")}
+        LR_Type::TokenEnd => {panic!("unreachable")}
+        LR_Type::ExpraltS => {
+            assert_eq!((*expr).expr_count, 1);
+            return eval_tree(get_expr_in_array(expr, 0));
+        }
+        LR_Type::ExprFuncDecl => {todo!("not implemented")}
+        LR_Type::ExprVarDecl => {todo!("not implemented")}
+        LR_Type::ExprE => {
+            match (*expr).expr_count
+            {
+                1 => {return eval_tree(get_expr_in_array(expr, 0))}
+                2 => {todo!("not implemented")}
+                3 => {match i64_to_TokenType((*get_expr_in_array(expr, 1)).token.token_type).unwrap() 
+                {
+                    LR_Type::TokenPlus => {
+                        return eval_tree(get_expr_in_array(expr, 0)) + eval_tree(get_expr_in_array(expr, 2));
+                    }
+                    LR_Type::TokenMinus => {
+                        return eval_tree(get_expr_in_array(expr, 0)) - eval_tree(get_expr_in_array(expr, 2));
+                    }
+                    LR_Type::TokenTimes => {
+                        return eval_tree(get_expr_in_array(expr, 0)) * eval_tree(get_expr_in_array(expr, 2));
+                    }
+                    LR_Type::TokenDivide => {
+                        return eval_tree(get_expr_in_array(expr, 0)) / eval_tree(get_expr_in_array(expr, 2));
+                    }                 
+                    _ => panic!("unreachable")
+                }
+}
+                _ => panic!("unreachable")
+            }
+        }
+        LR_Type::ExprFuncCall => {todo!("not implemented")}
+        LR_Type::ExprVar => {todo!("not implemented")}
+    
     }
 }
 
@@ -179,5 +238,8 @@ fn main()
 
     println!("success: {}, \n{}", success, std::str::from_utf8(&msg).unwrap());
     unsafe {graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr)};
+
+    println!("evaled to {}", unsafe {eval_tree(expr)});
+
     unload_ptg();
 }
