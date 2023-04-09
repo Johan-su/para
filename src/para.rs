@@ -5,14 +5,12 @@
 mod ptg_header;
 
 use core::ffi::c_void;
-use core::num;
 use core::panic;
 use std::fs::File;
+use std::io;
 use std::io::BufReader;
 use std::io::Read;
-use std::env;
 use std::mem::transmute;
-use std::process::exit;
 
 use crate::ptg_header::*;
 
@@ -121,7 +119,10 @@ unsafe fn eval_tree(expr: *const Expr) -> i64
         LR_Type::TokenId => {todo!("not implemented")}
         LR_Type::TokenEnd => {panic!("unreachable")}
         LR_Type::ExpraltS => {
-            assert_eq!((*expr).expr_count, 1);
+            if (*expr).expr_count != 1
+            {
+                return 0;
+            }
             return eval_tree(get_expr_in_array(expr, 0));
         }
         LR_Type::ExprFuncDecl => {todo!("not implemented")}
@@ -180,19 +181,12 @@ unsafe fn eval_tree(expr: *const Expr) -> i64
     }
 }
 
-fn main()
-{
-    load_ptg();
-    let args: Vec<String> = env::args().collect();
-    let mut token_list: Vec<ParseToken> = Vec::new();
 
-    if args.len() < 2
-    {
-        eprintln!("ERROR: no command provided");
-        exit(1);
-    }
-    
-    let arg = args[1].as_bytes();
+
+
+fn string_to_tokens(arg: &Vec<u8>) -> Result<Vec<ParseToken>, &'static str>
+{   
+    let mut token_list: Vec<ParseToken> = Vec::new();
     {
         let mut i: usize = 0;
         while i < arg.len()
@@ -232,16 +226,25 @@ fn main()
                     b'\n' => {}
                     b'\r' => {}
                     b'\t' => {}
-                    _ => {eprintln!("ERROR: Unknown char {}", arg[i] as char); exit(1);},
+                    _ => {eprintln!("ERROR: Unknown char {}", arg[i] as char); return Err("Unknown value")}
                 }
             }
             i += 1;
         }
         token_list.push(ParseToken {token_type: LR_Type::TokenEnd as i64, data: &(arg[0] as i8), length: 0});
     }
-    let token_count = token_list.len() as u32;
+    return Ok(token_list);
+}
 
 
+
+fn main()
+{
+    load_ptg();
+
+    
+    
+    
     let mut bnf_src: Vec<u8>;
     {
         let file = File::open("./src/bnf.txt").unwrap();
@@ -249,8 +252,8 @@ fn main()
         let mut bnf: String = String::new();
         buf_reader.read_to_string(&mut bnf).unwrap();
         bnf_src = bnf.into_bytes();
+        bnf_src.push(0);
     }
-    bnf_src.push(0);
 
 
 
@@ -266,18 +269,38 @@ fn main()
     let mut expr: *mut Expr = 0 as *mut Expr;
     let mut msg: [u8; 1000] = [0; 1000];
 
-    
-    let success: bool = unsafe {parse_bin(token_list.as_mut_ptr(), token_count, table.as_mut_ptr(), /*PRINT_EVERY_PARSE_STEP*/0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000)};
-    
-    
-    
-    println!("success: {}, \n{}", success, std::str::from_utf8(&msg).unwrap());
-    if success
-    {
-        unsafe {graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr)};
-        println!("evaled to {}", unsafe {eval_tree(expr)});
-    }
 
+    loop 
+    { 
+        let mut read_str = String::new();
+        io::stdin().read_line(&mut read_str).unwrap();
+
+        if read_str.as_str() == "q"
+        {
+            break;
+        }
+        let mut token_list: Vec<ParseToken>;
+        {
+            let result = string_to_tokens(&read_str.as_bytes().to_vec());
+            if result.is_err()
+            {
+                continue;
+            }
+            token_list = result.unwrap();
+        }
+        let token_count = token_list.len() as u32;
+        let success: bool = unsafe {parse_bin(token_list.as_mut_ptr(), token_count, table.as_mut_ptr(), /*PRINT_EVERY_PARSE_STEP*/0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000)};
+
+        if success
+        {
+            // unsafe {graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr)};
+            println!(" = {}", unsafe {eval_tree(expr)});
+        }
+        else
+        {
+            println!("{}", std::str::from_utf8(&msg).unwrap());
+        }       
+    }
 
     unload_ptg();
 }
