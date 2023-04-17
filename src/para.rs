@@ -89,7 +89,6 @@ fn eval_tree(expr: &Expr)
 
 fn main()
 {
-    load_ptg();
     let args: Vec<String> = env::args().collect();
     let mut token_list: Vec<ParseToken> = Vec::new();
 
@@ -173,5 +172,4 @@ fn main()
 
     println!("success: {}, \n{}", success, std::str::from_utf8(&msg).unwrap());
     unsafe {graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr)};
-    unload_ptg();
 }
