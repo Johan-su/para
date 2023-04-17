@@ -14,10 +14,11 @@ use std::io::Read;
 use std::mem::transmute;
 use std::slice::from_raw_parts;
 
+
 use crate::ptg_header::*;
 
 
-
+#[derive(Debug, PartialEq)]
 enum LR_Type
 {
     TokenPlus,
@@ -105,8 +106,18 @@ unsafe fn get_expr_in_array(expr: *const Expr, index: isize) -> *const Expr
     return *exprs.offset(index);   
 }
 
+unsafe fn get_expr_token_type(expr: *const Expr) -> LR_Type
+{
+    return i64_to_TokenType((*expr).token.token_type).unwrap();
+}
 
-unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<&[i8], *const Expr>) -> f64
+unsafe fn slice_from_expr_token<'a>(expr: *const Expr) -> &'a[i8]
+{
+    return from_raw_parts((*expr).token.data, (*expr).token.length as usize);
+}
+
+
+unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<&[i8], Symbol>, in_func_call: Option<&(Func, f64)>) -> Result<f64, &'static str>
 {
     match i64_to_TokenType((*expr).token.token_type).unwrap() 
     {
@@ -117,39 +128,29 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<&[i8], *const Expr>) ->
         LR_Type::TokenEquals => {todo!("not implemented")}
         LR_Type::TokenOpen => {todo!("not implemented")}
         LR_Type::TokenClose => {todo!("not implemented")}
-        LR_Type::TokenNumber => {return parse_number((*expr).token.data, (*expr).token.length)}
+        LR_Type::TokenNumber => {return Ok(parse_number((*expr).token.data, (*expr).token.length))}
         LR_Type::TokenId => {todo!("not implemented")}
         LR_Type::TokenEnd => {panic!("unreachable")}
         LR_Type::ExpraltS => {
             if (*expr).expr_count != 1
             {
-                return 0.0;
+                panic!("unreachable");
             }
-            return eval_tree(get_expr_in_array(expr, 0), map);
+            return eval_tree(get_expr_in_array(expr, 0), map, in_func_call);
         }
-        LR_Type::ExprFuncDecl => {todo!("not implemented")}
-        LR_Type::ExprVarDecl => 
-        {
-            assert_eq!((*expr).expr_count, 3);
-
-            let var_name_ptr: *const Expr = get_expr_in_array(expr, 2);
-            let var_expr_ptr: *const Expr = get_expr_in_array(expr, 0);
-
-            let slice: &[i8] = from_raw_parts((*var_name_ptr).token.data, (*var_name_ptr).token.length as usize);
-            map.insert(slice, var_expr_ptr);
-            return 0.0;
-        }
+        LR_Type::ExprFuncDecl => {panic!("unreachable")}
+        LR_Type::ExprVarDecl => {panic!("unreachable")}
         LR_Type::ExprE => {
             match (*expr).expr_count
             {
-                1 => {return eval_tree(get_expr_in_array(expr, 0), map)}
+                1 => {return eval_tree(get_expr_in_array(expr, 0), map, in_func_call)}
                 2 => 
                 {
                     let token = i64_to_TokenType((*get_expr_in_array(expr, 1)).token.token_type).unwrap(); 
                     match token 
                     {
-                        LR_Type::TokenPlus => {return eval_tree(get_expr_in_array(expr, 0), map)}
-                        LR_Type::TokenMinus => {return -eval_tree(get_expr_in_array(expr, 0), map)}
+                        LR_Type::TokenPlus => {return eval_tree(get_expr_in_array(expr, 0), map, in_func_call)}
+                        LR_Type::TokenMinus => {return Ok(-(eval_tree(get_expr_in_array(expr, 0), map, in_func_call)?))}
                         _ => panic!("unexpected token")          
                     }
                 }
@@ -159,31 +160,31 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<&[i8], *const Expr>) ->
                     {
                         LR_Type::TokenPlus =>
                         {
-                            let num1 = eval_tree(get_expr_in_array(expr, 2), map); 
-                            let num2 = eval_tree(get_expr_in_array(expr, 0), map); 
-                            return num1 + num2;
+                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call)?; 
+                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call)?; 
+                            return Ok(num1 + num2);
                         }
                         LR_Type::TokenMinus =>
                         {
-                            let num1 = eval_tree(get_expr_in_array(expr, 2), map); 
-                            let num2 = eval_tree(get_expr_in_array(expr, 0), map); 
-                            return num1 - num2;
+                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call)?; 
+                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call)?; 
+                            return Ok(num1 - num2);
                         }
                         LR_Type::TokenTimes =>
                         {
-                            let num1 = eval_tree(get_expr_in_array(expr, 2), map); 
-                            let num2 = eval_tree(get_expr_in_array(expr, 0), map); 
-                            return num1 * num2;
+                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call)?; 
+                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call)?; 
+                            return Ok(num1 * num2);
                         }
                         LR_Type::TokenDivide =>
                         {
-                            let num1 = eval_tree(get_expr_in_array(expr, 2), map); 
-                            let num2 = eval_tree(get_expr_in_array(expr, 0), map); 
-                            return num1 / num2;
+                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call)?; 
+                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call)?; 
+                            return Ok(num1 / num2);
                         }
                         LR_Type::ExprE =>
                         {
-                            return eval_tree(get_expr_in_array(expr, 1), map);
+                            return eval_tree(get_expr_in_array(expr, 1), map, in_func_call);
                         }
                         _ => panic!("unreachable")
                     }
@@ -191,28 +192,86 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<&[i8], *const Expr>) ->
                 _ => panic!("unreachable")
             }
         }
-        LR_Type::ExprFuncCall => {todo!("not implemented")}
-        LR_Type::ExprVar => 
+        LR_Type::ExprFuncCall => 
         {
-            assert_eq!((*expr).expr_count, 1);
+            assert_eq!((*expr).expr_count, 4);
 
-            let slice: &[i8] = from_raw_parts((*get_expr_in_array(expr, 0)).token.data, (*get_expr_in_array(expr, 0)).token.length as usize);            
-            let val = map.get(slice);
-            if val.is_none()
+            let func_name = get_expr_in_array(expr, 3);
+            let open = get_expr_in_array(expr, 2);
+            let call_expr = get_expr_in_array(expr, 1);
+            let close = get_expr_in_array(expr, 0);
+
+            assert_eq!(get_expr_token_type(func_name), LR_Type::TokenId);
+            assert_eq!(get_expr_token_type(open), LR_Type::TokenOpen);
+            assert_eq!(get_expr_token_type(call_expr), LR_Type::ExprE);
+            assert_eq!(get_expr_token_type(close), LR_Type::TokenClose);
+
+            let call_val: f64 = eval_tree(call_expr, map, in_func_call)?;
+            
+            let opt_func = map.get(slice_from_expr_token(func_name));
+            if opt_func.is_some()
             {
-                return 0.0
+                match opt_func.unwrap()
+                {
+                    Symbol::Func(x) => {return eval_tree(x.expr, map, Some(&(x.clone(), call_val)))}
+                    _ => return Err("Symbol is not a function")
+                }
             }
             else 
             {
-                return eval_tree(*val.unwrap(), map);    
+                return Err("Undefined function");       
             }
         }
-    
+        LR_Type::ExprVar => 
+        {
+            assert_eq!((*expr).expr_count, 1);
+            
+            let slice: &[i8] = slice_from_expr_token(get_expr_in_array(expr, 0));            
+            if in_func_call.is_some()
+            {
+                let tuple = in_func_call.unwrap();
+                let func: &Func = &tuple.0;
+                let val: f64 = tuple.1;
+                
+
+                //TODO(Johan): works with these prints, probably because of Undefined behavior from aliasing somewhere else.
+                print_i8(func.var_name.as_ptr(), func.var_name.len() as u32);
+                print_i8(slice.as_ptr(), slice.len() as u32);
+
+                if func.var_name == slice
+                {
+                    return Ok(val);
+                }
+            }
+            let val = map.get(slice);
+            if val.is_none()
+            {
+                return Err("Undefined variable");
+            }
+            else
+            {
+                let var_expr: *const Expr = match val.unwrap() {Symbol::Var(x) => *x, _ => {return Err("Symbol is not a variable")}};
+                return eval_tree(var_expr, map, in_func_call);    
+            }
+        }
     }
 }
 
 
 
+#[derive(Debug, Clone)]
+struct Func<'a>
+{
+    var_name: &'a[i8],
+    expr: *const Expr,
+}
+
+#[derive(Debug)]
+enum Symbol<'a>
+{
+    Var(*const Expr),
+    Func(Func<'a>),
+}
 
 fn string_to_tokens<'a>(arg: &'a Vec<u8>, out: &'a mut Vec<ParseToken>) -> Result<(), &'static str>
 {
@@ -243,19 +302,19 @@ fn string_to_tokens<'a>(arg: &'a Vec<u8>, out: &'a mut Vec<ParseToken>) -> Resul
             }
             else
             {
-                match arg[i]
+                match arg[i] as char
                 {
-                    b'+' => token_list.push(ParseToken {token_type: LR_Type::TokenPlus as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    b'-' => token_list.push(ParseToken {token_type: LR_Type::TokenMinus as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    b'*' => token_list.push(ParseToken {token_type: LR_Type::TokenTimes as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    b'/' => token_list.push(ParseToken {token_type: LR_Type::TokenDivide as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    b'=' => token_list.push(ParseToken {token_type: LR_Type::TokenEquals as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    b'(' => token_list.push(ParseToken {token_type: LR_Type::TokenOpen as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    b')' => token_list.push(ParseToken {token_type: LR_Type::TokenClose as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    b' ' => {}
-                    b'\n' => {}
-                    b'\r' => {}
-                    b'\t' => {}
+                    '+' => token_list.push(ParseToken {token_type: LR_Type::TokenPlus as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
+                    '-' => token_list.push(ParseToken {token_type: LR_Type::TokenMinus as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
+                    '*' => token_list.push(ParseToken {token_type: LR_Type::TokenTimes as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
+                    '/' => token_list.push(ParseToken {token_type: LR_Type::TokenDivide as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
+                    '=' => token_list.push(ParseToken {token_type: LR_Type::TokenEquals as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
+                    '(' => token_list.push(ParseToken {token_type: LR_Type::TokenOpen as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
+                    ')' => token_list.push(ParseToken {token_type: LR_Type::TokenClose as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
+                    ' ' => {}
+                    '\n' => {}
+                    '\r' => {}
+                    '\t' => {}
                     _ => {eprintln!("ERROR: Unknown char {}", arg[i] as char); return Err("Unknown value");}
                 }
             }
@@ -267,12 +326,83 @@ fn string_to_tokens<'a>(arg: &'a Vec<u8>, out: &'a mut Vec<ParseToken>) -> Resul
 }
 
 
+unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<&[i8], Symbol>)
+{
+    if LR_Type::ExpraltS != get_expr_token_type(expr) || (*expr).expr_count == 0
+    {
+        return;
+    }
+
+    let decl_expr = get_expr_in_array(expr, 0);
+    let token_type = get_expr_token_type(decl_expr);
+    if LR_Type::ExprVarDecl == token_type
+    {
+        assert_eq!((*decl_expr).expr_count, 3);
+
+        let var_name = get_expr_in_array(decl_expr, 2);
+        let equals = get_expr_in_array(decl_expr, 1);
+        let var_expr = get_expr_in_array(decl_expr, 0);
+
+
+        assert_eq!(get_expr_token_type(var_name), LR_Type::TokenId);
+        assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
+        assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
+
+        let slice = slice_from_expr_token(var_name);
+        if map.insert(slice, Symbol::Var(var_expr)).is_some()
+        {
+            print!("redefined ");
+            print_i8(slice.as_ptr(), slice.len() as u32);
+        }
+    }
+    else if LR_Type::ExprFuncDecl == token_type
+    {
+        assert_eq!((*decl_expr).expr_count, 6);
+
+        let func_name = get_expr_in_array(decl_expr, 5);
+        let open_par = get_expr_in_array(decl_expr, 4);
+        // expr with variable instead of just Var to make parsing work
+        let var_expr = get_expr_in_array(decl_expr, 3);
+        let close_par = get_expr_in_array(decl_expr, 2);
+        let equals = get_expr_in_array(decl_expr, 1);
+        let func_expr = get_expr_in_array(decl_expr, 0);
+
+
+        assert_eq!(get_expr_token_type(func_name), LR_Type::TokenId);
+        assert_eq!(get_expr_token_type(open_par), LR_Type::TokenOpen);
+        assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
+        assert_eq!(get_expr_token_type(close_par), LR_Type::TokenClose);
+        assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
+        assert_eq!(get_expr_token_type(func_expr), LR_Type::ExprE);
+
+        let slice: &[i8] = slice_from_expr_token(func_name);
+        let var_slice: &[i8] = slice_from_expr_token(get_expr_in_array(get_expr_in_array(var_expr, 0), 0));
+
+        if map.insert(slice, Symbol::Func(Func {var_name: var_slice, expr: func_expr})).is_some()
+        {
+            print!("redefined ");
+            print_i8(slice.as_ptr(), slice.len() as u32);
+            println!();
+        }
+    }
+    else if LR_Type::ExprE == token_type
+    {
+        let result = unsafe {eval_tree(expr, map, None)};
+        match result
+        {
+            Ok(x) => println!(" = {}", x),    
+            Err(x) => println!("{}", x),    
+        }
+    }
+    else 
+    {
+        panic!("unreachable");    
+    }     
+}
+
 
 fn main()
 {
-    
-    
-    
     let mut bnf_src: Vec<u8>;
     {
         let file = File::open("./src/bnf.txt").unwrap();
@@ -297,7 +427,7 @@ fn main()
     let mut expr: *mut Expr = 0 as *mut Expr;
     let mut msg: [u8; 1000] = [0; 1000];
 
-    let mut map: HashMap<&[i8], *const Expr> = HashMap::new();
+    let mut map: HashMap<&[i8], Symbol> = HashMap::new();
     loop 
     { 
         let mut read_str = String::new();
@@ -325,9 +455,9 @@ fn main()
         {
             unsafe {graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr)};
 
-            // TODO(Johan): add symbols to hash table before evaluating to handle variables and functions in a better way
+            unsafe {add_declarations_if_needed_and_run(expr, &mut map)};
 
-            println!(" = {}", unsafe {eval_tree(expr, &mut map)});
+
         }
         else
         {
