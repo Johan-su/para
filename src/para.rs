@@ -5,13 +5,13 @@
 mod ptg_header;
 
 use core::ffi::c_void;
-use core::panic;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::io::BufReader;
 use std::io::Read;
 use std::mem::transmute;
+
 
 
 use crate::ptg_header::*;
@@ -129,7 +129,8 @@ unsafe fn vec_from_expr_token(expr: *const Expr) -> Vec<char>
 }
 
 
-unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<Vec<char>, Symbol>, in_func_call: Option<&(Func, f64)>) -> Result<f64, &'static str>
+
+unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<Vec<char>, Symbol>, in_func_call: Option<&(Func, f64)>, predefined_funcions: &HashMap<Vec<char>, fn(f64) -> f64>) -> Result<f64, &'static str>
 {
     match i64_to_TokenType((*expr).token.token_type).unwrap() 
     {
@@ -148,21 +149,21 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<Vec<char>, Symbol>, in_
             {
                 panic!("unreachable");
             }
-            return eval_tree(get_expr_in_array(expr, 0), map, in_func_call);
+            return eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions);
         }
         LR_Type::ExprFuncDecl => {panic!("unreachable")}
         LR_Type::ExprVarDecl => {panic!("unreachable")}
         LR_Type::ExprE => {
             match (*expr).expr_count
             {
-                1 => return eval_tree(get_expr_in_array(expr, 0), map, in_func_call),
+                1 => return eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions),
                 2 =>
                 {
                     let token = i64_to_TokenType((*get_expr_in_array(expr, 1)).token.token_type).unwrap(); 
                     match token 
                     {
-                        LR_Type::TokenPlus => {return eval_tree(get_expr_in_array(expr, 0), map, in_func_call)}
-                        LR_Type::TokenMinus => {return Ok(-(eval_tree(get_expr_in_array(expr, 0), map, in_func_call)?))}
+                        LR_Type::TokenPlus => {return eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)}
+                        LR_Type::TokenMinus => {return Ok(-(eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?))}
                         _ => panic!("unexpected token")          
                     }
                 }
@@ -172,31 +173,31 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<Vec<char>, Symbol>, in_
                     {
                         LR_Type::TokenPlus =>
                         {
-                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call)?; 
-                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call)?; 
+                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call, predefined_funcions)?; 
+                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?; 
                             return Ok(num1 + num2);
                         }
                         LR_Type::TokenMinus =>
                         {
-                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call)?; 
-                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call)?; 
+                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call, predefined_funcions)?; 
+                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?; 
                             return Ok(num1 - num2);
                         }
                         LR_Type::TokenTimes =>
                         {
-                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call)?; 
-                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call)?; 
+                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call, predefined_funcions)?; 
+                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?; 
                             return Ok(num1 * num2);
                         }
                         LR_Type::TokenDivide =>
                         {
-                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call)?; 
-                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call)?; 
+                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call, predefined_funcions)?; 
+                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?; 
                             return Ok(num1 / num2);
                         }
                         LR_Type::ExprE =>
                         {
-                            return eval_tree(get_expr_in_array(expr, 1), map, in_func_call);
+                            return eval_tree(get_expr_in_array(expr, 1), map, in_func_call, predefined_funcions);
                         }
                         _ => panic!("unreachable")
                     }
@@ -218,16 +219,20 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<Vec<char>, Symbol>, in_
             assert_eq!(get_expr_token_type(call_expr), LR_Type::ExprE);
             assert_eq!(get_expr_token_type(close), LR_Type::TokenClose);
 
-            let call_val: f64 = eval_tree(call_expr, map, in_func_call)?;
+            let call_val: f64 = eval_tree(call_expr, map, in_func_call, predefined_funcions)?;
 
-
+            let pre_func = predefined_funcions.get(&vec_from_expr_token(func_name));
+            if pre_func.is_some()
+            {
+                return Ok(pre_func.unwrap()(call_val));
+            }
 
             let opt_func = map.get(&vec_from_expr_token(func_name));
             if opt_func.is_some()
             {
                 match opt_func.unwrap()
                 {
-                    Symbol::Func(x) => {return eval_tree(x.expr, map, Some(&(x.clone(), call_val)))}
+                    Symbol::Func(x) => {return eval_tree(x.expr, map, Some(&(x.clone(), call_val)), predefined_funcions)}
                     _ => return Err("Symbol is not a function")
                 }
             }
@@ -260,7 +265,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<Vec<char>, Symbol>, in_
             else
             {
                 let var_expr: *const Expr = match val.unwrap() {Symbol::Var(x) => *x, _ => {return Err("Symbol is not a variable")}};
-                return eval_tree(var_expr, map, in_func_call);    
+                return eval_tree(var_expr, map, in_func_call, predefined_funcions);    
             }
         }
     }
@@ -335,7 +340,7 @@ fn string_to_tokens<'a>(arg: &'a Vec<u8>, out: &'a mut Vec<ParseToken>) -> Resul
 }
 
 
-unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<Vec<char>, Symbol>)
+unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<Vec<char>, Symbol>, predefined_funcions: &HashMap<Vec<char>, fn(f64) -> f64>)
 {
     if LR_Type::ExpraltS != get_expr_token_type(expr) || (*expr).expr_count == 0
     {
@@ -386,18 +391,39 @@ unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<
 
 
         let func_vec: Vec<char> = vec_from_expr_token(func_name);
-        let var_vec: Vec<char> = vec_from_expr_token(get_expr_in_array(get_expr_in_array(var_expr, 0), 0));
 
+        let var: *const Expr = get_expr_in_array(var_expr, 0);
+        if get_expr_token_type(var) != LR_Type::ExprVar
+        {
+            println!("Function argument has to be a single variable");
+            return;
+        }
+        let var_value: *const Expr = get_expr_in_array(var, 0);
+        assert_eq!(get_expr_token_type(var_value), LR_Type::TokenId);
+
+        let var_vec: Vec<char> = vec_from_expr_token(var_value);
+
+
+        if predefined_funcions.get(&func_vec).is_some()
+        {
+            println!("Cannot redefine predefined functions");
+            return;
+        }
 
         if map.insert(func_vec, Symbol::Func(Func {var_name: var_vec, expr: func_expr})).is_some()
         {
             print!("redefined ");
             print_expr_token(func_name);
         }
+        else 
+        {
+            print!("defined ");
+            print_expr_token(func_name);
+        }
     }
     else if LR_Type::ExprE == token_type
     {
-        let result = unsafe {eval_tree(expr, map, None)};
+        let result = eval_tree(expr, map, None, predefined_funcions);
         match result
         {
             Ok(x) => println!(" = {}", x),    
@@ -453,6 +479,19 @@ fn main()
     let mut expr: *mut Expr = 0 as *mut Expr;
     let mut msg: [u8; 1000] = [0; 1000];
 
+
+
+    let mut predefined_functions: HashMap<Vec<char>, fn(f64) -> f64> = HashMap::new();
+
+    predefined_functions.insert("cos".chars().collect(), f64::cos);
+    predefined_functions.insert("sin".chars().collect(), f64::sin);
+    predefined_functions.insert("sqrt".chars().collect(), f64::sqrt);
+    predefined_functions.insert("sqrt".chars().collect(), f64::exp);
+    predefined_functions.insert("log2".chars().collect(), f64::log2);
+    predefined_functions.insert("log10".chars().collect(), f64::log10);
+    predefined_functions.insert("floor".chars().collect(), f64::floor);
+
+
     let mut map: HashMap<Vec<char>, Symbol> = HashMap::new();
 
     let mut byte_vectors: Vec<Vec<u8>> = Vec::new();
@@ -492,7 +531,7 @@ fn main()
             unsafe {graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr)};
             
             // unsafe {print_tree(expr)};
-            unsafe {add_declarations_if_needed_and_run(expr, &mut map)};
+            unsafe {add_declarations_if_needed_and_run(expr, &mut map, &predefined_functions)};
 
 
         }
