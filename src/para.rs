@@ -483,13 +483,27 @@ fn main()
 
     let mut predefined_functions: HashMap<Vec<char>, fn(f64) -> f64> = HashMap::new();
 
-    predefined_functions.insert("cos".chars().collect(), f64::cos);
     predefined_functions.insert("sin".chars().collect(), f64::sin);
+    predefined_functions.insert("cos".chars().collect(), f64::cos);
+    predefined_functions.insert("tan".chars().collect(), f64::tan);
+
+    predefined_functions.insert("asin".chars().collect(), f64::asin);
+    predefined_functions.insert("acos".chars().collect(), f64::acos);
+    predefined_functions.insert("atan".chars().collect(), f64::atan);
+
     predefined_functions.insert("sqrt".chars().collect(), f64::sqrt);
-    predefined_functions.insert("sqrt".chars().collect(), f64::exp);
+    predefined_functions.insert("cbrt".chars().collect(), f64::cbrt);
+
+    predefined_functions.insert("exp".chars().collect(), f64::exp);
+
+    predefined_functions.insert("ln".chars().collect(), f64::ln);
     predefined_functions.insert("log2".chars().collect(), f64::log2);
     predefined_functions.insert("log10".chars().collect(), f64::log10);
+
     predefined_functions.insert("floor".chars().collect(), f64::floor);
+    predefined_functions.insert("ceil".chars().collect(), f64::ceil);
+    
+    predefined_functions.insert("abs".chars().collect(), f64::abs);
 
 
     let mut map: HashMap<Vec<char>, Symbol> = HashMap::new();
