@@ -12,7 +12,6 @@ use std::io;
 use std::io::BufReader;
 use std::io::Read;
 use std::mem::transmute;
-use std::slice::from_raw_parts;
 
 
 use crate::ptg_header::*;
@@ -99,9 +98,16 @@ unsafe fn print_i8(data: *const i8, data_length: u32)
 }
 
 
+unsafe fn print_expr_token(expr_token: *const Expr)
+{
+    print_i8((*expr_token).token.data, (*expr_token).token.length);
+}
+
+
 
 unsafe fn get_expr_in_array(expr: *const Expr, index: isize) -> *const Expr
 {
+    assert!((*expr).expr_count > index as u32);
     let exprs: *const *const Expr = transmute(expr.offset(1));
     return *exprs.offset(index);   
 }
@@ -111,13 +117,19 @@ unsafe fn get_expr_token_type(expr: *const Expr) -> LR_Type
     return i64_to_TokenType((*expr).token.token_type).unwrap();
 }
 
-unsafe fn slice_from_expr_token<'a>(expr: *const Expr) -> &'a[i8]
+unsafe fn vec_from_expr_token(expr: *const Expr) -> Vec<char>
 {
-    return from_raw_parts((*expr).token.data, (*expr).token.length as usize);
+    let mut vec: Vec<char> = Vec::new();
+    let data: *const i8 = (*expr).token.data;
+    for i in 0..((*expr).token.length)
+    {
+        vec.push(*(data.offset(i as isize)) as u8 as char);
+    }
+    return vec;
 }
 
 
-unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<&[i8], Symbol>, in_func_call: Option<&(Func, f64)>) -> Result<f64, &'static str>
+unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<Vec<char>, Symbol>, in_func_call: Option<&(Func, f64)>) -> Result<f64, &'static str>
 {
     match i64_to_TokenType((*expr).token.token_type).unwrap() 
     {
@@ -143,8 +155,8 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<&[i8], Symbol>, in_func
         LR_Type::ExprE => {
             match (*expr).expr_count
             {
-                1 => {return eval_tree(get_expr_in_array(expr, 0), map, in_func_call)}
-                2 => 
+                1 => return eval_tree(get_expr_in_array(expr, 0), map, in_func_call),
+                2 =>
                 {
                     let token = i64_to_TokenType((*get_expr_in_array(expr, 1)).token.token_type).unwrap(); 
                     match token 
@@ -207,8 +219,10 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<&[i8], Symbol>, in_func
             assert_eq!(get_expr_token_type(close), LR_Type::TokenClose);
 
             let call_val: f64 = eval_tree(call_expr, map, in_func_call)?;
-            
-            let opt_func = map.get(slice_from_expr_token(func_name));
+
+
+
+            let opt_func = map.get(&vec_from_expr_token(func_name));
             if opt_func.is_some()
             {
                 match opt_func.unwrap()
@@ -225,8 +239,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<&[i8], Symbol>, in_func
         LR_Type::ExprVar => 
         {
             assert_eq!((*expr).expr_count, 1);
-            
-            let slice: &[i8] = slice_from_expr_token(get_expr_in_array(expr, 0));            
+            let vec: Vec<char> = vec_from_expr_token(get_expr_in_array(expr, 0));
             if in_func_call.is_some()
             {
                 let tuple = in_func_call.unwrap();
@@ -234,16 +247,12 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<&[i8], Symbol>, in_func
                 let val: f64 = tuple.1;
                 
 
-                //TODO(Johan): works with these prints, probably because of Undefined behavior from aliasing somewhere else.
-                print_i8(func.var_name.as_ptr(), func.var_name.len() as u32);
-                print_i8(slice.as_ptr(), slice.len() as u32);
-
-                if func.var_name == slice
+                if func.var_name == vec
                 {
                     return Ok(val);
                 }
             }
-            let val = map.get(slice);
+            let val = map.get(&vec);
             if val.is_none()
             {
                 return Err("Undefined variable");
@@ -260,17 +269,17 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<&[i8], Symbol>, in_func
 
 
 #[derive(Debug, Clone)]
-struct Func<'a>
+struct Func
 {
-    var_name: &'a[i8],
+    var_name: Vec<char>,
     expr: *const Expr,
 }
 
 #[derive(Debug)]
-enum Symbol<'a>
+enum Symbol
 {
     Var(*const Expr),
-    Func(Func<'a>),
+    Func(Func),
 }
 
 fn string_to_tokens<'a>(arg: &'a Vec<u8>, out: &'a mut Vec<ParseToken>) -> Result<(), &'static str>
@@ -326,7 +335,7 @@ fn string_to_tokens<'a>(arg: &'a Vec<u8>, out: &'a mut Vec<ParseToken>) -> Resul
 }
 
 
-unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<&[i8], Symbol>)
+unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<Vec<char>, Symbol>)
 {
     if LR_Type::ExpraltS != get_expr_token_type(expr) || (*expr).expr_count == 0
     {
@@ -348,11 +357,11 @@ unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<
         assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
         assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
 
-        let slice = slice_from_expr_token(var_name);
-        if map.insert(slice, Symbol::Var(var_expr)).is_some()
+        let name_vec = vec_from_expr_token(var_name);
+        if map.insert(name_vec, Symbol::Var(var_expr)).is_some()
         {
             print!("redefined ");
-            print_i8(slice.as_ptr(), slice.len() as u32);
+            print_expr_token(var_name);
         }
     }
     else if LR_Type::ExprFuncDecl == token_type
@@ -375,14 +384,15 @@ unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<
         assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
         assert_eq!(get_expr_token_type(func_expr), LR_Type::ExprE);
 
-        let slice: &[i8] = slice_from_expr_token(func_name);
-        let var_slice: &[i8] = slice_from_expr_token(get_expr_in_array(get_expr_in_array(var_expr, 0), 0));
 
-        if map.insert(slice, Symbol::Func(Func {var_name: var_slice, expr: func_expr})).is_some()
+        let func_vec: Vec<char> = vec_from_expr_token(func_name);
+        let var_vec: Vec<char> = vec_from_expr_token(get_expr_in_array(get_expr_in_array(var_expr, 0), 0));
+
+
+        if map.insert(func_vec, Symbol::Func(Func {var_name: var_vec, expr: func_expr})).is_some()
         {
             print!("redefined ");
-            print_i8(slice.as_ptr(), slice.len() as u32);
-            println!();
+            print_expr_token(func_name);
         }
     }
     else if LR_Type::ExprE == token_type
@@ -399,6 +409,22 @@ unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<
         panic!("unreachable");    
     }     
 }
+
+
+
+unsafe fn print_tree(expr: *const Expr)
+{
+    let token_type: i64 = (*expr).token.token_type;
+    let token_length = (*expr).token.length;
+    print!("token_type = {}, length = {}, ptr = {:#x} val = ", token_type, token_length, (*expr).token.data as usize);
+    print_expr_token(expr);
+    for i in 0..((*expr).expr_count)
+    {
+        let arr_expr: *const Expr = get_expr_in_array(expr, i as isize);
+        print_tree(arr_expr);
+    }
+}
+
 
 
 fn main()
@@ -427,7 +453,14 @@ fn main()
     let mut expr: *mut Expr = 0 as *mut Expr;
     let mut msg: [u8; 1000] = [0; 1000];
 
-    let mut map: HashMap<&[i8], Symbol> = HashMap::new();
+    let mut map: HashMap<Vec<char>, Symbol> = HashMap::new();
+
+    let mut byte_vectors: Vec<Vec<u8>> = Vec::new();
+    const size: usize = 4096;
+    byte_vectors.reserve_exact(size);
+
+    let mut i: usize = 0;
+
     loop 
     { 
         let mut read_str = String::new();
@@ -439,22 +472,26 @@ fn main()
             break;
         }
         let mut token_list: Vec<ParseToken> = Vec::new();
-        let byte_vec = read_str.as_bytes().to_vec(); 
+        assert_ne!(i, size);
+        byte_vectors.insert(i, read_str.as_bytes().to_vec()); 
         {
-            let err = string_to_tokens(&byte_vec, &mut token_list);
+            let err = string_to_tokens(&byte_vectors.get(i).unwrap(), &mut token_list);
             if err.is_err()
             {
                 continue;
             }
         }
-        
+
+
         let token_count = token_list.len() as u32;
         let success: bool = unsafe {parse_bin(token_list.as_mut_ptr(), token_count, table.as_mut_ptr(), /*PRINT_EVERY_PARSE_STEP*/0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000)};
 
         if success
         {
+            i += 1;
             unsafe {graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr)};
-
+            
+            // unsafe {print_tree(expr)};
             unsafe {add_declarations_if_needed_and_run(expr, &mut map)};
 
 
