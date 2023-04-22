@@ -3,6 +3,7 @@
 #![allow(non_camel_case_types)]
 
 mod ptg_header;
+mod win_header;
 
 use core::ffi::c_void;
 use std::collections::HashMap;
@@ -10,12 +11,14 @@ use std::fs::File;
 use std::io;
 use std::io::BufReader;
 use std::io::Read;
+use std::io::stdout;
 use std::mem::transmute;
+use std::process::exit;
 
 
 
 use crate::ptg_header::*;
-
+use crate::win_header::*;
 
 #[derive(Debug, PartialEq)]
 enum LR_Type
@@ -453,8 +456,117 @@ unsafe fn print_tree(expr: *const Expr)
 
 
 
+
+enum Mode
+{
+    Normal,
+    Insert,
+}
+
+
+
 fn main()
 {
+    unsafe
+    {
+        let stdin: HANDLE = GetStdHandle(STD_INPUT_HANDLE);
+        if stdin == INVALID_HANDLE_VALUE
+        {
+            exit(420);
+        }
+
+        let stdout: HANDLE = GetStdHandle(STD_OUTPUT_HANDLE);
+        if stdout == INVALID_HANDLE_VALUE
+        {
+            exit(420);
+        }
+
+        if SetConsoleMode(stdin, 0) == FALSE
+        {
+            exit(421);
+        }
+
+        let mut x: SHORT = 0;
+        let mut y: SHORT = 0;
+        let mut w: SHORT = 0;
+        let mut h: SHORT = 0;
+
+        loop
+        {
+            {
+                let mut screen_buf_info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::MaybeUninit::zeroed().assume_init();
+                if GetConsoleScreenBufferInfo(stdout, &mut screen_buf_info as PCONSOLE_SCREEN_BUFFER_INFO) == FALSE
+                {
+                    eprintln!("ERROR: GetConsoleScreenBufferInfo {}", GetLastError());
+                    exit(-1);
+                }
+                
+                
+
+                let new_x = screen_buf_info.srWindow.Left;
+                let new_y = screen_buf_info.srWindow.Top;
+                let new_w = screen_buf_info.srWindow.Right - screen_buf_info.srWindow.Left;
+                let new_h = screen_buf_info.srWindow.Bottom - screen_buf_info.srWindow.Top;
+
+                if x != new_x || y != new_y || w != new_w || h != new_h
+                {
+                    x = new_x;
+                    y = new_y;
+                    w = new_w;
+                    h = new_h;
+                    println!("terminal x = {}, y = {}, w = {}, h = {}", x, y, w, h);
+                }    
+            }
+
+            let mut buf: INPUT_RECORD = std::mem::MaybeUninit::zeroed().assume_init();
+            let num_char_to_read: DWORD = 1;
+            let mut num_chars_read: DWORD = 0;
+            if ReadConsoleInputW(stdin, &mut buf as PINPUT_RECORD, num_char_to_read, &mut num_chars_read) == FALSE
+            {
+                exit(-1)
+            }
+
+            match buf.EventType 
+            {
+                FOCUS_EVENT => {},
+                KEY_EVENT => 
+                {
+                    let key_event = buf.event.KeyEvent; 
+                    if key_event.bKeyDown == FALSE
+                    {
+                        if key_event.wVirtualKeyCode == 'Q' as u16
+                        {
+                            exit(0);
+                        }
+                        else if key_event.wVirtualKeyCode == 'C' as u16
+                        {
+                            println!("{}", key_event.dwControlKeyState);
+                            if key_event.dwControlKeyState == LEFT_CTRL_PRESSED
+                            {
+                                exit(0);
+                            }
+                        }
+                        else
+                        {
+                            println!("code = {}", key_event.wVirtualKeyCode);
+                        }
+                    }
+                },
+                MENU_EVENT => {},
+                MOUSE_EVENT => {},
+                WINDOW_BUFFER_SIZE_EVENT => {},
+                _ => {panic!("unreachable")}
+            }
+
+    
+        }
+    }
+}
+
+
+fn main2()
+{
+
     let mut bnf_src: Vec<u8>;
     {
         let file = File::open("./src/bnf.txt").unwrap();
