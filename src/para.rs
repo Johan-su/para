@@ -554,7 +554,6 @@ fn main()
         let mut w: SHORT = 0;
         let mut h: SHORT = 0;
 
-        let mut console_buffer.
 
         loop
         {
