@@ -464,16 +464,14 @@ enum Mode
 }
 
 
-unsafe fn print_at(str: &String, x: u32, y: u32)
-{
 
-}
+
 
 unsafe fn begin_esc(console: HANDLE)
 {
     let mut mode: DWORD = 0;
     GetConsoleMode(console, &mut mode);
-    mode |= mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_PROCESSED_OUTPUT; 
+    mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_PROCESSED_OUTPUT; 
     if SetConsoleMode(console, mode) == FALSE
     {
         exit(422);
@@ -505,6 +503,7 @@ unsafe fn revert_console(out_console: HANDLE, in_console: HANDLE, old_out_mode: 
 
 fn main()
 {
+
     let mut old_stdin_mode: DWORD = 0;
     let mut old_stdout_mode: DWORD = 0;
 
@@ -537,19 +536,10 @@ fn main()
         end_esc(stdout);
 
 
-        let mut mode: DWORD = 0;
-        GetConsoleMode(stdin, &mut mode);
-        mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN; 
-        mode &= !ENABLE_WRAP_AT_EOL_OUTPUT & !ENABLE_PROCESSED_OUTPUT;
-             
-        println!("mode = {:#X}", mode);
-        if SetConsoleMode(stdout, mode) == FALSE
-        {
-            println!("{}", GetLastError());
-            exit(424);
-        } 
-
-        println!("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.");
+        println!("Lorem ipsum dolor sit amet\n
+        consectetur adipiscing elit\n
+        sed do eiusmod tempor incididunt ut labore et dolore magna aliqua\n
+        Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.");
 
 
 
@@ -563,6 +553,8 @@ fn main()
         let mut y: SHORT = 0;
         let mut w: SHORT = 0;
         let mut h: SHORT = 0;
+
+        let mut console_buffer.
 
         loop
         {
@@ -602,7 +594,7 @@ fn main()
                 {
                     let key_event = buf.event.KeyEvent; 
                     let key_code = key_event.wVirtualKeyCode;
-                    if key_event.bKeyDown == FALSE
+                    if key_event.bKeyDown == TRUE
                     {
                         if key_code == VK_UP
                         {
