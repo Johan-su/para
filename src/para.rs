@@ -467,39 +467,118 @@ enum Mode
 
 
 
-unsafe fn begin_esc(console: HANDLE)
+fn begin_esc() -> bool
 {
+    let console: HANDLE = unsafe {GetStdHandle(STD_OUTPUT_HANDLE)};
+
     let mut mode: DWORD = 0;
-    GetConsoleMode(console, &mut mode);
-    mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_PROCESSED_OUTPUT; 
-    if SetConsoleMode(console, mode) == FALSE
+    if unsafe {GetConsoleMode(console, &mut mode)} == FALSE
     {
-        exit(422);
+        return false;
     }
+    mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_PROCESSED_OUTPUT; 
+    if unsafe {SetConsoleMode(console, mode)} == FALSE
+    {
+        return false;
+    }
+    return true;
 }
 
-unsafe fn end_esc(console: HANDLE)
+fn end_esc() -> bool
 {
     io::stdout().flush().unwrap();
+    let console: HANDLE = unsafe {GetStdHandle(STD_OUTPUT_HANDLE)};
     let mut mode: DWORD = 0;
-    GetConsoleMode(console, &mut mode);
+    if unsafe {GetConsoleMode(console, &mut mode)} == FALSE { return false }
+
     mode &= !ENABLE_VIRTUAL_TERMINAL_PROCESSING & !ENABLE_PROCESSED_OUTPUT; 
-    if SetConsoleMode(console, mode) == FALSE
-    {
-        exit(424);
-    }
+
+    if unsafe {SetConsoleMode(console, mode)} == FALSE { return false }
+    return true
 }
 
-unsafe fn revert_console(out_console: HANDLE, in_console: HANDLE, old_out_mode: &DWORD, old_in_mode: &DWORD)
+unsafe fn revert_console(out_console: HANDLE, in_console: HANDLE, old_out_mode: DWORD, old_in_mode: DWORD)
 {
-    begin_esc(out_console);
+    begin_esc();
     // change back to main buffer
     print!("\x1b[?1049l");
-    end_esc(out_console);
-    SetConsoleMode(out_console, *old_out_mode);
-    SetConsoleMode(in_console, *old_in_mode);
+    end_esc();
+    SetConsoleMode(out_console, old_out_mode);
+    SetConsoleMode(in_console, old_in_mode);
 }
 
+
+static mut y_shift: u16 = 1;
+
+fn begin_ui()
+{
+    begin_esc();
+    clear_screen_esc();
+    end_esc();
+    unsafe {y_shift = 1}
+
+}
+
+fn end_ui()
+{
+    unsafe {y_shift = 1}
+}
+
+
+fn input_string_box(name: &'static str, str_buffer: &mut [u8], max_len: usize)
+{
+    let width = max_len + 2;
+    let mut str: String = String::new();
+    for _ in 0..width
+    {
+        str += "-"; 
+    }
+    begin_esc();
+    unsafe
+    {
+        write_at_pos_esc(&str, 1, y_shift);
+        write_at_pos_esc(&str, 1, y_shift + 2);
+        y_shift += 3;
+    }
+    end_esc();
+}
+
+fn save_cursor_position_esc()
+{
+    print!("\x1b[s")
+}
+
+fn restore_cursor_position_esc()
+{
+    print!("\x1b[u");
+}
+
+fn clear_screen_esc()
+{
+    print!("\x1b[2J");
+}
+
+fn move_cursor_to_esc(x: u16, y: u16)
+{
+    assert!(x > 0);
+    assert!(y > 0);
+    assert!(x <= 32767);
+    assert!(y <= 32767);
+
+    print!("\x1b[{};{}H", y, x);
+}
+
+fn write_at_pos_esc(str: &String, x: u16, y: u16)
+{
+    save_cursor_position_esc();
+    move_cursor_to_esc(x, y);
+
+    end_esc(); // ignore terminal sequences from user input text
+    print!("{}", str);
+    begin_esc();
+
+    restore_cursor_position_esc();
+}
 
 fn main()
 {
@@ -530,31 +609,19 @@ fn main()
         }
         
         
-        begin_esc(stdout);
+        begin_esc();
         // change to alternate buffer
         print!("\x1b[?1049h");
-        end_esc(stdout);
+        move_cursor_to_esc(1, 1);
+        end_esc();
 
-
-        println!("Lorem ipsum dolor sit amet\n
-        consectetur adipiscing elit\n
-        sed do eiusmod tempor incididunt ut labore et dolore magna aliqua\n
-        Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.");
-
-
-
-        begin_esc(stdout);
-        // change to alternate buffer
-        print!("\x1b[0;0H");
-        end_esc(stdout);
-
-
+        
         let mut x: SHORT = 0;
         let mut y: SHORT = 0;
         let mut w: SHORT = 0;
         let mut h: SHORT = 0;
 
-
+        // let mut input_box_count: usize = 1; 
         loop
         {
             let mut screen_buf_info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::MaybeUninit::zeroed().assume_init();
@@ -567,8 +634,8 @@ fn main()
 
             let new_x = screen_buf_info.srWindow.Left;
             let new_y = screen_buf_info.srWindow.Top;
-            let new_w = screen_buf_info.srWindow.Right - screen_buf_info.srWindow.Left + 1;
-            let new_h = screen_buf_info.srWindow.Bottom - screen_buf_info.srWindow.Top + 1;
+            let new_w = screen_buf_info.srWindow.Right - screen_buf_info.srWindow.Left;
+            let new_h = screen_buf_info.srWindow.Bottom - screen_buf_info.srWindow.Top;
 
             if x != new_x || y != new_y || w != new_w || h != new_h
             {
@@ -577,7 +644,15 @@ fn main()
                 w = new_w;
                 h = new_h;
                 // println!("terminal x = {}, y = {}, w = {}, h = {}", x, y, w, h);
-            }    
+            }
+
+            let mut buf: Vec<u8> = Vec::new();
+
+            begin_ui();
+            input_string_box("1", buf.as_mut_slice(), 64);
+            end_ui();
+
+
             let mut buf: INPUT_RECORD = std::mem::MaybeUninit::zeroed().assume_init();
             let num_char_to_read: DWORD = 1;
             let mut num_chars_read: DWORD = 0;
@@ -597,32 +672,42 @@ fn main()
                     {
                         if key_code == VK_UP
                         {
-                            begin_esc(stdout);
+                            begin_esc();
                             print!("\x1b[1A");
-                            end_esc(stdout);
+                            end_esc();
                         }
                         if key_code == VK_DOWN
                         {
-                            begin_esc(stdout);
+                            begin_esc();
                             print!("\x1b[1B");
-                            end_esc(stdout);
+                            end_esc();
                         }
                         if key_code == VK_RIGHT
                         {
-                            begin_esc(stdout);
+                            begin_esc();
                             print!("\x1b[1C");
-                            end_esc(stdout);
+                            end_esc();
                         }
                         if key_code == VK_LEFT
                         {
-                            begin_esc(stdout);
+                            begin_esc();
                             print!("\x1b[1D");
-                            end_esc(stdout);
+                            end_esc();
                         }
 
-                        if key_code == 'A' as u16
+                        if key_code == 'S' as u16
                         {
-
+                            begin_esc();
+                            save_cursor_position_esc();
+                            write_at_pos_esc(&"save".to_string(), 1, h as u16);
+                            end_esc();
+                        }
+                        if key_code == 'R' as u16
+                        {
+                            begin_esc();
+                            restore_cursor_position_esc();
+                            write_at_pos_esc(&"restore".to_string(), 1, h as u16);
+                            end_esc();
                         }
                         if key_code == 'Q' as u16
                         {
@@ -653,7 +738,7 @@ fn main()
 
     
         }
-        revert_console(stdout, stdin, &old_stdout_mode, &old_stdin_mode);
+        revert_console(stdout, stdin, old_stdout_mode, old_stdin_mode);
         exit(0);
     }
 }
