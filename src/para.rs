@@ -457,6 +457,28 @@ unsafe fn print_tree(expr: *const Expr)
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 enum Mode
 {
     Normal,
@@ -508,49 +530,96 @@ unsafe fn revert_console(out_console: HANDLE, in_console: HANDLE, old_out_mode: 
 }
 
 
-static mut y_shift: u16 = 1;
+static mut y_shift: i16 = 0;
 
 fn begin_ui()
 {
     begin_esc();
-    clear_screen_esc();
+    // clear_screen_esc();
     end_esc();
-    unsafe {y_shift = 1}
+    unsafe {y_shift = 0}
 
 }
 
 fn end_ui()
 {
-    unsafe {y_shift = 1}
+    unsafe {y_shift = 0}
 }
 
 
-fn input_string_box(name: &'static str, str_buffer: &mut [u8], max_len: usize)
+fn input_string_box(name: &'static str, str_buffer: &mut [u8], max_len: usize) -> bool
 {
-    let width = max_len + 2;
+    let x = 1;
+    let y = 1;
+    let height = 3;
+    let width = max_len;
     let mut str: String = String::new();
     for _ in 0..width
     {
         str += "-"; 
     }
     begin_esc();
+    let x_bound: bool; 
+    let y_bound: bool; 
     unsafe
     {
-        write_at_pos_esc(&str, 1, y_shift);
-        write_at_pos_esc(&str, 1, y_shift + 2);
-        y_shift += 3;
+        assert!(max_len <= i16::MAX as usize);
+        x_bound = cursor.x >= x && cursor.x <= x + (width - 1) as i16;
+        y_bound = cursor.y >= y && cursor.y <= y + (height - 1);
+        write_at_pos_esc(&str, x, y + y_shift);
+        write_at_pos_esc(&str, x, y + (height - 1) + y_shift);
+        y_shift += height;
     }
     end_esc();
+    if x_bound && y_bound
+    {
+        return true;
+    }
+    return false;
 }
 
-fn save_cursor_position_esc()
+fn get_cursor_position_esc() -> (i16, i16)
 {
-    print!("\x1b[s")
+    return unsafe {(cursor.x, cursor.y)};
 }
+
+struct Cursor
+{
+    x: i16,
+    y: i16,
+
+
+    stack_count: usize, 
+    save_stack: [(i16, i16); 8],
+
+}
+static mut cursor: Cursor = Cursor {x: 1, y: 1, stack_count: 0, save_stack: [(1, 1); 8]};
+
+fn save_cursor_position()
+{
+    unsafe
+    {
+        assert!(cursor.stack_count < 8);
+        cursor.save_stack[cursor.stack_count] = (cursor.x, cursor.y);
+        cursor.stack_count += 1;
+    }
+}
+
+fn move_cursor_esc(x: i16, y: i16)
+{
+    unsafe {set_cursor_to_esc(cursor.x + x, cursor.y + y)};
+}
+
 
 fn restore_cursor_position_esc()
 {
-    print!("\x1b[u");
+    unsafe
+    {
+        assert!(cursor.stack_count > 0);
+        cursor.stack_count -= 1;
+        let saved_cursor = cursor.save_stack[cursor.stack_count];
+        set_cursor_to_esc(saved_cursor.0, saved_cursor.1);
+    }
 }
 
 fn clear_screen_esc()
@@ -558,20 +627,26 @@ fn clear_screen_esc()
     print!("\x1b[2J");
 }
 
-fn move_cursor_to_esc(x: u16, y: u16)
+fn set_cursor_to_esc(x: i16, y: i16)
 {
-    assert!(x > 0);
-    assert!(y > 0);
-    assert!(x <= 32767);
-    assert!(y <= 32767);
+    let mut x = x;
+    let mut y = y;
+    if x < 1 { x = 1; } ;
+    if y < 1 { y = 1; } ; 
+
+    unsafe
+    {
+        cursor.x = x;
+        cursor.y = y;
+    }
 
     print!("\x1b[{};{}H", y, x);
 }
 
-fn write_at_pos_esc(str: &String, x: u16, y: u16)
+fn write_at_pos_esc(str: &String, x: i16, y: i16)
 {
-    save_cursor_position_esc();
-    move_cursor_to_esc(x, y);
+    save_cursor_position();
+    set_cursor_to_esc(x, y);
 
     end_esc(); // ignore terminal sequences from user input text
     print!("{}", str);
@@ -612,7 +687,7 @@ fn main()
         begin_esc();
         // change to alternate buffer
         print!("\x1b[?1049h");
-        move_cursor_to_esc(1, 1);
+        set_cursor_to_esc(1, 1);
         end_esc();
 
         
@@ -649,9 +724,14 @@ fn main()
             let mut buf: Vec<u8> = Vec::new();
 
             begin_ui();
-            input_string_box("1", buf.as_mut_slice(), 64);
+            let inside: bool = input_string_box("1", buf.as_mut_slice(), 16);
             end_ui();
 
+            begin_esc();
+            write_at_pos_esc(&format!("pos = [ {} {} ] {}", cursor.x, cursor.y, inside), 0, h);
+            end_esc();
+
+            // get_cursor_position_esc();
 
             let mut buf: INPUT_RECORD = std::mem::MaybeUninit::zeroed().assume_init();
             let num_char_to_read: DWORD = 1;
@@ -673,40 +753,37 @@ fn main()
                         if key_code == VK_UP
                         {
                             begin_esc();
-                            print!("\x1b[1A");
+                            move_cursor_esc(0, -1);
                             end_esc();
                         }
                         if key_code == VK_DOWN
                         {
                             begin_esc();
-                            print!("\x1b[1B");
+                            move_cursor_esc(0, 1);
                             end_esc();
                         }
                         if key_code == VK_RIGHT
                         {
                             begin_esc();
-                            print!("\x1b[1C");
+                            move_cursor_esc(1, 0);
                             end_esc();
                         }
                         if key_code == VK_LEFT
                         {
                             begin_esc();
-                            print!("\x1b[1D");
+                            move_cursor_esc(-1, 0);
                             end_esc();
                         }
-
                         if key_code == 'S' as u16
                         {
                             begin_esc();
-                            save_cursor_position_esc();
-                            write_at_pos_esc(&"save".to_string(), 1, h as u16);
+                            write_at_pos_esc(&"save".to_string(), 1, h);
                             end_esc();
                         }
                         if key_code == 'R' as u16
                         {
                             begin_esc();
-                            restore_cursor_position_esc();
-                            write_at_pos_esc(&"restore".to_string(), 1, h as u16);
+                            write_at_pos_esc(&"restore".to_string(), 1, h);
                             end_esc();
                         }
                         if key_code == 'Q' as u16
@@ -742,6 +819,27 @@ fn main()
         exit(0);
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 fn main2()
