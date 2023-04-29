@@ -547,7 +547,10 @@ fn end_ui()
 }
 
 
-fn input_string_box(name: &'static str, str_buffer: &mut [u8], max_len: usize) -> bool
+
+
+
+fn input_string_box(screen: &mut Terminal_Screen, name: &'static str, str_buffer: &mut [u8], max_len: usize, inputs: &Input) -> bool
 {
     let x = 1;
     let y = 1;
@@ -558,21 +561,107 @@ fn input_string_box(name: &'static str, str_buffer: &mut [u8], max_len: usize) -
     {
         str += "-"; 
     }
-    begin_esc();
     let x_bound: bool; 
     let y_bound: bool; 
+
+
+    fn move_left_in_input_string(x: i16)
+    {
+        if unsafe {cursor.x} > x
+        {
+            move_cursor_esc(-1, 0);
+        }
+    }
+    fn move_right_in_input_string(max_len: i16)
+    {
+        if unsafe {cursor.x} < max_len
+        {
+            move_cursor_esc(1, 0);
+        }
+    }
+
+    if unsafe {active}
+    {
+        begin_esc();
+        if inputs.key_val == VK_LEFT
+        {
+            move_left_in_input_string(x);
+        }
+        else if inputs.key_val == VK_RIGHT
+        {
+            move_right_in_input_string(max_len as i16);
+        }
+        else if inputs.key_val == VK_ESCAPE
+        {
+            unsafe { active = false;}
+        }
+        else if inputs.key_val == VK_BACK
+        {
+        }
+        else if inputs.key_val >= 'A' as u16 && inputs.key_val <= 'Z' as u16
+        {
+            if inputs.SHIFT_PRESSED
+            {
+                if unsafe {cursor.x} < max_len as i16
+                {
+                    write_at_pos(screen, &(inputs.key_val as u8 as char).to_string(), unsafe {cursor.x}, unsafe {cursor.y});
+                    move_cursor_esc(1, 0);
+                }
+            }
+            else 
+            {
+                if unsafe {cursor.x} < max_len as i16
+                {
+                    write_at_pos(screen, &(inputs.key_val as u8 as char).to_ascii_lowercase().to_string(), unsafe {cursor.x}, unsafe {cursor.y});
+                    move_cursor_esc(1, 0);
+                }
+            }
+        }
+        else if inputs.key_val >= '0' as u16 && inputs.key_val <= '9' as u16
+        {
+            if unsafe {cursor.x} < max_len as i16
+            {
+                write_at_pos(screen, &(inputs.key_val as u8 as char).to_string(), unsafe {cursor.x}, unsafe {cursor.y});
+                move_cursor_esc(1, 0);
+            }
+        }
+        end_esc();
+    }
+
+
+
+    let mut value_str: &str = ""; 
+    
+    match std::str::from_utf8(&str_buffer)
+    {
+        Ok(x) => value_str = x,
+        Err(_) => {}
+    }
+    
+
+    
+    assert!(max_len <= i16::MAX as usize);
     unsafe
     {
-        assert!(max_len <= i16::MAX as usize);
         x_bound = cursor.x >= x && cursor.x <= x + (width - 1) as i16;
-        y_bound = cursor.y >= y && cursor.y <= y + (height - 1);
-        write_at_pos_esc(&str, x, y + y_shift);
-        write_at_pos_esc(&str, x, y + (height - 1) + y_shift);
+        y_bound = cursor.y == y + 1;
+        // y_bound = cursor.y >= y && cursor.y <= y + (height - 1);
+        write_at_pos(screen, &str, x, y + y_shift);
+        write_at_pos(screen, &value_str.to_string(), x, y + y_shift + (height - 1 / 2));
+        write_at_pos(screen, &str, x, y + (height - 1) + y_shift);
         y_shift += height;
     }
-    end_esc();
     if x_bound && y_bound
     {
+        if !unsafe {active}
+        {
+            if inputs.key_val == 'I' as u16
+            {
+                unsafe {active = true};
+            }
+        }
+
+        
         return true;
     }
     return false;
@@ -582,6 +671,8 @@ fn get_cursor_position_esc() -> (i16, i16)
 {
     return unsafe {(cursor.x, cursor.y)};
 }
+
+
 
 struct Cursor
 {
@@ -593,7 +684,20 @@ struct Cursor
     save_stack: [(i16, i16); 8],
 
 }
+
 static mut cursor: Cursor = Cursor {x: 1, y: 1, stack_count: 0, save_stack: [(1, 1); 8]};
+static mut last_input: u16 = 0;
+static mut active: bool = false;
+
+
+#[derive(Debug)]
+struct Terminal_Screen
+{
+    buffer: Vec<char>,
+    width: usize,
+    height: usize,
+}
+
 
 fn save_cursor_position()
 {
@@ -643,16 +747,120 @@ fn set_cursor_to_esc(x: i16, y: i16)
     print!("\x1b[{};{}H", y, x);
 }
 
-fn write_at_pos_esc(str: &String, x: i16, y: i16)
+fn render_terminal_buffer(screen: &mut Terminal_Screen)
 {
-    save_cursor_position();
-    set_cursor_to_esc(x, y);
-
-    end_esc(); // ignore terminal sequences from user input text
-    print!("{}", str);
     begin_esc();
+    save_cursor_position();
+    set_cursor_to_esc(1, 1);
+    clear_screen_esc();
+    end_esc();
 
+
+
+    for y in 0..screen.height
+    {
+        let row = y * screen.width;
+        for x in 0..screen.width
+        {
+            let char_pos = x + row;
+
+            print!("{}", screen.buffer[char_pos]);
+        }
+        begin_esc();
+        set_cursor_to_esc(0, y as i16);
+        end_esc();
+    }
+    begin_esc();
     restore_cursor_position_esc();
+    end_esc();
+}
+
+fn write_at_pos(screen: &mut Terminal_Screen, str: &String, x: i16, y: i16)
+{
+    assert!(x >= 0);
+    assert!(y >= 0);
+    assert!((x as usize) < screen.width);
+    if !((y as usize) < screen.height)
+    {
+        println!("{}, {}", y, screen.height);
+    }
+    assert!((y as usize) < screen.height);
+
+    let start_pos: usize = x as usize + y as usize * screen.width; 
+
+
+    let normalized_len: usize;
+    if (str.len() + x as usize) < screen.width
+    {
+        normalized_len = str.len();   
+    }
+    else 
+    {
+        normalized_len = screen.width - 1 - x as usize;
+    }
+
+    let str_slice: &[u8] = str.as_bytes();
+
+    for i in 0..normalized_len
+    {
+        screen.buffer[start_pos + i] = str_slice[i] as char;
+    }
+}
+
+fn get_console_input() -> Input
+{
+    let mut input: Input = unsafe {std::mem::zeroed()};
+
+    let mut buf: INPUT_RECORD = unsafe {std::mem::zeroed()};
+    let num_char_to_read: DWORD = 1;
+    let mut num_chars_read: DWORD = 0;
+    if unsafe {ReadConsoleInputW(GetStdHandle(STD_INPUT_HANDLE), &mut buf as PINPUT_RECORD, num_char_to_read, &mut num_chars_read) == FALSE}
+    {
+        exit(-1)
+    }
+
+    match buf.EventType 
+    {
+        FOCUS_EVENT => {},
+        KEY_EVENT => 
+        {
+            let key_event = unsafe {buf.event.KeyEvent}; 
+            let key_code = key_event.wVirtualKeyCode;
+            if key_event.bKeyDown == TRUE
+            {
+                input.key_val = key_code;
+                if key_event.dwControlKeyState == CAPSLOCK_ON {input.CAPSLOCK_ON = true}
+                if key_event.dwControlKeyState == ENHANCED_KEY {input.ENHANCED_KEY = true}
+                if key_event.dwControlKeyState == LEFT_ALT_PRESSED {input.LEFT_ALT_PRESSED = true}
+                if key_event.dwControlKeyState == LEFT_CTRL_PRESSED {input.LEFT_CTRL_PRESSED = true}
+                if key_event.dwControlKeyState == NUMLOCK_ON {input.NUMLOCK_ON = true}
+                if key_event.dwControlKeyState == RIGHT_ALT_PRESSED {input.RIGHT_ALT_PRESSED = true}
+                if key_event.dwControlKeyState == RIGHT_CTRL_PRESSED {input.RIGHT_CTRL_PRESSED = true}
+                if key_event.dwControlKeyState == SCROLLLOCK_ON {input.SCROLLLOCK_ON = true}
+                if key_event.dwControlKeyState == SHIFT_PRESSED {input.SHIFT_PRESSED = true}
+            }
+        },
+        MENU_EVENT => {},
+        MOUSE_EVENT => {},
+        WINDOW_BUFFER_SIZE_EVENT => {},
+        _ => {panic!("unreachable")}
+    }
+    return input;
+}
+
+#[derive(Debug)]
+struct Input
+{
+    key_val: u16,
+    CAPSLOCK_ON: bool,
+    ENHANCED_KEY: bool,
+    LEFT_ALT_PRESSED: bool,
+    LEFT_CTRL_PRESSED: bool,
+    NUMLOCK_ON: bool,
+    RIGHT_ALT_PRESSED: bool,
+    RIGHT_CTRL_PRESSED: bool,
+    SCROLLLOCK_ON: bool,
+    SHIFT_PRESSED: bool,
 }
 
 fn main()
@@ -699,121 +907,103 @@ fn main()
         // let mut input_box_count: usize = 1; 
         loop
         {
-            let mut screen_buf_info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::MaybeUninit::zeroed().assume_init();
-            if GetConsoleScreenBufferInfo(stdout, &mut screen_buf_info as PCONSOLE_SCREEN_BUFFER_INFO) == FALSE
+            let mut screen: Terminal_Screen;
             {
-                eprintln!("ERROR: GetConsoleScreenBufferInfo {}", GetLastError());
-                exit(-1);
+                let mut screen_buf_info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::zeroed();
+                if GetConsoleScreenBufferInfo(stdout, &mut screen_buf_info as PCONSOLE_SCREEN_BUFFER_INFO) == FALSE
+                {
+                    eprintln!("ERROR: GetConsoleScreenBufferInfo {}", GetLastError());
+                    exit(-1);
+                }
+                
+    
+                let new_x = screen_buf_info.srWindow.Left;
+                let new_y = screen_buf_info.srWindow.Top;
+                let new_w = screen_buf_info.srWindow.Right - screen_buf_info.srWindow.Left;
+                let new_h = screen_buf_info.srWindow.Bottom - screen_buf_info.srWindow.Top;
+    
+                if x != new_x || y != new_y || w != new_w || h != new_h
+                {
+                    x = new_x;
+                    y = new_y;
+                    w = new_w;
+                    h = new_h;
+                    // println!("terminal x = {}, y = {}, w = {}, h = {}", x, y, w, h);
+                }
+
+                let buffer_length = (w * h) as usize;
+                let width = w as usize;
+                let height = h as usize;
+                let mut terminal_screen_buffer: Vec<char> = Vec::new();
+                terminal_screen_buffer.reserve(buffer_length);
+                for _ in 0..buffer_length
+                {
+                    terminal_screen_buffer.insert(0, '\0');
+                }
+                screen = Terminal_Screen { buffer: (terminal_screen_buffer), width: (width), height: (height) };
             }
             
-
-            let new_x = screen_buf_info.srWindow.Left;
-            let new_y = screen_buf_info.srWindow.Top;
-            let new_w = screen_buf_info.srWindow.Right - screen_buf_info.srWindow.Left;
-            let new_h = screen_buf_info.srWindow.Bottom - screen_buf_info.srWindow.Top;
-
-            if x != new_x || y != new_y || w != new_w || h != new_h
+            
+            let inputs: Input = get_console_input();
+            
+            
+            if inputs.key_val == 'Q' as u16
             {
-                x = new_x;
-                y = new_y;
-                w = new_w;
-                h = new_h;
-                // println!("terminal x = {}, y = {}, w = {}, h = {}", x, y, w, h);
-            }
-
-            let mut buf: Vec<u8> = Vec::new();
-
-            begin_ui();
-            let inside: bool = input_string_box("1", buf.as_mut_slice(), 16);
-            end_ui();
-
-            begin_esc();
-            write_at_pos_esc(&format!("pos = [ {} {} ] {}", cursor.x, cursor.y, inside), 0, h);
-            end_esc();
-
-            // get_cursor_position_esc();
-
-            let mut buf: INPUT_RECORD = std::mem::MaybeUninit::zeroed().assume_init();
-            let num_char_to_read: DWORD = 1;
-            let mut num_chars_read: DWORD = 0;
-            if ReadConsoleInputW(stdin, &mut buf as PINPUT_RECORD, num_char_to_read, &mut num_chars_read) == FALSE
-            {
-                exit(-1)
-            }
-
-            match buf.EventType 
-            {
-                FOCUS_EVENT => {},
-                KEY_EVENT => 
+                if inputs.LEFT_ALT_PRESSED
                 {
-                    let key_event = buf.event.KeyEvent; 
-                    let key_code = key_event.wVirtualKeyCode;
-                    if key_event.bKeyDown == TRUE
-                    {
-                        if key_code == VK_UP
-                        {
-                            begin_esc();
-                            move_cursor_esc(0, -1);
-                            end_esc();
-                        }
-                        if key_code == VK_DOWN
-                        {
-                            begin_esc();
-                            move_cursor_esc(0, 1);
-                            end_esc();
-                        }
-                        if key_code == VK_RIGHT
-                        {
-                            begin_esc();
-                            move_cursor_esc(1, 0);
-                            end_esc();
-                        }
-                        if key_code == VK_LEFT
-                        {
-                            begin_esc();
-                            move_cursor_esc(-1, 0);
-                            end_esc();
-                        }
-                        if key_code == 'S' as u16
-                        {
-                            begin_esc();
-                            write_at_pos_esc(&"save".to_string(), 1, h);
-                            end_esc();
-                        }
-                        if key_code == 'R' as u16
-                        {
-                            begin_esc();
-                            write_at_pos_esc(&"restore".to_string(), 1, h);
-                            end_esc();
-                        }
-                        if key_code == 'Q' as u16
-                        {
-                            if key_event.dwControlKeyState == LEFT_ALT_PRESSED
-                            {
-                                break;
-                            }
-                        }
-                        else if key_code == 'C' as u16
-                        {
-                            if key_event.dwControlKeyState == LEFT_CTRL_PRESSED
-                            {
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            // println!("code = {:#x}", key_code);
-                        }
-                    }
-                },
-                MENU_EVENT => {},
-                MOUSE_EVENT => {},
-                WINDOW_BUFFER_SIZE_EVENT => {},
-                _ => {panic!("unreachable")}
+                    break;
+                }
             }
+            if inputs.key_val == 'C' as u16
+            {
+                if inputs.LEFT_CTRL_PRESSED
+                {
+                    break;
+                }
+            }
+            
+            
+            
+            let mut buf: Vec<u8> = Vec::new();
+            const length: usize = 16;
+            buf.reserve_exact(length);
+            
+            begin_ui();
+            let inside: bool = input_string_box(&mut screen, "1", buf.as_mut_slice(), length, &inputs);
+            end_ui();
+            let bottom_y = screen.height as i16 - 1;
+            write_at_pos(&mut screen, &format!("pos = [ {} {} ] inside = {}, active = {}", cursor.x, cursor.y, inside, active), 0, bottom_y);
+            
+            if !active
+            {
+                if inputs.key_val == VK_UP
+                {
+                    begin_esc();
+                    move_cursor_esc(0, -1);
+                    end_esc();
+                }
+                else if inputs.key_val == VK_LEFT
+                {
+                    begin_esc();
+                    move_cursor_esc(-1, 0);
+                    end_esc();
+                }
+                else if inputs.key_val == VK_DOWN
+                {
+                    begin_esc();
+                    move_cursor_esc(0, 1);
+                    end_esc();
+                }
+                else if inputs.key_val == VK_RIGHT
+                {
+                    begin_esc();
+                    move_cursor_esc(1, 0);
+                    end_esc();
+                }
+            }
+            
+            render_terminal_buffer(&mut screen);
             io::stdout().flush().unwrap();
-
-    
         }
         revert_console(stdout, stdin, old_stdout_mode, old_stdin_mode);
         exit(0);
