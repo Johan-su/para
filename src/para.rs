@@ -530,40 +530,55 @@ unsafe fn revert_console(out_console: HANDLE, in_console: HANDLE, old_out_mode: 
 }
 
 
-static mut y_shift: i16 = 0;
 
 fn begin_ui()
 {
     begin_esc();
     // clear_screen_esc();
     end_esc();
-    unsafe {y_shift = 0}
-
 }
 
 fn end_ui()
 {
-    unsafe {y_shift = 0}
 }
 
 
-
-
-
-fn input_string_box(screen: &mut Terminal_Screen, name: &'static str, str_buffer: &mut [u8], max_len: usize, inputs: &Input) -> bool
+fn str_as_usize(str: &'static str) -> usize
 {
-    let x = 1;
-    let y = 1;
-    let height = 3;
-    let width = max_len;
-    let mut str: String = String::new();
-    for _ in 0..width
-    {
-        str += "-"; 
-    }
-    let x_bound: bool; 
-    let y_bound: bool; 
+    return str as *const str as *const () as usize;
+}
 
+fn is_active(unique_str: &'static str) -> bool
+{
+    return unsafe {active.index} == str_as_usize(unique_str);
+}
+
+fn is_hot(unique_str: &'static str) -> bool
+{
+    return unsafe {hot.index} == str_as_usize(unique_str);
+}   
+
+// https://www.youtube.com/watch?v=Z1qyvQsjK5Y
+
+enum Input_Box_Actions
+{
+    LEAVE_WITH_ENTER,
+    LEAVE_WITH_ESCAPE,
+}
+
+fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str_buffer: &mut [u8], max_len: usize, x: usize, y: usize, inputs: &Input) -> Input_Box_Actions
+{
+    fn str_buffer_len(str_buffer: &mut [u8], max_len: usize) -> usize
+    {
+        for i in 0..max_len
+        {
+            if str_buffer[i] == b'\0'
+            {
+                return i + 1;
+            }
+        }
+        return max_len;
+    }
 
     fn move_left_in_input_string(x: i16)
     {
@@ -580,7 +595,39 @@ fn input_string_box(screen: &mut Terminal_Screen, name: &'static str, str_buffer
         }
     }
 
-    if unsafe {active}
+    fn shift_string_left_if_not_full(buffer: &mut [u8], max_len: usize)
+    {
+        if str_buffer_len(buffer, max_len) >= max_len
+        {
+            return;
+        }
+
+        
+
+    }
+
+    fn inside(x: usize, y: usize, width: usize, height: usize) -> bool
+    {
+        let cx = unsafe {cursor.x} as usize;
+        let cy = unsafe {cursor.y} as usize;
+
+        let bx: bool = cx >= x && cx <= x + width;
+        let by: bool = cx >= y && cx <= y + height;
+
+
+        return bx && by;
+    }
+
+
+
+
+
+
+    let height = 3;
+    let width = max_len;
+
+
+    if is_active(unique_name) 
     {
         begin_esc();
         if inputs.key_val == VK_LEFT
@@ -593,7 +640,7 @@ fn input_string_box(screen: &mut Terminal_Screen, name: &'static str, str_buffer
         }
         else if inputs.key_val == VK_ESCAPE
         {
-            unsafe { active = false;}
+            let id = pop_active();
         }
         else if inputs.key_val == VK_BACK
         {
@@ -627,44 +674,81 @@ fn input_string_box(screen: &mut Terminal_Screen, name: &'static str, str_buffer
         }
         end_esc();
     }
-
-
-
-    let mut value_str: &str = ""; 
-    
-    match std::str::from_utf8(&str_buffer)
+    else if is_hot(unique_name) 
     {
-        Ok(x) => value_str = x,
-        Err(_) => {}
-    }
-    
-
-    
-    assert!(max_len <= i16::MAX as usize);
-    unsafe
-    {
-        x_bound = cursor.x >= x && cursor.x <= x + (width - 1) as i16;
-        y_bound = cursor.y == y + 1;
-        // y_bound = cursor.y >= y && cursor.y <= y + (height - 1);
-        write_at_pos(screen, &str, x, y + y_shift);
-        write_at_pos(screen, &value_str.to_string(), x, y + y_shift + (height - 1 / 2));
-        write_at_pos(screen, &str, x, y + (height - 1) + y_shift);
-        y_shift += height;
-    }
-    if x_bound && y_bound
-    {
-        if !unsafe {active}
+        if unsafe {last_input} == 'A' as u16
         {
-            if inputs.key_val == 'I' as u16
-            {
-                unsafe {active = true};
-            }
+            push_active(unsafe {hot});
+            begin_esc();
+            set_cursor_to_esc(x as i16 + 1, y as i16 + 1);
+            end_esc();
         }
+    }
+
+    if inside(x, y, width, height)
+    {
+        unsafe
+        {
+            hot.owner = hot.index;
+            hot.item = Ui_kind::INPUT_TEXT;
+            hot.index = str_as_usize(unique_name);
+        }   
+    }
+
+    let mut str: String = String::new();
+    for _ in 0..width
+    {
+        str += "-"; 
+    }
+    let x_bound: bool; 
+    let y_bound: bool; 
+
+
+
+
+    // if unsafe {active}
+    // {
+
+    // }
+
+
+
+    // let mut value_str: &str = ""; 
+    
+    // match std::str::from_utf8(&str_buffer)
+    // {
+    //     Ok(x) => value_str = x,
+    //     Err(_) => {}
+    // }
+    
+
+    
+    // assert!(max_len <= i16::MAX as usize);
+    // unsafe
+    // {
+    //     x_bound = cursor.x >= x && cursor.x <= x + (width - 1) as i16;
+    //     y_bound = cursor.y == y + 1;
+    //     // y_bound = cursor.y >= y && cursor.y <= y + (height - 1);
+    //     write_at_pos(screen, &str, x, y + y_shift);
+    //     write_at_pos(screen, &value_str.to_string(), x, y + y_shift + (height - 1 / 2));
+    //     write_at_pos(screen, &str, x, y + (height - 1) + y_shift);
+    //     y_shift += height;
+    // }
+    // if x_bound && y_bound
+    // {
+    //     if !unsafe {active}
+    //     {
+    //         if inputs.key_val == 'I' as u16
+    //         {
+    //             unsafe {active = true};
+    //         }
+    //     }
 
         
-        return true;
-    }
-    return false;
+    //     return true;
+    // }
+    // return false;
+    
 }
 
 fn get_cursor_position_esc() -> (i16, i16)
@@ -685,9 +769,55 @@ struct Cursor
 
 }
 
+#[derive(Clone, Copy)]
+enum Ui_kind 
+{
+    None,
+    INPUT_TEXT,
+    SCROLL_LIST,
+}
+
+#[derive(Clone, Copy)]
+struct Ui_id
+{
+    owner: usize,
+    item: Ui_kind,
+    index: usize,
+}
+
+
+struct Active_Stack
+{
+    stack_count: usize,
+    stack: [Ui_id; 8],
+}
+
+
 static mut cursor: Cursor = Cursor {x: 1, y: 1, stack_count: 0, save_stack: [(1, 1); 8]};
 static mut last_input: u16 = 0;
-static mut active: bool = false;
+
+static mut hot: Ui_id = Ui_id {owner: 0, item: Ui_kind::None, index: 0};
+static mut active: Active_Stack = Active_Stack {stack_count: 0, stack: [Ui_id {owner: 0, item: Ui_kind::None, index: 0}; 8]} ;
+
+fn push_active(id: Ui_id)
+{
+    unsafe
+    {
+        assert!(active.stack_count < 8);
+        active.stack[active.stack_count] = id;
+        active.stack_count += 1;
+    }
+}
+
+fn pop_active() -> Ui_id
+{
+    unsafe
+    {
+        assert!(active.stack_count > 0);
+        active.stack_count -= 1;
+        return active.stack[active.stack_count];
+    }
+}
 
 
 #[derive(Debug)]
@@ -735,8 +865,8 @@ fn set_cursor_to_esc(x: i16, y: i16)
 {
     let mut x = x;
     let mut y = y;
-    if x < 1 { x = 1; } ;
-    if y < 1 { y = 1; } ; 
+    if x < 0 { x = 0; } ;
+    if y < 0 { y = 0; } ; 
 
     unsafe
     {
@@ -744,7 +874,7 @@ fn set_cursor_to_esc(x: i16, y: i16)
         cursor.y = y;
     }
 
-    print!("\x1b[{};{}H", y, x);
+    print!("\x1b[{};{}H", y + 1, x + 1);
 }
 
 fn render_terminal_buffer(screen: &mut Terminal_Screen)
@@ -969,7 +1099,10 @@ fn main()
             buf.reserve_exact(length);
             
             begin_ui();
-            let inside: bool = input_string_box(&mut screen, "1", buf.as_mut_slice(), length, &inputs);
+            match input_string_box(&mut screen, "1", buf.as_mut_slice(), length, 0, 0 &inputs)
+            {
+
+            }
             end_ui();
             let bottom_y = screen.height as i16 - 1;
             write_at_pos(&mut screen, &format!("pos = [ {} {} ] inside = {}, active = {}", cursor.x, cursor.y, inside, active), 0, bottom_y);
