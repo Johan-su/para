@@ -586,7 +586,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         {
             if str_buffer[i] == b'\0'
             {
-                return i + 1;
+                return i;
             }
         }
         return max_len;
@@ -599,9 +599,9 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
             move_cursor_esc(-1, 0);
         }
     }
-    fn move_right_in_input_string(max_len: i16)
+    fn move_right_in_input_string(str_buffer: &mut [u8], max_len: usize)
     {
-        if unsafe {cursor.x} < max_len
+        if unsafe {cursor.x as usize} < str_buffer_len(str_buffer, max_len)
         {
             move_cursor_esc(1, 0);
         }
@@ -628,7 +628,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
 
             assert!(loop_start > 0);
 
-            for i in loop_start..max_len
+            for i in (loop_start..max_len).rev()
             {
                 buffer[i] = buffer[i - 1];
             }
@@ -639,15 +639,14 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
     fn shift_string_left_from_index(buffer: &mut [u8], max_len: usize, index: usize)
     {
         assert!(index < max_len);
-        assert!(index != 0);
 
 
         let str_len = str_buffer_len(buffer, max_len); 
-
-        if str_len < max_len
+        assert!(str_len > 0);
+        
         {
 
-            for i in index..max_len
+            for i in index..str_len - 1
             {
                 buffer[i] = buffer[i + 1];
             }
@@ -661,8 +660,8 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         let cx = unsafe {cursor.x} as usize;
         let cy = unsafe {cursor.y} as usize;
 
-        let bx: bool = cx >= x && cx <= x + width;
-        let by: bool = cy >= y && cy <= y + height;
+        let bx: bool = cx >= x && cx < x + width;
+        let by: bool = cy >= y && cy < y + height;
 
         return bx && by;
     }
@@ -683,7 +682,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         }
         else if inputs.key_val == VK_RIGHT
         {
-            move_right_in_input_string(max_len as i16);
+            move_right_in_input_string(str_buffer, max_len);
         }
         else if inputs.key_val == VK_ESCAPE
         {
@@ -697,41 +696,53 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         }
         else if inputs.key_val == VK_BACK
         {
-            if unsafe {cursor.x} - (x as i16) > 0 as i16
+            let x_in_str = unsafe {cursor.x} as usize - x;
+            if x_in_str > 0
             {
-                shift_string_left_from_index(str_buffer, max_len, unsafe {cursor.x} as usize - x);
-                write_string_at_pos(screen, &('\0').to_string(), unsafe {cursor.x}, unsafe {cursor.y});
+                if x_in_str < max_len
+                {
+                    shift_string_left_from_index(str_buffer, max_len, x_in_str - 1);
+                }
+                else 
+                {
+                    str_buffer[max_len - 1] = b'\0';    
+                }
                 move_cursor_esc(-1, 0);
             }
         }
         else if inputs.key_val >= 'A' as u16 && inputs.key_val <= 'Z' as u16
         {
-            if unsafe {cursor.x} - (x as i16) < max_len as i16
+            if unsafe {cursor.x} - (x as i16) < max_len as i16 && str_buffer_len(str_buffer, max_len) != max_len
             {
-                let typed_char: String = 
+                let typed_char: char = 
                 {
                     if inputs.SHIFT_PRESSED
                     {
-                        (inputs.key_val as u8 as char).to_string()
+                        inputs.key_val as u8 as char
                     }
                     else 
                     {
-                        (inputs.key_val as u8 as char).to_ascii_lowercase().to_string()
+                        (inputs.key_val as u8 as char).to_ascii_lowercase()
                     }
                 };
+
+                let x_in_str = unsafe {cursor.x} as usize - x;
                 
-                shift_string_right_from_index(str_buffer, max_len, unsafe {cursor.x} as usize - x);
-                write_string_at_pos(screen, &typed_char, unsafe {cursor.x}, unsafe {cursor.y});
+
+                shift_string_right_from_index(str_buffer, max_len, x_in_str);
+                str_buffer[x_in_str] = typed_char as u8;
                 move_cursor_esc(1, 0);
             }
 
         }
         else if inputs.key_val >= '0' as u16 && inputs.key_val <= '9' as u16
         {
-            if unsafe {cursor.x} - (x as i16) < max_len as i16
+            if unsafe {cursor.x} - (x as i16) < max_len as i16 && str_buffer_len(str_buffer, max_len) != max_len
             {
+                let x_in_str = unsafe {cursor.x} as usize - x;
+
                 shift_string_right_from_index(str_buffer, max_len, unsafe {cursor.x} as usize - x);
-                write_string_at_pos(screen, &(inputs.key_val as u8 as char).to_string(), unsafe {cursor.x}, unsafe {cursor.y});
+                str_buffer[x_in_str] = inputs.key_val as u8;
                 move_cursor_esc(1, 0);
             }
         }
@@ -743,7 +754,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         {
             push_active(unsafe {hot});
             begin_esc();
-            set_cursor_to_esc(x as i16 + 1, y as i16 + 1);
+            set_cursor_to_esc((x + str_buffer_len(str_buffer, max_len)) as i16, y as i16 + 1);
             end_esc();
         }
     }
@@ -758,15 +769,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         }   
     }
 
-    let mut str: String = String::new();
-    for _ in 0..width
-    {
-        str += "-"; 
-    }
-
-
     let mut value_str: &str = ""; 
-    
     match std::str::from_utf8(&str_buffer)
     {
         Ok(x) => value_str = x,
@@ -776,12 +779,14 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
     
     
     assert!(max_len <= i16::MAX as usize);
-    write_string_at_pos(screen, &str, x as i16, y as i16);
+    for i in 0..width
+    {
+        write_char_at_pos(screen, '-', (x + i) as i16, y as i16);
+        write_char_at_pos(screen, '-', (x + i) as i16, (y + 2) as i16);
+    }
     write_string_at_pos(screen, &value_str.to_string(), x as i16, (y + 1) as i16);
-    write_string_at_pos(screen, &str, x as i16, (y + 2) as i16);
 
     return Input_Box_Actions::None;
-    
 }
 
 fn get_cursor_position_esc() -> (i16, i16)
@@ -924,17 +929,6 @@ fn render_terminal_buffer(screen: &mut Terminal_Screen)
     clear_screen_esc();
     end_esc();
 
-    write_char_at_pos(screen, '0', 0, 0);
-    write_char_at_pos(screen, '1', 1, 1);
-    write_char_at_pos(screen, '2', 2, 2);
-    write_char_at_pos(screen, '3', 3, 3);
-    write_char_at_pos(screen, '4', 4, 4);
-    write_char_at_pos(screen, '5', 5, 5);
-    write_char_at_pos(screen, '6', 6, 6);
-    write_char_at_pos(screen, '7', 7, 7);
-    write_char_at_pos(screen, '8', 8, 8);
-    write_char_at_pos(screen, '9', 9, 9);
-
 
     for y in 0..screen.height
     {
@@ -1001,6 +995,9 @@ fn write_string_at_pos(screen: &mut Terminal_Screen, str: &String, x: i16, y: i1
         screen.buffer[start_pos + i] = str_slice[i] as char;
     }
 }
+
+//TODO(Johan): add better support for unicode
+//TODO(Johan): fix bug when pressing backspace at index 0
 
 fn get_console_input() -> Input
 {
@@ -1099,6 +1096,19 @@ fn main()
         let mut w: SHORT = 0;
         let mut h: SHORT = 0;
 
+        let mut buf1: Vec<u8> = Vec::new();
+        const length: usize = 16;
+        buf1.reserve_exact(length);
+        for i in 0..length
+        {
+            buf1.insert(i, 0);
+        }
+        let mut buf2: Vec<u8> = Vec::new();
+        buf2.reserve_exact(length);
+        for i in 0..length
+        {
+            buf2.insert(i, 0);
+        }
         // let mut input_box_count: usize = 1; 
         loop
         {
@@ -1157,18 +1167,20 @@ fn main()
                 }
             }
             
-            
-            
-            let mut buf: Vec<u8> = Vec::new();
-            const length: usize = 16;
-            buf.reserve_exact(length);
-            for i in 0..length
-            {
-                buf.insert(i, 0);
-            }
-            
+
+            // hot = Ui_id {owner: 0, item: Ui_kind::None, index: 0};
+
+                    
             begin_ui();
-            match input_string_box(&mut screen, "my_first_text_box", buf.as_mut_slice(), length, 0, 1, &inputs)
+            match input_string_box(&mut screen, "my_1_text_box", buf1.as_mut_slice(), length, 0, 0, &inputs)
+            {
+                Input_Box_Actions::None => {},
+                Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER => 
+                {
+
+                }
+            }
+            match input_string_box(&mut screen, "my_2_text_box", buf2.as_mut_slice(), length, 0, 4, &inputs)
             {
                 Input_Box_Actions::None => {},
                 Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER => 
