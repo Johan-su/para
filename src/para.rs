@@ -491,6 +491,7 @@ enum Mode
 
 fn begin_esc() -> bool
 {
+    unsafe {debug_escape = true};
     let console: HANDLE = unsafe {GetStdHandle(STD_OUTPUT_HANDLE)};
 
     let mut mode: DWORD = 0;
@@ -508,6 +509,7 @@ fn begin_esc() -> bool
 
 fn end_esc() -> bool
 {
+    unsafe {debug_escape = false};
     io::stdout().flush().unwrap();
     let console: HANDLE = unsafe {GetStdHandle(STD_OUTPUT_HANDLE)};
     let mut mode: DWORD = 0;
@@ -574,9 +576,9 @@ enum Input_Box_Actions
     LEAVE_WITH_ESCAPE,
 }
 
+
 fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str_buffer: &mut [u8], max_len: usize, x: usize, y: usize, inputs: &Input) -> Input_Box_Actions
 {
-
     fn str_buffer_len(str_buffer: &mut [u8], max_len: usize) -> usize
     {
         assert!(str_buffer.len() == max_len);
@@ -668,8 +670,6 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
 
 
 
-
-
     let height = 3;
     let width = max_len;
 
@@ -700,7 +700,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
             if unsafe {cursor.x} - (x as i16) > 0 as i16
             {
                 shift_string_left_from_index(str_buffer, max_len, unsafe {cursor.x} as usize - x);
-                write_at_pos(screen, &('\0').to_string(), unsafe {cursor.x}, unsafe {cursor.y});
+                write_string_at_pos(screen, &('\0').to_string(), unsafe {cursor.x}, unsafe {cursor.y});
                 move_cursor_esc(-1, 0);
             }
         }
@@ -721,7 +721,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
                 };
                 
                 shift_string_right_from_index(str_buffer, max_len, unsafe {cursor.x} as usize - x);
-                write_at_pos(screen, &typed_char, unsafe {cursor.x}, unsafe {cursor.y});
+                write_string_at_pos(screen, &typed_char, unsafe {cursor.x}, unsafe {cursor.y});
                 move_cursor_esc(1, 0);
             }
 
@@ -731,7 +731,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
             if unsafe {cursor.x} - (x as i16) < max_len as i16
             {
                 shift_string_right_from_index(str_buffer, max_len, unsafe {cursor.x} as usize - x);
-                write_at_pos(screen, &(inputs.key_val as u8 as char).to_string(), unsafe {cursor.x}, unsafe {cursor.y});
+                write_string_at_pos(screen, &(inputs.key_val as u8 as char).to_string(), unsafe {cursor.x}, unsafe {cursor.y});
                 move_cursor_esc(1, 0);
             }
         }
@@ -773,12 +773,12 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         Err(_) => {}
     }
     
-
+    
     
     assert!(max_len <= i16::MAX as usize);
-    write_at_pos(screen, &str, x as i16, y as i16);
-    write_at_pos(screen, &value_str.to_string(), x as i16, (y + ((height - 1) / 2)) as i16);
-    write_at_pos(screen, &str, x as i16, (y + (height - 1)) as i16);
+    write_string_at_pos(screen, &str, x as i16, y as i16);
+    write_string_at_pos(screen, &value_str.to_string(), x as i16, (y + 1) as i16);
+    write_string_at_pos(screen, &str, x as i16, (y + 2) as i16);
 
     return Input_Box_Actions::None;
     
@@ -833,6 +833,8 @@ static mut cursor: Cursor = Cursor {x: 0, y: 0, stack_count: 0, save_stack: [(0,
 static mut hot: Ui_id = Ui_id {owner: 0, item: Ui_kind::None, index: 0};
 static mut active: Active_Stack = Active_Stack {stack_count: 0, stack: [Ui_id {owner: 0, item: Ui_kind::None, index: 0}; 8]} ;
 
+static mut debug_escape: bool = false;
+
 fn push_active(id: Ui_id)
 {
     unsafe
@@ -875,12 +877,14 @@ fn save_cursor_position()
 
 fn move_cursor_esc(x: i16, y: i16)
 {
+    assert!(unsafe {debug_escape});
     unsafe {set_cursor_to_esc(cursor.x + x, cursor.y + y)};
 }
 
 
 fn restore_cursor_position_esc()
 {
+    assert!(unsafe {debug_escape});
     unsafe
     {
         assert!(cursor.stack_count > 0);
@@ -892,11 +896,13 @@ fn restore_cursor_position_esc()
 
 fn clear_screen_esc()
 {
+    assert!(unsafe {debug_escape});
     print!("\x1b[2J");
 }
 
 fn set_cursor_to_esc(x: i16, y: i16)
 {
+    assert!(unsafe {debug_escape});
     let mut x = x;
     let mut y = y;
     if x < 0 { x = 0; } ;
@@ -913,33 +919,62 @@ fn set_cursor_to_esc(x: i16, y: i16)
 
 fn render_terminal_buffer(screen: &mut Terminal_Screen)
 {
-    begin_esc();
     save_cursor_position();
-    set_cursor_to_esc(0, 0);
+    begin_esc();
     clear_screen_esc();
     end_esc();
 
+    write_char_at_pos(screen, '0', 0, 0);
+    write_char_at_pos(screen, '1', 1, 1);
+    write_char_at_pos(screen, '2', 2, 2);
+    write_char_at_pos(screen, '3', 3, 3);
+    write_char_at_pos(screen, '4', 4, 4);
+    write_char_at_pos(screen, '5', 5, 5);
+    write_char_at_pos(screen, '6', 6, 6);
+    write_char_at_pos(screen, '7', 7, 7);
+    write_char_at_pos(screen, '8', 8, 8);
+    write_char_at_pos(screen, '9', 9, 9);
 
 
     for y in 0..screen.height
     {
+        begin_esc();
+        set_cursor_to_esc(0, y as i16);
+        end_esc();
         let row = y * screen.width;
         for x in 0..screen.width
         {
             let char_pos = x + row;
-
-            print!("{}", screen.buffer[char_pos]);
+            let char_val = screen.buffer[char_pos];
+            if char_val == '\0'
+            {
+                print!(" ");
+            }
+            else 
+            {
+                print!("{}", char_val);
+            }
         }
-        begin_esc();
-        set_cursor_to_esc(0, y as i16);
-        end_esc();
+
     }
     begin_esc();
     restore_cursor_position_esc();
     end_esc();
 }
 
-fn write_at_pos(screen: &mut Terminal_Screen, str: &String, x: i16, y: i16)
+#[inline(always)]
+fn write_char_at_pos(screen: &mut Terminal_Screen, character: char, x: i16, y: i16)
+{
+    assert!(x >= 0);
+    assert!(y >= 0);
+    assert!((x as usize) < screen.width);
+    assert!((y as usize) < screen.height);
+
+    screen.buffer[x as usize + y as usize * screen.width] = character;
+}
+
+
+fn write_string_at_pos(screen: &mut Terminal_Screen, str: &String, x: i16, y: i16)
 {
     assert!(x >= 0);
     assert!(y >= 0);
@@ -1127,9 +1162,13 @@ fn main()
             let mut buf: Vec<u8> = Vec::new();
             const length: usize = 16;
             buf.reserve_exact(length);
+            for i in 0..length
+            {
+                buf.insert(i, 0);
+            }
             
             begin_ui();
-            match input_string_box(&mut screen, "my_first_text_box", buf.as_mut_slice(), length, 5, 5, &inputs)
+            match input_string_box(&mut screen, "my_first_text_box", buf.as_mut_slice(), length, 0, 1, &inputs)
             {
                 Input_Box_Actions::None => {},
                 Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER => 
@@ -1139,7 +1178,7 @@ fn main()
             }
             end_ui();
             let bottom_y = screen.height as i16 - 1;
-            write_at_pos(&mut screen, &format!("pos = [ {} {} ] inside = {:?}, active = {:?}", cursor.x, cursor.y, hot.item, active), 0, bottom_y);
+            write_string_at_pos(&mut screen, &format!("pos=[{} {}] inside={:?}, active = {:?}", cursor.x, cursor.y, hot.item, active), 0, bottom_y);
             
             if active.stack_count == 0
             {
