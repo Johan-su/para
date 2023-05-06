@@ -8,10 +8,7 @@ mod win_header;
 
 use core::ffi::c_void;
 use std::collections::HashMap;
-use std::fs::File;
 use std::io;
-use std::io::BufReader;
-use std::io::Read;
 use std::mem::transmute;
 use std::process::exit;
 use std::io::Write;
@@ -531,26 +528,12 @@ unsafe fn revert_console(out_console: HANDLE, in_console: HANDLE, old_out_mode: 
     SetConsoleMode(in_console, old_in_mode);
 }
 
-
-
-fn begin_ui()
-{
-    begin_esc();
-    // clear_screen_esc();
-    end_esc();
-}
-
-fn end_ui()
-{
-}
-
-
 fn str_as_usize(str: &'static str) -> usize
 {
     return str as *const str as *const () as usize;
 }
 
-fn is_active(unique_str: &'static str) -> bool
+fn is_active(unique_id: usize) -> bool
 {
     unsafe 
     {
@@ -558,13 +541,13 @@ fn is_active(unique_str: &'static str) -> bool
         {
             return false;
         }
-        return active.stack[active.stack_count - 1].index == str_as_usize(unique_str);
+        return active.stack[active.stack_count - 1].index == unique_id;
     }
 }
 
-fn is_hot(unique_str: &'static str) -> bool
+fn is_hot(unique_id: usize) -> bool
 {
-    return unsafe {hot.index} == str_as_usize(unique_str);
+    return unsafe {hot.index} == unique_id;
 }   
 
 // https://www.youtube.com/watch?v=Z1qyvQsjK5Y
@@ -577,7 +560,7 @@ enum Input_Box_Actions
 }
 
 
-fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str_buffer: &mut [char], max_len: usize, x: usize, y: usize, inputs: &Input) -> Input_Box_Actions
+fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: &mut [char], max_len: usize, x: usize, y: usize, inputs: &Input) -> Input_Box_Actions
 {
     fn str_buffer_len(str_buffer: &mut [char], max_len: usize) -> usize
     {
@@ -673,7 +656,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
     let width = max_len;
 
 
-    if is_active(unique_name) 
+    if is_active(unique_id) 
     {
         begin_esc();
         if inputs.key_val == VK_LEFT
@@ -722,7 +705,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         }
         end_esc();
     }
-    else if is_hot(unique_name) 
+    else if is_hot(unique_id) 
     {
         if inputs.key_val == 'A' as u16
         {
@@ -739,13 +722,10 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         {
             hot.owner = hot.index;
             hot.item = Ui_kind::INPUT_TEXT;
-            hot.index = str_as_usize(unique_name);
+            hot.index = unique_id;
         }   
     }
 
-    let value_str: String = str_buffer.iter().collect();
-    
-    
     
     assert!(max_len <= i16::MAX as usize);
     for i in 0..width
@@ -753,7 +733,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         write_char_at_pos(screen, '-', (x + i) as i16, y as i16);
         write_char_at_pos(screen, '-', (x + i) as i16, (y + 2) as i16);
     }
-    write_string_at_pos(screen, &value_str, x as i16, (y + 1) as i16);
+    write_string_at_pos(screen, str_buffer, x as i16, (y + 1) as i16);
 
     return Input_Box_Actions::None;
 }
@@ -937,7 +917,7 @@ fn write_char_at_pos(screen: &mut Terminal_Screen, character: char, x: i16, y: i
 }
 
 
-fn write_string_at_pos(screen: &mut Terminal_Screen, str: &String, x: i16, y: i16)
+fn write_string_at_pos(screen: &mut Terminal_Screen, str: &[char], x: i16, y: i16)
 {
     assert!(x >= 0);
     assert!(y >= 0);
@@ -957,15 +937,12 @@ fn write_string_at_pos(screen: &mut Terminal_Screen, str: &String, x: i16, y: i1
         normalized_len = screen.width - 1 - x as usize;
     }
 
-    let str_slice: &[u8] = str.as_bytes();
-
     for i in 0..normalized_len
     {
-        screen.buffer[start_pos + i] = str_slice[i] as char;
+        screen.buffer[start_pos + i] = str[i];
     }
 }
 
-//TODO(Johan): add better support for unicode
 //TODO(Johan): fix bug when pressing backspace at index 0
 //TODO(Johan): maybe switch to ReadConsoleInputEx to avoid a blocking input
 
@@ -1027,21 +1004,65 @@ struct Input
     SHIFT_PRESSED: bool,
 }
 
+static mut terminal_x: SHORT = 0;
+static mut terminal_y: SHORT = 0;
+static mut terminal_w: SHORT = 0;
+static mut terminal_h: SHORT = 0;
+fn get_terminal_screen() -> Terminal_Screen
+{
+    unsafe 
+    {
+        let stdout: HANDLE = GetStdHandle(STD_OUTPUT_HANDLE);
+        let mut screen_buf_info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::zeroed();
+        if GetConsoleScreenBufferInfo(stdout, &mut screen_buf_info as PCONSOLE_SCREEN_BUFFER_INFO) == FALSE
+        {
+            eprintln!("ERROR: GetConsoleScreenBufferInfo {}", GetLastError());
+            exit(-1);
+        }
+
+        let new_x = screen_buf_info.srWindow.Left;
+        let new_y = screen_buf_info.srWindow.Top;
+        let new_w = screen_buf_info.srWindow.Right - screen_buf_info.srWindow.Left;
+        let new_h = screen_buf_info.srWindow.Bottom - screen_buf_info.srWindow.Top;
+    
+        if terminal_x != new_x || terminal_y != new_y || terminal_w != new_w || terminal_h != new_h
+        {
+            terminal_x = new_x;
+            terminal_y = new_y;
+            terminal_w = new_w;
+            terminal_h = new_h;
+            // println!("terminal terminal_x = {}, terminal_y = {}, terminal_w = {}, terminal_h = {}", terminal_x, terminal_y, terminal_w, terminal_h);
+        }
+    
+        let buffer_length = (terminal_w * terminal_h) as usize;
+        let width = terminal_w as usize;
+        let height = terminal_h as usize;
+        let mut terminal_screen_buffer: Vec<char> = Vec::new();
+        terminal_screen_buffer.reserve(buffer_length);
+        for _ in 0..buffer_length
+        {
+            terminal_screen_buffer.insert(0, '\0');
+        }
+        return Terminal_Screen { buffer: (terminal_screen_buffer), width: (width), height: (height)}
+    }
+}
+
 fn main()
 {
-
     let mut old_stdin_mode: DWORD = 0;
     let mut old_stdout_mode: DWORD = 0;
+    let mut stdin: HANDLE;
+    let mut stdout: HANDLE;
 
     unsafe
     {
-        let stdin: HANDLE = GetStdHandle(STD_INPUT_HANDLE);
+        stdin = GetStdHandle(STD_INPUT_HANDLE);
         if stdin == INVALID_HANDLE_VALUE
         {
             exit(420);
         }
 
-        let stdout: HANDLE = GetStdHandle(STD_OUTPUT_HANDLE);
+        stdout = GetStdHandle(STD_OUTPUT_HANDLE);
         if stdout == INVALID_HANDLE_VALUE
         {
             exit(420);
@@ -1054,75 +1075,77 @@ fn main()
         {
             exit(421);
         }
-        
-        
-        begin_esc();
-        // change to alternate buffer
-        print!("\x1b[?1049h");
-        set_cursor_to_esc(0, 0);
-        end_esc();
+    }
 
-        
-        let mut x: SHORT = 0;
-        let mut y: SHORT = 0;
-        let mut w: SHORT = 0;
-        let mut h: SHORT = 0;
+    let bnf_src = include_str!("bnf.txt");
 
-        let mut buf1: Vec<char> = Vec::new();
-        const length: usize = 16;
-        buf1.reserve_exact(length);
-        for i in 0..length
+
+    let mut table: [u8; 10000] = [0; 10000];
+    let table_size_diff: u32 = unsafe {write_parse_table_from_bnf(&mut table as *mut u8 as *mut c_void, 10000, bnf_src.as_ptr() as *const i8)};
+    if table_size_diff != 0
+    {
+        println!("failed to read table {}", table_size_diff);
+        return;
+    }
+
+
+
+
+
+
+    let mut predefined_functions: HashMap<&str, fn(f64) -> f64> = HashMap::new();
+
+    predefined_functions.insert("sin", f64::sin);
+    predefined_functions.insert("cos", f64::cos);
+    predefined_functions.insert("tan", f64::tan);
+
+    predefined_functions.insert("asin", f64::asin);
+    predefined_functions.insert("acos", f64::acos);
+    predefined_functions.insert("atan", f64::atan);
+
+    predefined_functions.insert("sqrt", f64::sqrt);
+    predefined_functions.insert("cbrt", f64::cbrt);
+
+    predefined_functions.insert("exp", f64::exp);
+
+    predefined_functions.insert("ln", f64::ln);
+    predefined_functions.insert("log2", f64::log2);
+    predefined_functions.insert("log10", f64::log10);
+
+    predefined_functions.insert("floor", f64::floor);
+    predefined_functions.insert("ceil", f64::ceil);
+    
+    predefined_functions.insert("abs", f64::abs);
+
+
+    const length: usize = 32;
+    const buffer_count: usize = 3;
+    let mut buffers: [([char; length], Vec<ParseToken>); buffer_count];
+    unsafe 
+    {
+        buffers = std::mem::zeroed();
+        for i in 0..buffer_count
         {
-            buf1.insert(i, '\0');
+            buffers[i] = (['\0'; length], Vec::new());
         }
-        let mut buf2: Vec<char> = Vec::new();
-        buf2.reserve_exact(length);
-        for i in 0..length
-        {
-            buf2.insert(i, '\0');
-        }
-        // let mut input_box_count: usize = 1;
+
+    }
+
+    let mut expr: *mut Expr = 0 as *mut Expr;
+    let mut msg: [u8; 1000] = [0; 1000];
+
+    begin_esc();
+    // change to alternate buffer
+    print!("\x1b[?1049h");
+    set_cursor_to_esc(0, 0);
+    end_esc();
+
+    unsafe
+    {
         loop
         {
-            let mut screen: Terminal_Screen;
-            {
-                let mut screen_buf_info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::zeroed();
-                if GetConsoleScreenBufferInfo(stdout, &mut screen_buf_info as PCONSOLE_SCREEN_BUFFER_INFO) == FALSE
-                {
-                    eprintln!("ERROR: GetConsoleScreenBufferInfo {}", GetLastError());
-                    exit(-1);
-                }
-                
-    
-                let new_x = screen_buf_info.srWindow.Left;
-                let new_y = screen_buf_info.srWindow.Top;
-                let new_w = screen_buf_info.srWindow.Right - screen_buf_info.srWindow.Left;
-                let new_h = screen_buf_info.srWindow.Bottom - screen_buf_info.srWindow.Top;
-    
-                if x != new_x || y != new_y || w != new_w || h != new_h
-                {
-                    x = new_x;
-                    y = new_y;
-                    w = new_w;
-                    h = new_h;
-                    // println!("terminal x = {}, y = {}, w = {}, h = {}", x, y, w, h);
-                }
-
-                let buffer_length = (w * h) as usize;
-                let width = w as usize;
-                let height = h as usize;
-                let mut terminal_screen_buffer: Vec<char> = Vec::new();
-                terminal_screen_buffer.reserve(buffer_length);
-                for _ in 0..buffer_length
-                {
-                    terminal_screen_buffer.insert(0, '\0');
-                }
-                screen = Terminal_Screen { buffer: (terminal_screen_buffer), width: (width), height: (height) };
-            }
-            
-            
+            let mut screen = get_terminal_screen();
             let inputs: Input = get_console_input();
-            
             
             if inputs.key_val == 'Q' as u16
             {
@@ -1139,31 +1162,35 @@ fn main()
                 }
             }
             
-
-            // hot = Ui_id {owner: 0, item: Ui_kind::None, index: 0};
-
-                    
-            begin_ui();
-            match input_string_box(&mut screen, "my_1_text_box", buf1.as_mut_slice(), length, 0, 0, &inputs)
+            for i in 0..buffer_count
             {
-                Input_Box_Actions::None => {},
-                Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER => 
+                match input_string_box(&mut screen, str_as_usize("my_text_box") + i, buffers[i].0.as_mut_slice(), length, 0, i * 3, &inputs)
                 {
-
+                    Input_Box_Actions::None => {},
+                    Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER => 
+                    {
+                        let success: bool = parse_bin(buffers[i].1.as_mut_ptr(), buffers[i].1.len() as u32, 
+                            table.as_mut_ptr(), 0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000);
+                        if success
+                        {
+                            graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr);
+                            
+                            // print_tree(expr);
+                            add_declarations_if_needed_and_run(expr, &mut map, &predefined_functions);
+                        }
+                    }
                 }
             }
-            match input_string_box(&mut screen, "my_2_text_box", buf2.as_mut_slice(), length, 0, 4, &inputs)
-            {
-                Input_Box_Actions::None => {},
-                Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER => 
-                {
-
-                }
-            }
-            end_ui();
             let bottom_y = screen.height as i16 - 1;
-            write_string_at_pos(&mut screen, &format!("pos=[{} {}] key={}, code={}, inside={:?}, active = {:?}", cursor.x, cursor.y, char::from_u32_unchecked(inputs.unicode_char.into()), inputs.unicode_char, hot.item, active), 0, bottom_y);
-            
+            let format_string: Vec<char> = format!("pos=[{} {}] unicode_u16={}, inside={:?}, active={:?}", 
+                cursor.x, 
+                cursor.y, 
+                inputs.unicode_char, 
+                hot.item,
+                active).chars().collect::<Vec<char>>();            
+
+            write_string_at_pos(&mut screen, format_string.as_slice(), 0, bottom_y);
+
             if active.stack_count == 0
             {
                 if inputs.key_val == VK_UP
@@ -1224,58 +1251,6 @@ fn main()
 
 fn main2()
 {
-
-    let mut bnf_src: Vec<u8>;
-    {
-        let file = File::open("./src/bnf.txt").unwrap();
-        let mut buf_reader = BufReader::new(file);
-        let mut bnf: String = String::new();
-        buf_reader.read_to_string(&mut bnf).unwrap();
-        bnf_src = bnf.into_bytes();
-        bnf_src.push(0);
-    }
-
-
-
-    let mut table: [u8; 10000] = [0; 10000];
-    let table_size: u32 = unsafe {write_parse_table_from_bnf(&mut table as *mut u8 as *mut c_void, 10000, bnf_src.as_ptr() as *const i8)};
-    if table_size != 0
-    {
-        println!("failed to read table {}", table_size);
-        return;
-    }
-
-
-    let mut expr: *mut Expr = 0 as *mut Expr;
-    let mut msg: [u8; 1000] = [0; 1000];
-
-
-
-    let mut predefined_functions: HashMap<Vec<char>, fn(f64) -> f64> = HashMap::new();
-
-    predefined_functions.insert("sin".chars().collect(), f64::sin);
-    predefined_functions.insert("cos".chars().collect(), f64::cos);
-    predefined_functions.insert("tan".chars().collect(), f64::tan);
-
-    predefined_functions.insert("asin".chars().collect(), f64::asin);
-    predefined_functions.insert("acos".chars().collect(), f64::acos);
-    predefined_functions.insert("atan".chars().collect(), f64::atan);
-
-    predefined_functions.insert("sqrt".chars().collect(), f64::sqrt);
-    predefined_functions.insert("cbrt".chars().collect(), f64::cbrt);
-
-    predefined_functions.insert("exp".chars().collect(), f64::exp);
-
-    predefined_functions.insert("ln".chars().collect(), f64::ln);
-    predefined_functions.insert("log2".chars().collect(), f64::log2);
-    predefined_functions.insert("log10".chars().collect(), f64::log10);
-
-    predefined_functions.insert("floor".chars().collect(), f64::floor);
-    predefined_functions.insert("ceil".chars().collect(), f64::ceil);
-    
-    predefined_functions.insert("abs".chars().collect(), f64::abs);
-
-
     let mut map: HashMap<Vec<char>, Symbol> = HashMap::new();
 
     let mut byte_vectors: Vec<Vec<u8>> = Vec::new();
@@ -1286,14 +1261,6 @@ fn main2()
 
     loop 
     { 
-        let mut read_str = String::new();
-        io::stdin().read_line(&mut read_str).unwrap();
-        read_str = read_str.trim_end().to_string();
-
-        if read_str.as_str() == "q"
-        {
-            break;
-        }
         let mut token_list: Vec<ParseToken> = Vec::new();
         assert_ne!(i, size);
         byte_vectors.insert(i, read_str.as_bytes().to_vec()); 
@@ -1312,10 +1279,7 @@ fn main2()
         if success
         {
             i += 1;
-            unsafe {graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr)};
-            
-            // unsafe {print_tree(expr)};
-            unsafe {add_declarations_if_needed_and_run(expr, &mut map, &predefined_functions)};
+
 
 
         }
