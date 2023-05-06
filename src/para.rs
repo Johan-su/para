@@ -337,7 +337,7 @@ impl PartialEq for C_String
 }
 
 
-fn string_to_tokens<'a>(arg: &'a [u8], out: &'a mut Vec<ParseToken>) -> Result<(), &'static str>
+fn string_to_tokens<'a>(arg: &'a [char], out: &'a mut Vec<ParseToken>) -> Result<(), &'static str>
 {
     let token_list = out;
     {
@@ -351,7 +351,7 @@ fn string_to_tokens<'a>(arg: &'a [u8], out: &'a mut Vec<ParseToken>) -> Result<(
                 {
                     count += 1;
                 }
-                token_list.push(ParseToken {token_type: LR_Type::TokenId as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: count as u32});
+                token_list.push(ParseToken {token_type: LR_Type::TokenId as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: count as u32, stride: 4});
                 i += count as usize - 1;
             }
             else if arg[i].is_ascii_digit()
@@ -361,20 +361,20 @@ fn string_to_tokens<'a>(arg: &'a [u8], out: &'a mut Vec<ParseToken>) -> Result<(
                 {
                     count += 1;
                 }
-                token_list.push(ParseToken {token_type: LR_Type::TokenNumber as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: count as u32});
+                token_list.push(ParseToken {token_type: LR_Type::TokenNumber as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: count as u32, stride: 4});
                 i += count as usize - 1;
             }
             else
             {
                 match arg[i] as char
                 {
-                    '+' => token_list.push(ParseToken {token_type: LR_Type::TokenPlus as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    '-' => token_list.push(ParseToken {token_type: LR_Type::TokenMinus as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    '*' => token_list.push(ParseToken {token_type: LR_Type::TokenTimes as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    '/' => token_list.push(ParseToken {token_type: LR_Type::TokenDivide as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    '=' => token_list.push(ParseToken {token_type: LR_Type::TokenEquals as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    '(' => token_list.push(ParseToken {token_type: LR_Type::TokenOpen as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
-                    ')' => token_list.push(ParseToken {token_type: LR_Type::TokenClose as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1}),
+                    '+' => token_list.push(ParseToken {token_type: LR_Type::TokenPlus as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    '-' => token_list.push(ParseToken {token_type: LR_Type::TokenMinus as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    '*' => token_list.push(ParseToken {token_type: LR_Type::TokenTimes as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    '/' => token_list.push(ParseToken {token_type: LR_Type::TokenDivide as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    '=' => token_list.push(ParseToken {token_type: LR_Type::TokenEquals as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    '(' => token_list.push(ParseToken {token_type: LR_Type::TokenOpen as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    ')' => token_list.push(ParseToken {token_type: LR_Type::TokenClose as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
                     ' ' => {}
                     '\n' => {}
                     '\r' => {}
@@ -384,7 +384,7 @@ fn string_to_tokens<'a>(arg: &'a [u8], out: &'a mut Vec<ParseToken>) -> Result<(
             }
             i += 1;
         }
-        token_list.push(ParseToken {token_type: LR_Type::TokenEnd as i64, data: 0 as *const i8, length: 0});
+        token_list.push(ParseToken {token_type: LR_Type::TokenEnd as i64, data: 0 as *const i8, length: 0, stride: 4});
     }
     return Ok(());
 }
@@ -1102,9 +1102,6 @@ fn get_terminal_screen() -> Terminal_Screen
 
 fn main()
 {
-
-    println!("{}", std::mem::size_of::<char>());
-    return;
     let mut old_stdin_mode: DWORD = 0;
     let mut old_stdout_mode: DWORD = 0;
     let stdin: HANDLE;
@@ -1172,12 +1169,14 @@ fn main()
 
     const length: usize = 32;
     const buffer_count: usize = 3;
-    let mut buffers: Vec<([u8; 32], Vec<ParseToken>)> = Vec::new();
-    buffers.reserve_exact(buffer_count);
+    let mut char_buffers: Vec<[char; 32]> = Vec::new();
+    let mut token_buffers: Vec<Vec<ParseToken>> = Vec::new();
+    char_buffers.reserve_exact(buffer_count);
+    token_buffers.reserve_exact(buffer_count);
     for _ in 0..buffer_count
     {
-        let tuple = ([0; 32], Vec::new());
-        buffers.push(tuple);
+        char_buffers.push(['\0'; 32]);
+        token_buffers.push(Vec::new());
     }
 
 
@@ -1215,16 +1214,18 @@ fn main()
 
             for i in 0..buffer_count
             {
-                match input_string_box(&mut screen, str_as_usize("my_text_box") + i, buffers[i].0.as_mut_slice(), length, 0, i * 3, &inputs)
+                match input_string_box(&mut screen, str_as_usize("my_text_box") + i, char_buffers[i].as_mut_slice(), length, 0, i * 3, &inputs)
                 {
                     Input_Box_Actions::None => {},
                     Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER => 
                     {
-                        if string_to_tokens(&buffers[i].0, &mut buffers[i].1).is_ok()
+                        if string_to_tokens(&char_buffers[i], &mut token_buffers[i]).is_ok()
                         {
                             
-                            let success: bool = parse_bin(buffers[i].1.as_mut_ptr(), buffers[i].1.len() as u32, 
+                            let success: bool = parse_bin(token_buffers[i].as_mut_ptr(), token_buffers[i].len() as u32, 
                                 table.as_mut_ptr(), 0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000);
+                            
+
                             if success
                             {
                                 graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr);
