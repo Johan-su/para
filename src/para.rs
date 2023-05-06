@@ -577,14 +577,14 @@ enum Input_Box_Actions
 }
 
 
-fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str_buffer: &mut [u8], max_len: usize, x: usize, y: usize, inputs: &Input) -> Input_Box_Actions
+fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str_buffer: &mut [char], max_len: usize, x: usize, y: usize, inputs: &Input) -> Input_Box_Actions
 {
-    fn str_buffer_len(str_buffer: &mut [u8], max_len: usize) -> usize
+    fn str_buffer_len(str_buffer: &mut [char], max_len: usize) -> usize
     {
         assert!(str_buffer.len() == max_len);
         for i in 0..max_len
         {
-            if str_buffer[i] == b'\0'
+            if str_buffer[i] == '\0'
             {
                 return i;
             }
@@ -599,7 +599,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
             move_cursor_esc(-1, 0);
         }
     }
-    fn move_right_in_input_string(str_buffer: &mut [u8], max_len: usize)
+    fn move_right_in_input_string(str_buffer: &mut [char], max_len: usize)
     {
         if unsafe {cursor.x as usize} < str_buffer_len(str_buffer, max_len)
         {
@@ -607,7 +607,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         }
     }
 
-    fn shift_string_right_from_index(buffer: &mut [u8], max_len: usize, index: usize)
+    fn shift_string_right_from_index(buffer: &mut [char], max_len: usize, index: usize)
     {
         assert!(index < max_len);
 
@@ -617,7 +617,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
             {
                 if index == 0
                 {
-                    buffer[0] = b'\0';
+                    buffer[0] = '\0';
                     1
                 }
                 else 
@@ -636,7 +636,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         }
     }
 
-    fn shift_string_left_from_index(buffer: &mut [u8], max_len: usize, index: usize)
+    fn shift_string_left_from_index(buffer: &mut [char], max_len: usize, index: usize)
     {
         assert!(index < max_len);
 
@@ -651,7 +651,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
                 buffer[i] = buffer[i + 1];
             }
         }
-        buffer[str_len - 1] = b'\0';
+        buffer[str_len - 1] = '\0';
     }
 
 
@@ -705,44 +705,18 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
                 }
                 else 
                 {
-                    str_buffer[max_len - 1] = b'\0';    
+                    str_buffer[max_len - 1] = '\0';    
                 }
                 move_cursor_esc(-1, 0);
             }
         }
-        else if inputs.key_val >= 'A' as u16 && inputs.key_val <= 'Z' as u16
+        else if inputs.unicode_char != 0 
         {
-            if unsafe {cursor.x} - (x as i16) < max_len as i16 && str_buffer_len(str_buffer, max_len) != max_len
+            let x_in_str = unsafe {cursor.x} as usize - x;
+            if x_in_str < max_len && str_buffer_len(str_buffer, max_len) != max_len
             {
-                let typed_char: char = 
-                {
-                    if inputs.SHIFT_PRESSED
-                    {
-                        inputs.key_val as u8 as char
-                    }
-                    else 
-                    {
-                        (inputs.key_val as u8 as char).to_ascii_lowercase()
-                    }
-                };
-
-                let x_in_str = unsafe {cursor.x} as usize - x;
-                
-
                 shift_string_right_from_index(str_buffer, max_len, x_in_str);
-                str_buffer[x_in_str] = typed_char as u8;
-                move_cursor_esc(1, 0);
-            }
-
-        }
-        else if inputs.key_val >= '0' as u16 && inputs.key_val <= '9' as u16
-        {
-            if unsafe {cursor.x} - (x as i16) < max_len as i16 && str_buffer_len(str_buffer, max_len) != max_len
-            {
-                let x_in_str = unsafe {cursor.x} as usize - x;
-
-                shift_string_right_from_index(str_buffer, max_len, unsafe {cursor.x} as usize - x);
-                str_buffer[x_in_str] = inputs.key_val as u8;
+                str_buffer[x_in_str] = char::from_u32(inputs.unicode_char as u32).unwrap();
                 move_cursor_esc(1, 0);
             }
         }
@@ -769,12 +743,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         }   
     }
 
-    let mut value_str: &str = ""; 
-    match std::str::from_utf8(&str_buffer)
-    {
-        Ok(x) => value_str = x,
-        Err(_) => {}
-    }
+    let value_str: String = str_buffer.iter().collect();
     
     
     
@@ -784,7 +753,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_name: &'static str, str
         write_char_at_pos(screen, '-', (x + i) as i16, y as i16);
         write_char_at_pos(screen, '-', (x + i) as i16, (y + 2) as i16);
     }
-    write_string_at_pos(screen, &value_str.to_string(), x as i16, (y + 1) as i16);
+    write_string_at_pos(screen, &value_str, x as i16, (y + 1) as i16);
 
     return Input_Box_Actions::None;
 }
@@ -998,6 +967,7 @@ fn write_string_at_pos(screen: &mut Terminal_Screen, str: &String, x: i16, y: i1
 
 //TODO(Johan): add better support for unicode
 //TODO(Johan): fix bug when pressing backspace at index 0
+//TODO(Johan): maybe switch to ReadConsoleInputEx to avoid a blocking input
 
 fn get_console_input() -> Input
 {
@@ -1020,6 +990,7 @@ fn get_console_input() -> Input
             let key_code = key_event.wVirtualKeyCode;
             if key_event.bKeyDown == TRUE
             {
+                input.unicode_char = unsafe {buf.event.KeyEvent.u_char.UnicodeChar};
                 input.key_val = key_code;
                 if key_event.dwControlKeyState == CAPSLOCK_ON {input.CAPSLOCK_ON = true}
                 if key_event.dwControlKeyState == ENHANCED_KEY {input.ENHANCED_KEY = true}
@@ -1043,6 +1014,7 @@ fn get_console_input() -> Input
 #[derive(Debug)]
 struct Input
 {
+    unicode_char: u16,
     key_val: u16,
     CAPSLOCK_ON: bool,
     ENHANCED_KEY: bool,
@@ -1096,20 +1068,20 @@ fn main()
         let mut w: SHORT = 0;
         let mut h: SHORT = 0;
 
-        let mut buf1: Vec<u8> = Vec::new();
+        let mut buf1: Vec<char> = Vec::new();
         const length: usize = 16;
         buf1.reserve_exact(length);
         for i in 0..length
         {
-            buf1.insert(i, 0);
+            buf1.insert(i, '\0');
         }
-        let mut buf2: Vec<u8> = Vec::new();
+        let mut buf2: Vec<char> = Vec::new();
         buf2.reserve_exact(length);
         for i in 0..length
         {
-            buf2.insert(i, 0);
+            buf2.insert(i, '\0');
         }
-        // let mut input_box_count: usize = 1; 
+        // let mut input_box_count: usize = 1;
         loop
         {
             let mut screen: Terminal_Screen;
@@ -1190,7 +1162,7 @@ fn main()
             }
             end_ui();
             let bottom_y = screen.height as i16 - 1;
-            write_string_at_pos(&mut screen, &format!("pos=[{} {}] inside={:?}, active = {:?}", cursor.x, cursor.y, hot.item, active), 0, bottom_y);
+            write_string_at_pos(&mut screen, &format!("pos=[{} {}] key={}, code={}, inside={:?}, active = {:?}", cursor.x, cursor.y, char::from_u32_unchecked(inputs.unicode_char.into()), inputs.unicode_char, hot.item, active), 0, bottom_y);
             
             if active.stack_count == 0
             {
