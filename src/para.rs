@@ -98,6 +98,21 @@ unsafe fn print_i8(data: *const i8, data_length: u32)
     println!();
 }
 
+unsafe fn expr_token_to_string(expr: *const Expr) -> String
+{
+    let mut vec: Vec<char> = Vec::new();
+
+    let data: *const i8 = (*expr).token.data;
+    let data_length: u32 = (*expr).token.length;
+    {
+        for i in 0..data_length
+        {
+            vec.push(*(data.offset(i as isize)) as u8 as char);
+        }
+    }
+    return vec.into_iter().collect();
+}
+
 
 unsafe fn print_expr_token(expr_token: *const Expr)
 {
@@ -337,17 +352,17 @@ impl PartialEq for C_String
 }
 
 
-fn string_to_tokens<'a>(arg: &'a [char], out: &'a mut Vec<ParseToken>) -> Result<(), &'static str>
+fn string_to_tokens<'a>(arg: &'a [char], str_len: usize, out: &'a mut Vec<ParseToken>) -> Result<(), String>
 {
     let token_list = out;
     {
         let mut i: usize = 0;
-        while i < arg.len()
+        while i < str_len
         {
             if arg[i].is_ascii_alphabetic()
             {
                 let mut count = 1;
-                while (i + count) != arg.len() && arg[i + count].is_ascii_alphanumeric()
+                while (i + count) != str_len && arg[i + count].is_ascii_alphanumeric()
                 {
                     count += 1;
                 }
@@ -357,7 +372,7 @@ fn string_to_tokens<'a>(arg: &'a [char], out: &'a mut Vec<ParseToken>) -> Result
             else if arg[i].is_ascii_digit()
             {
                 let mut count = 1;
-                while (i + count) != arg.len() && arg[i + count].is_ascii_digit()
+                while (i + count) != str_len && arg[i + count].is_ascii_digit()
                 {
                     count += 1;
                 }
@@ -379,7 +394,7 @@ fn string_to_tokens<'a>(arg: &'a [char], out: &'a mut Vec<ParseToken>) -> Result
                     '\n' => {}
                     '\r' => {}
                     '\t' => {}
-                    _ => {eprintln!("ERROR: Unknown char {}", arg[i] as char); return Err("Unknown value");}
+                    _ => return Err(format!("ERROR: Unknown char {}", arg[i]))
                 }
             }
             i += 1;
@@ -390,102 +405,175 @@ fn string_to_tokens<'a>(arg: &'a [char], out: &'a mut Vec<ParseToken>) -> Result
 }
 
 
-unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<C_String, Symbol>, predefined_funcions: &HashMap<C_String, fn(f64) -> f64>)
+unsafe fn add_var_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symbol>) -> Option<String>
 {
-    if LR_Type::ExpraltS != get_expr_token_type(expr) || (*expr).expr_count == 0
+    assert_eq!((*decl_expr).expr_count, 3);
+
+    let var_name = get_expr_in_array(decl_expr, 2);
+    let equals = get_expr_in_array(decl_expr, 1);
+    let var_expr = get_expr_in_array(decl_expr, 0);
+
+
+    assert_eq!(get_expr_token_type(var_name), LR_Type::TokenId);
+    assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
+    assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
+
+    let name_str = cstr_from_expr_token(var_name);
+    if map.insert(name_str, Symbol::Var(var_expr)).is_some()
     {
-        return;
+        return Some(format!("redefined {}", expr_token_to_string(var_name)));
+    }
+    return None;
+}
+
+unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symbol>, predefined_functions: &HashMap<C_String, fn(f64) -> f64>) -> Result<String, String>
+{
+    assert_eq!((*decl_expr).expr_count, 6);
+
+    let func_name = get_expr_in_array(decl_expr, 5);
+    let open_par = get_expr_in_array(decl_expr, 4);
+    // expr with variable instead of just Var to make parsing work
+    let var_expr = get_expr_in_array(decl_expr, 3);
+    let close_par = get_expr_in_array(decl_expr, 2);
+    let equals = get_expr_in_array(decl_expr, 1);
+    let func_expr = get_expr_in_array(decl_expr, 0);
+
+
+    assert_eq!(get_expr_token_type(func_name), LR_Type::TokenId);
+    assert_eq!(get_expr_token_type(open_par), LR_Type::TokenOpen);
+    assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
+    assert_eq!(get_expr_token_type(close_par), LR_Type::TokenClose);
+    assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
+    assert_eq!(get_expr_token_type(func_expr), LR_Type::ExprE);
+
+
+
+    let func: C_String = cstr_from_expr_token(func_name);
+
+    let var: *const Expr = get_expr_in_array(var_expr, 0);
+    if get_expr_token_type(var) != LR_Type::ExprVar
+    {
+        return Err("Function argument has to be a single variable".to_string());
+    }
+    let var_value: *const Expr = get_expr_in_array(var, 0);
+    assert_eq!(get_expr_token_type(var_value), LR_Type::TokenId);
+
+    let var_str: C_String = cstr_from_expr_token(var_value);
+
+
+    if predefined_functions.get(&func).is_some()
+    {
+        return Err("Cannot redefine predefined functions".to_string());
     }
 
-    let decl_expr = get_expr_in_array(expr, 0);
-    let token_type = get_expr_token_type(decl_expr);
-    if LR_Type::ExprVarDecl == token_type
+    if map.insert(func, Symbol::Func(Func {var_name_str: var_str, expr: func_expr})).is_some()
     {
-        assert_eq!((*decl_expr).expr_count, 3);
-
-        let var_name = get_expr_in_array(decl_expr, 2);
-        let equals = get_expr_in_array(decl_expr, 1);
-        let var_expr = get_expr_in_array(decl_expr, 0);
-
-
-        assert_eq!(get_expr_token_type(var_name), LR_Type::TokenId);
-        assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
-        assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
-
-        let name_str = cstr_from_expr_token(var_name);
-        if map.insert(name_str, Symbol::Var(var_expr)).is_some()
-        {
-            print!("redefined ");
-            print_expr_token(var_name);
-        }
-    }
-    else if LR_Type::ExprFuncDecl == token_type
-    {
-        assert_eq!((*decl_expr).expr_count, 6);
-
-        let func_name = get_expr_in_array(decl_expr, 5);
-        let open_par = get_expr_in_array(decl_expr, 4);
-        // expr with variable instead of just Var to make parsing work
-        let var_expr = get_expr_in_array(decl_expr, 3);
-        let close_par = get_expr_in_array(decl_expr, 2);
-        let equals = get_expr_in_array(decl_expr, 1);
-        let func_expr = get_expr_in_array(decl_expr, 0);
-
-
-        assert_eq!(get_expr_token_type(func_name), LR_Type::TokenId);
-        assert_eq!(get_expr_token_type(open_par), LR_Type::TokenOpen);
-        assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
-        assert_eq!(get_expr_token_type(close_par), LR_Type::TokenClose);
-        assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
-        assert_eq!(get_expr_token_type(func_expr), LR_Type::ExprE);
-
-
-
-        let func: C_String = cstr_from_expr_token(func_name);
-
-        let var: *const Expr = get_expr_in_array(var_expr, 0);
-        if get_expr_token_type(var) != LR_Type::ExprVar
-        {
-            println!("Function argument has to be a single variable");
-            return;
-        }
-        let var_value: *const Expr = get_expr_in_array(var, 0);
-        assert_eq!(get_expr_token_type(var_value), LR_Type::TokenId);
-
-        let var_str: C_String = cstr_from_expr_token(var_value);
-
-
-        if predefined_funcions.get(&func).is_some()
-        {
-            println!("Cannot redefine predefined functions");
-            return;
-        }
-
-        if map.insert(func, Symbol::Func(Func {var_name_str: var_str, expr: func_expr})).is_some()
-        {
-            print!("redefined ");
-            print_expr_token(func_name);
-        }
-        else 
-        {
-            print!("defined ");
-            print_expr_token(func_name);
-        }
-    }
-    else if LR_Type::ExprE == token_type
-    {
-        let result = eval_tree(expr, map, None, predefined_funcions);
-        match result
-        {
-            Ok(x) => println!(" = {}", x),    
-            Err(x) => println!("{}", x),    
-        }
+        return Ok(format!("redefined {}", expr_token_to_string(func_name)));
     }
     else 
     {
-        panic!("unreachable");    
+        return Ok(format!("defined {}", expr_token_to_string(func_name)));
     }
 }
+
+
+
+// unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<C_String, Symbol>, predefined_functions: &HashMap<C_String, fn(f64) -> f64>) -> Result<(f64, String), String>
+// {
+//     if LR_Type::ExpraltS != get_expr_token_type(expr) || (*expr).expr_count == 0
+//     {
+//         return Err(format!("no or invalid expr tree"));
+//     }
+
+//     let decl_expr = get_expr_in_array(expr, 0);
+//     let token_type = get_expr_token_type(decl_expr);
+//     if LR_Type::ExprVarDecl == token_type
+//     {
+//         assert_eq!((*decl_expr).expr_count, 3);
+
+//         let var_name = get_expr_in_array(decl_expr, 2);
+//         let equals = get_expr_in_array(decl_expr, 1);
+//         let var_expr = get_expr_in_array(decl_expr, 0);
+
+
+//         assert_eq!(get_expr_token_type(var_name), LR_Type::TokenId);
+//         assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
+//         assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
+
+//         let name_str = cstr_from_expr_token(var_name);
+//         if map.insert(name_str, Symbol::Var(var_expr)).is_some()
+//         {
+//             return Ok(format!("redefined {}", expr_token_to_string(var_name)));
+//         }
+//     }
+//     else if LR_Type::ExprFuncDecl == token_type
+//     {
+//         assert_eq!((*decl_expr).expr_count, 6);
+
+//         let func_name = get_expr_in_array(decl_expr, 5);
+//         let open_par = get_expr_in_array(decl_expr, 4);
+//         // expr with variable instead of just Var to make parsing work
+//         let var_expr = get_expr_in_array(decl_expr, 3);
+//         let close_par = get_expr_in_array(decl_expr, 2);
+//         let equals = get_expr_in_array(decl_expr, 1);
+//         let func_expr = get_expr_in_array(decl_expr, 0);
+
+
+//         assert_eq!(get_expr_token_type(func_name), LR_Type::TokenId);
+//         assert_eq!(get_expr_token_type(open_par), LR_Type::TokenOpen);
+//         assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
+//         assert_eq!(get_expr_token_type(close_par), LR_Type::TokenClose);
+//         assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
+//         assert_eq!(get_expr_token_type(func_expr), LR_Type::ExprE);
+
+
+
+//         let func: C_String = cstr_from_expr_token(func_name);
+
+//         let var: *const Expr = get_expr_in_array(var_expr, 0);
+//         if get_expr_token_type(var) != LR_Type::ExprVar
+//         {
+//             println!("Function argument has to be a single variable");
+//             return;
+//         }
+//         let var_value: *const Expr = get_expr_in_array(var, 0);
+//         assert_eq!(get_expr_token_type(var_value), LR_Type::TokenId);
+
+//         let var_str: C_String = cstr_from_expr_token(var_value);
+
+
+//         if predefined_funcions.get(&func).is_some()
+//         {
+//             println!("Cannot redefine predefined functions");
+//             return;
+//         }
+
+//         if map.insert(func, Symbol::Func(Func {var_name_str: var_str, expr: func_expr})).is_some()
+//         {
+//             print!("redefined ");
+//             print_expr_token(func_name);
+//         }
+//         else 
+//         {
+//             print!("defined ");
+//             print_expr_token(func_name);
+//         }
+//     }
+//     else if LR_Type::ExprE == token_type
+//     {
+//         let result = eval_tree(expr, map, None, predefined_funcions);
+//         match result
+//         {
+//             Ok(x) => println!(" = {}", x),    
+//             Err(x) => println!("{}", x),    
+//         }
+//     }
+//     else 
+//     {
+//         panic!("unreachable");    
+//     }
+//     return Ok("Ok".to_string());
+// }
 
 
 
@@ -603,6 +691,59 @@ fn is_hot(unique_id: usize) -> bool
 
 // https://www.youtube.com/watch?v=Z1qyvQsjK5Y
 
+fn inside(x: usize, y: usize, width: usize, height: usize) -> bool
+{
+    let cx = unsafe {cursor.x} as usize;
+    let cy = unsafe {cursor.y} as usize;
+
+    let bx: bool = cx >= x && cx < x + width;
+    let by: bool = cy >= y && cy < y + height;
+
+    return bx && by;
+}
+
+
+fn output_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: &[char], max_len: usize, x: usize, y: usize)
+{
+    assert!(max_len <= i16::MAX as usize);
+    
+    let height = 1;
+    let width = max_len;
+
+    if is_active(unique_id) 
+    {
+    }
+    else if is_hot(unique_id) 
+    {
+    }
+    if inside(x, y, width, height)
+    {
+        unsafe
+        {
+            hot.owner = hot.index;
+            hot.item = Ui_kind::OUTPUT_TEXT;
+            hot.index = unique_id;
+        }   
+    }
+    
+    write_string_at_pos(screen, str_buffer, x as i16, y as i16);
+}
+
+
+fn str_buffer_len(str_buffer: &[char], max_len: usize) -> usize
+{
+    assert!(str_buffer.len() >= max_len);
+    for i in 0..max_len
+    {
+        if str_buffer[i] == '\0'
+        {
+            return i;
+        }
+    }
+    return max_len;
+}
+
+
 enum Input_Box_Actions
 {
     None,
@@ -613,19 +754,6 @@ enum Input_Box_Actions
 
 fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: &mut [char], max_len: usize, x: usize, y: usize, inputs: &Input) -> Input_Box_Actions
 {
-    fn str_buffer_len(str_buffer: &mut [char], max_len: usize) -> usize
-    {
-        assert!(str_buffer.len() == max_len);
-        for i in 0..max_len
-        {
-            if str_buffer[i] == '\0'
-            {
-                return i;
-            }
-        }
-        return max_len;
-    }
-
     fn move_left_in_input_string(x: i16)
     {
         if unsafe {cursor.x} > x
@@ -686,18 +814,6 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
             }
         }
         buffer[str_len - 1] = '\0';
-    }
-
-
-    fn inside(x: usize, y: usize, width: usize, height: usize) -> bool
-    {
-        let cx = unsafe {cursor.x} as usize;
-        let cy = unsafe {cursor.y} as usize;
-
-        let bx: bool = cx >= x && cx < x + width;
-        let by: bool = cy >= y && cy < y + height;
-
-        return bx && by;
     }
 
 
@@ -812,6 +928,7 @@ enum Ui_kind
 {
     None,
     INPUT_TEXT,
+    OUTPUT_TEXT,
     SCROLL_LIST,
 }
 
@@ -956,7 +1073,7 @@ fn render_terminal_buffer(screen: &mut Terminal_Screen)
     end_esc();
 }
 
-#[inline(always)]
+
 fn write_char_at_pos(screen: &mut Terminal_Screen, character: char, x: i16, y: i16)
 {
     assert!(x >= 0);
@@ -1169,13 +1286,16 @@ fn main()
 
     const length: usize = 32;
     const buffer_count: usize = 3;
-    let mut char_buffers: Vec<[char; 32]> = Vec::new();
+    let mut input_buffers: Vec<[char; length]> = Vec::new();
+    let mut output_buffers: Vec<[char; length]> = Vec::new();
     let mut token_buffers: Vec<Vec<ParseToken>> = Vec::new();
-    char_buffers.reserve_exact(buffer_count);
+    input_buffers.reserve_exact(buffer_count);
+    output_buffers.reserve_exact(buffer_count);
     token_buffers.reserve_exact(buffer_count);
     for _ in 0..buffer_count
     {
-        char_buffers.push(['\0'; 32]);
+        input_buffers.push(['\0'; length]);
+        output_buffers.push(['\0'; length]);
         token_buffers.push(Vec::new());
     }
 
@@ -1212,30 +1332,93 @@ fn main()
                 }
             }
 
-            for i in 0..buffer_count
+
+            fn write_string_to_buffer(buffer: &mut [char], string: &String)
             {
-                match input_string_box(&mut screen, str_as_usize("my_text_box") + i, char_buffers[i].as_mut_slice(), length, 0, i * 3, &inputs)
+                for i in 0..buffer.len()
+                {
+                    buffer[i] = '\0'
+                }
+                let mut j = 0;
+                for character in string.chars()
+                {
+                    buffer[j] = character;
+                    j += 1;
+                }
+            }
+
+            'outer: for i in 0..buffer_count
+            {
+                match input_string_box(&mut screen, str_as_usize("my_text_box") + i, input_buffers[i].as_mut_slice(), length, 1, i * 3, &inputs)
                 {
                     Input_Box_Actions::None => {},
                     Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER => 
                     {
-                        if string_to_tokens(&char_buffers[i], &mut token_buffers[i]).is_ok()
-                        {
-                            
-                            let success: bool = parse_bin(token_buffers[i].as_mut_ptr(), token_buffers[i].len() as u32, 
-                                table.as_mut_ptr(), 0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000);
-                            
+                        let str_len = str_buffer_len(&input_buffers[i], length);
 
-                            if success
+                        if let Err(x) = string_to_tokens(&input_buffers[i], str_len, &mut token_buffers[i])
+                        {
+                            write_string_to_buffer(&mut output_buffers[i], &x);
+                            continue 'outer;
+                        }
+
+
+                        let success: bool = parse_bin(token_buffers[i].as_mut_ptr(), token_buffers[i].len() as u32, 
+                            table.as_mut_ptr(), 0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000);
+                        
+
+                        if success
+                        {
+                            graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr);
+                            
+                            // print_tree(expr);
+
+
+                            if get_expr_token_type(expr) != LR_Type::ExpraltS ||
+                                (*expr).expr_count == 0
                             {
-                                graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr);
-                                
-                                // print_tree(expr);
-                                add_declarations_if_needed_and_run(expr, &mut map, &predefined_functions);
+                                assert!(true, "invalid expr tree");
+                            }
+
+                            let decl_expr = get_expr_in_array(expr, 0);
+                            let token_type = get_expr_token_type(decl_expr);
+
+                            if token_type == LR_Type::ExprVarDecl
+                            {
+                                if let Some(x) = add_var_decl(decl_expr, &mut map)
+                                {
+                                    write_string_to_buffer(&mut output_buffers[i], &x);
+                                }
+                            }
+                            else if LR_Type::ExprFuncDecl == token_type
+                            {
+
+                                let (Ok(x) | Err(x)) = add_func_decl(decl_expr, &mut map, &predefined_functions);
+                                write_string_to_buffer(&mut output_buffers[i], &x);
+                            }
+                            else if LR_Type::ExprE == token_type
+                            {
+                                match eval_tree(expr, &mut map, None, &predefined_functions)
+                                {
+                                    Ok(x) => write_string_to_buffer(&mut output_buffers[i], &format!(" = {}", x)),    
+                                    Err(x) => write_string_to_buffer(&mut output_buffers[i], &format!("{}", x)),    
+                                }
+                            }
+                            else 
+                            {
+                                panic!("unreachable");    
+                            }
+                        }
+                        else
+                        {
+                            for j in 0..length
+                            {
+                                output_buffers[i][j] = msg[j] as char;
                             }
                         }
                     }
                 }
+                output_string_box(&mut screen, str_as_usize("my_output_string") + i, output_buffers[i].as_slice(), length, 1 + length + 1, 1 + i * 3);
             }
             let bottom_y = screen.height as i16 - 1;
             let format_string: Vec<char> = format!("pos=[{} {}] unicode_u16={}, inside={:?}, active={:?}", 
