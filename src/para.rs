@@ -69,7 +69,7 @@ unsafe fn parse_number(data: *const i8, data_length: u32) -> f64
     let mut num_pos: f64 = 1.0;
     for i in (0..data_length).rev()
     {
-        let val = *(data.offset(i.try_into().unwrap())) as u8 as char; 
+        let val = *(data.offset(i.try_into().unwrap())) as u8 as char;
         match val
         {
             '0' => {/*result += 0.0 * num_pos*/}
@@ -113,19 +113,16 @@ unsafe fn expr_token_to_string(expr: *const Expr) -> String
     return vec.into_iter().collect();
 }
 
-
 unsafe fn print_expr_token(expr_token: *const Expr)
 {
     print_i8((*expr_token).token.data, (*expr_token).token.length);
 }
 
-
-
 unsafe fn get_expr_in_array(expr: *const Expr, index: isize) -> *const Expr
 {
     assert!((*expr).expr_count > index as u32);
     let exprs: *const *const Expr = transmute(expr.offset(1));
-    return *exprs.offset(index);   
+    return *exprs.offset(index);
 }
 
 unsafe fn get_expr_token_type(expr: *const Expr) -> LR_Type
@@ -157,7 +154,7 @@ fn cstr_from_str(str: &'static str) -> C_String
 
 unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<C_String, Symbol>, in_func_call: Option<&(Func, f64)>, predefined_funcions: &HashMap<C_String, fn(f64) -> f64>) -> Result<f64, &'static str>
 {
-    match i64_to_TokenType((*expr).token.token_type).unwrap() 
+    match i64_to_TokenType((*expr).token.token_type).unwrap()
     {
         LR_Type::TokenPlus => {panic!("unreachable")}
         LR_Type::TokenMinus => {panic!("unreachable")}
@@ -184,40 +181,40 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<C_String, Symbol>, in_f
                 1 => return eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions),
                 2 =>
                 {
-                    let token = i64_to_TokenType((*get_expr_in_array(expr, 1)).token.token_type).unwrap(); 
-                    match token 
+                    let token = i64_to_TokenType((*get_expr_in_array(expr, 1)).token.token_type).unwrap();
+                    match token
                     {
                         LR_Type::TokenPlus => {return eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)}
                         LR_Type::TokenMinus => {return Ok(-(eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?))}
-                        _ => panic!("unexpected token")          
+                        _ => panic!("unexpected token")
                     }
                 }
-                3 => 
+                3 =>
                 {
-                    match i64_to_TokenType((*get_expr_in_array(expr, 1)).token.token_type).unwrap() 
+                    match i64_to_TokenType((*get_expr_in_array(expr, 1)).token.token_type).unwrap()
                     {
                         LR_Type::TokenPlus =>
                         {
-                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call, predefined_funcions)?; 
-                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?; 
+                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call, predefined_funcions)?;
+                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?;
                             return Ok(num1 + num2);
                         }
                         LR_Type::TokenMinus =>
                         {
-                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call, predefined_funcions)?; 
-                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?; 
+                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call, predefined_funcions)?;
+                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?;
                             return Ok(num1 - num2);
                         }
                         LR_Type::TokenTimes =>
                         {
-                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call, predefined_funcions)?; 
-                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?; 
+                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call, predefined_funcions)?;
+                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?;
                             return Ok(num1 * num2);
                         }
                         LR_Type::TokenDivide =>
                         {
-                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call, predefined_funcions)?; 
-                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?; 
+                            let num1 = eval_tree(get_expr_in_array(expr, 2), map, in_func_call, predefined_funcions)?;
+                            let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?;
                             return Ok(num1 / num2);
                         }
                         LR_Type::ExprE =>
@@ -230,7 +227,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<C_String, Symbol>, in_f
                 _ => panic!("unreachable")
             }
         }
-        LR_Type::ExprFuncCall => 
+        LR_Type::ExprFuncCall =>
         {
             assert_eq!((*expr).expr_count, 4);
 
@@ -263,21 +260,21 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<C_String, Symbol>, in_f
                     _ => return Err("Symbol is not a function")
                 }
             }
-            else 
+            else
             {
-                return Err("Undefined function");       
+                return Err("Undefined function");
             }
         }
-        LR_Type::ExprVar => 
+        LR_Type::ExprVar =>
         {
             assert_eq!((*expr).expr_count, 1);
-            let var_name_str: C_String = cstr_from_expr_token(get_expr_in_array(expr, 0)); 
+            let var_name_str: C_String = cstr_from_expr_token(get_expr_in_array(expr, 0));
             if in_func_call.is_some()
             {
                 let tuple = in_func_call.unwrap();
                 let func: &Func = &tuple.0;
                 let val: f64 = tuple.1;
-                
+
 
                 if func.var_name_str == var_name_str
                 {
@@ -292,7 +289,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<C_String, Symbol>, in_f
             else
             {
                 let var_expr: *const Expr = match val.unwrap() {Symbol::Var(x) => *x, _ => {return Err("Symbol is not a variable")}};
-                return eval_tree(var_expr, map, in_func_call, predefined_funcions);    
+                return eval_tree(var_expr, map, in_func_call, predefined_funcions);
             }
         }
     }
@@ -323,7 +320,7 @@ struct C_String
 
 impl Hash for C_String
 {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) 
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H)
     {
         self.length.hash(state);
         for i in 0..self.length as isize
@@ -470,7 +467,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symb
     {
         return Ok(format!("redefined {}", expr_token_to_string(func_name)));
     }
-    else 
+    else
     {
         return Ok(format!("defined {}", expr_token_to_string(func_name)));
     }
@@ -553,7 +550,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symb
 //             print!("redefined ");
 //             print_expr_token(func_name);
 //         }
-//         else 
+//         else
 //         {
 //             print!("defined ");
 //             print_expr_token(func_name);
@@ -564,13 +561,13 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symb
 //         let result = eval_tree(expr, map, None, predefined_funcions);
 //         match result
 //         {
-//             Ok(x) => println!(" = {}", x),    
-//             Err(x) => println!("{}", x),    
+//             Ok(x) => println!(" = {}", x),
+//             Err(x) => println!("{}", x),
 //         }
 //     }
-//     else 
+//     else
 //     {
-//         panic!("unreachable");    
+//         panic!("unreachable");
 //     }
 //     return Ok("Ok".to_string());
 // }
@@ -635,7 +632,7 @@ fn begin_esc() -> bool
     {
         return false;
     }
-    mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_PROCESSED_OUTPUT; 
+    mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_PROCESSED_OUTPUT;
     if unsafe {SetConsoleMode(console, mode)} == FALSE
     {
         return false;
@@ -651,7 +648,7 @@ fn end_esc() -> bool
     let mut mode: DWORD = 0;
     if unsafe {GetConsoleMode(console, &mut mode)} == FALSE { return false }
 
-    mode &= !ENABLE_VIRTUAL_TERMINAL_PROCESSING & !ENABLE_PROCESSED_OUTPUT; 
+    mode &= !ENABLE_VIRTUAL_TERMINAL_PROCESSING & !ENABLE_PROCESSED_OUTPUT;
 
     if unsafe {SetConsoleMode(console, mode)} == FALSE { return false }
     return true
@@ -674,7 +671,7 @@ fn str_as_usize(str: &'static str) -> usize
 
 fn is_active(unique_id: usize) -> bool
 {
-    unsafe 
+    unsafe
     {
         if active.stack_count == 0
         {
@@ -687,7 +684,7 @@ fn is_active(unique_id: usize) -> bool
 fn is_hot(unique_id: usize) -> bool
 {
     return unsafe {hot.index} == unique_id;
-}   
+}
 
 // https://www.youtube.com/watch?v=Z1qyvQsjK5Y
 
@@ -706,14 +703,14 @@ fn inside(x: usize, y: usize, width: usize, height: usize) -> bool
 fn output_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: &[char], max_len: usize, x: usize, y: usize)
 {
     assert!(max_len <= i16::MAX as usize);
-    
+
     let height = 1;
     let width = max_len;
 
-    if is_active(unique_id) 
+    if is_active(unique_id)
     {
     }
-    else if is_hot(unique_id) 
+    else if is_hot(unique_id)
     {
     }
     if inside(x, y, width, height)
@@ -723,9 +720,9 @@ fn output_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer:
             hot.owner = hot.index;
             hot.item = Ui_kind::OUTPUT_TEXT;
             hot.index = unique_id;
-        }   
+        }
     }
-    
+
     write_string_at_pos(screen, str_buffer, x as i16, y as i16);
 }
 
@@ -775,16 +772,16 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
 
         if str_buffer_len(buffer, max_len) < max_len
         {
-            let loop_start = 
+            let loop_start =
             {
                 if index == 0
                 {
                     buffer[0] = '\0';
                     1
                 }
-                else 
+                else
                 {
-                    index    
+                    index
                 }
             };
 
@@ -803,9 +800,9 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
         assert!(index < max_len);
 
 
-        let str_len = str_buffer_len(buffer, max_len); 
+        let str_len = str_buffer_len(buffer, max_len);
         assert!(str_len > 0);
-        
+
         {
 
             for i in index..str_len - 1
@@ -823,7 +820,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
     let width = max_len;
 
 
-    if is_active(unique_id) 
+    if is_active(unique_id)
     {
         begin_esc();
         if inputs.key_val == VK_LEFT
@@ -853,14 +850,14 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
                 {
                     shift_string_left_from_index(str_buffer, max_len, x_in_str - 1);
                 }
-                else 
+                else
                 {
-                    str_buffer[max_len - 1] = '\0';    
+                    str_buffer[max_len - 1] = '\0';
                 }
                 move_cursor_esc(-1, 0);
             }
         }
-        else if inputs.unicode_char != 0 
+        else if inputs.unicode_char != 0
         {
             let x_in_str = unsafe {cursor.x} as usize - x;
             if x_in_str < max_len && str_buffer_len(str_buffer, max_len) != max_len
@@ -872,7 +869,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
         }
         end_esc();
     }
-    else if is_hot(unique_id) 
+    else if is_hot(unique_id)
     {
         if inputs.key_val == 'A' as u16
         {
@@ -890,10 +887,10 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
             hot.owner = hot.index;
             hot.item = Ui_kind::INPUT_TEXT;
             hot.index = unique_id;
-        }   
+        }
     }
 
-    
+
     assert!(max_len <= i16::MAX as usize);
     for i in 0..width
     {
@@ -918,13 +915,13 @@ struct Cursor
     y: i16,
 
 
-    stack_count: usize, 
+    stack_count: usize,
     save_stack: [(i16, i16); 8],
 
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Ui_kind 
+enum Ui_kind
 {
     None,
     INPUT_TEXT,
@@ -1028,7 +1025,7 @@ fn set_cursor_to_esc(x: i16, y: i16)
     let mut x = x;
     let mut y = y;
     if x < 0 { x = 0; } ;
-    if y < 0 { y = 0; } ; 
+    if y < 0 { y = 0; } ;
 
     unsafe
     {
@@ -1061,7 +1058,7 @@ fn render_terminal_buffer(screen: &mut Terminal_Screen)
             {
                 print!(" ");
             }
-            else 
+            else
             {
                 print!("{}", char_val);
             }
@@ -1092,15 +1089,15 @@ fn write_string_at_pos(screen: &mut Terminal_Screen, str: &[char], x: i16, y: i1
     assert!((x as usize) < screen.width);
     assert!((y as usize) < screen.height);
 
-    let start_pos: usize = x as usize + y as usize * screen.width; 
+    let start_pos: usize = x as usize + y as usize * screen.width;
 
 
     let normalized_len: usize;
     if (str.len() + x as usize) < screen.width
     {
-        normalized_len = str.len();   
+        normalized_len = str.len();
     }
-    else 
+    else
     {
         normalized_len = screen.width - 1 - x as usize;
     }
@@ -1126,12 +1123,12 @@ fn get_console_input() -> Input
         exit(-1)
     }
 
-    match buf.EventType 
+    match buf.EventType
     {
         FOCUS_EVENT => {},
-        KEY_EVENT => 
+        KEY_EVENT =>
         {
-            let key_event = unsafe {buf.event.KeyEvent}; 
+            let key_event = unsafe {buf.event.KeyEvent};
             let key_code = key_event.wVirtualKeyCode;
             if key_event.bKeyDown == TRUE
             {
@@ -1178,7 +1175,7 @@ static mut terminal_w: SHORT = 0;
 static mut terminal_h: SHORT = 0;
 fn get_terminal_screen() -> Terminal_Screen
 {
-    unsafe 
+    unsafe
     {
         let stdout: HANDLE = GetStdHandle(STD_OUTPUT_HANDLE);
         let mut screen_buf_info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::zeroed();
@@ -1192,7 +1189,7 @@ fn get_terminal_screen() -> Terminal_Screen
         let new_y = screen_buf_info.srWindow.Top;
         let new_w = screen_buf_info.srWindow.Right - screen_buf_info.srWindow.Left;
         let new_h = screen_buf_info.srWindow.Bottom - screen_buf_info.srWindow.Top;
-    
+
         if terminal_x != new_x || terminal_y != new_y || terminal_w != new_w || terminal_h != new_h
         {
             terminal_x = new_x;
@@ -1201,7 +1198,7 @@ fn get_terminal_screen() -> Terminal_Screen
             terminal_h = new_h;
             // println!("terminal terminal_x = {}, terminal_y = {}, terminal_w = {}, terminal_h = {}", terminal_x, terminal_y, terminal_w, terminal_h);
         }
-    
+
         let buffer_length = (terminal_w * terminal_h) as usize;
         let width = terminal_w as usize;
         let height = terminal_h as usize;
@@ -1240,7 +1237,7 @@ fn main()
         GetConsoleMode(stdin, &mut old_stdin_mode);
         GetConsoleMode(stdout, &mut old_stdout_mode);
 
-        
+
         if SetConsoleMode(stdin, 0) == FALSE
         {
             exit(421);
@@ -1280,7 +1277,7 @@ fn main()
 
     predefined_functions.insert(cstr_from_str("floor"), f64::floor);
     predefined_functions.insert(cstr_from_str("ceil"), f64::ceil);
-    
+
     predefined_functions.insert(cstr_from_str("abs"), f64::abs);
 
 
@@ -1316,7 +1313,7 @@ fn main()
             let mut map: HashMap<C_String, Symbol> = HashMap::new();
             let mut screen = get_terminal_screen();
             let inputs: Input = get_console_input();
-            
+
             if inputs.key_val == 'Q' as u16
             {
                 if inputs.LEFT_ALT_PRESSED
@@ -1352,7 +1349,7 @@ fn main()
                 match input_string_box(&mut screen, str_as_usize("my_text_box") + i, input_buffers[i].as_mut_slice(), length, 1, i * 3, &inputs)
                 {
                     Input_Box_Actions::None => {},
-                    Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER => 
+                    Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER =>
                     {
                         let str_len = str_buffer_len(&input_buffers[i], length);
 
@@ -1363,14 +1360,14 @@ fn main()
                         }
 
 
-                        let success: bool = parse_bin(token_buffers[i].as_mut_ptr(), token_buffers[i].len() as u32, 
+                        let success: bool = parse_bin(token_buffers[i].as_mut_ptr(), token_buffers[i].len() as u32,
                             table.as_mut_ptr(), 0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000);
-                        
+
 
                         if success
                         {
                             graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr);
-                            
+
                             // print_tree(expr);
 
 
@@ -1400,13 +1397,13 @@ fn main()
                             {
                                 match eval_tree(expr, &mut map, None, &predefined_functions)
                                 {
-                                    Ok(x) => write_string_to_buffer(&mut output_buffers[i], &format!(" = {}", x)),    
-                                    Err(x) => write_string_to_buffer(&mut output_buffers[i], &format!("{}", x)),    
+                                    Ok(x) => write_string_to_buffer(&mut output_buffers[i], &format!(" = {}", x)),
+                                    Err(x) => write_string_to_buffer(&mut output_buffers[i], &format!("{}", x)),
                                 }
                             }
-                            else 
+                            else
                             {
-                                panic!("unreachable");    
+                                panic!("unreachable");
                             }
                         }
                         else
@@ -1421,12 +1418,12 @@ fn main()
                 output_string_box(&mut screen, str_as_usize("my_output_string") + i, output_buffers[i].as_slice(), length, 1 + length + 1, 1 + i * 3);
             }
             let bottom_y = screen.height as i16 - 1;
-            let format_string: Vec<char> = format!("pos=[{} {}] unicode_u16={}, inside={:?}, active={:?}", 
-                cursor.x, 
-                cursor.y, 
-                inputs.unicode_char, 
+            let format_string: Vec<char> = format!("pos=[{} {}] unicode_u16={}, inside={:?}, active={:?}",
+                cursor.x,
+                cursor.y,
+                inputs.unicode_char,
                 hot.item,
-                active).chars().collect::<Vec<char>>();            
+                active).chars().collect::<Vec<char>>();
 
             write_string_at_pos(&mut screen, format_string.as_slice(), 0, bottom_y);
 
@@ -1457,7 +1454,7 @@ fn main()
                     end_esc();
                 }
             }
-            
+
             render_terminal_buffer(&mut screen);
             io::stdout().flush().unwrap();
         }
