@@ -7,6 +7,7 @@ mod ptg_header;
 mod win_header;
 
 use core::ffi::c_void;
+use core::hash::Hash;
 use std::collections::HashMap;
 use std::io;
 use std::mem::transmute;
@@ -128,9 +129,18 @@ unsafe fn vec_from_expr_token(expr: *const Expr) -> Vec<char>
     return vec;
 }
 
+unsafe fn cstr_from_expr_token(expr: *const Expr) -> C_String
+{
+    return C_String { data: (*expr).token.data, length: (*expr).token.length as usize }
+}
+fn cstr_from_str(str: &'static str) -> C_String
+{
+    let cstr: C_String = C_String { data: str as *const str as *const i8, length: str.len()};
+    return cstr;
+}
 
 
-unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<Vec<char>, Symbol>, in_func_call: Option<&(Func, f64)>, predefined_funcions: &HashMap<Vec<char>, fn(f64) -> f64>) -> Result<f64, &'static str>
+unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<C_String, Symbol>, in_func_call: Option<&(Func, f64)>, predefined_funcions: &HashMap<C_String, fn(f64) -> f64>) -> Result<f64, &'static str>
 {
     match i64_to_TokenType((*expr).token.token_type).unwrap() 
     {
@@ -221,13 +231,15 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<Vec<char>, Symbol>, in_
 
             let call_val: f64 = eval_tree(call_expr, map, in_func_call, predefined_funcions)?;
 
-            let pre_func = predefined_funcions.get(&vec_from_expr_token(func_name));
+            let func_name_str: C_String = cstr_from_expr_token(func_name);
+
+            let pre_func = predefined_funcions.get(&func_name_str);
             if pre_func.is_some()
             {
                 return Ok(pre_func.unwrap()(call_val));
             }
 
-            let opt_func = map.get(&vec_from_expr_token(func_name));
+            let opt_func = map.get(&func_name_str);
             if opt_func.is_some()
             {
                 match opt_func.unwrap()
@@ -244,7 +256,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<Vec<char>, Symbol>, in_
         LR_Type::ExprVar => 
         {
             assert_eq!((*expr).expr_count, 1);
-            let vec: Vec<char> = vec_from_expr_token(get_expr_in_array(expr, 0));
+            let var_name_str: C_String = cstr_from_expr_token(get_expr_in_array(expr, 0)); 
             if in_func_call.is_some()
             {
                 let tuple = in_func_call.unwrap();
@@ -252,12 +264,12 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<Vec<char>, Symbol>, in_
                 let val: f64 = tuple.1;
                 
 
-                if func.var_name == vec
+                if func.var_name_str == var_name_str
                 {
                     return Ok(val);
                 }
             }
-            let val = map.get(&vec);
+            let val = map.get(&var_name_str);
             if val.is_none()
             {
                 return Err("Undefined variable");
@@ -276,7 +288,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<Vec<char>, Symbol>, in_
 #[derive(Debug, Clone)]
 struct Func
 {
-    var_name: Vec<char>,
+    var_name_str: C_String,
     expr: *const Expr,
 }
 
@@ -286,6 +298,44 @@ enum Symbol
     Var(*const Expr),
     Func(Func),
 }
+
+#[derive(Debug, Eq, Clone, Copy)]
+struct C_String
+{
+    data: *const i8,
+    length: usize,
+}
+
+impl Hash for C_String
+{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) 
+    {
+        self.length.hash(state);
+        for i in 0..self.length as isize
+        {
+            unsafe {*self.data.offset(i)}.hash(state);
+        }
+    }
+}
+impl PartialEq for C_String
+{
+    fn eq(&self, other: &Self) -> bool {
+        if self.length != other.length
+        {
+            return false;
+        }
+
+        for i in 0..self.length as isize
+        {
+            if unsafe {*self.data.offset(i) != *other.data.offset(i)}
+            {
+                return false
+            }
+        }
+        return true;
+    }
+}
+
 
 fn string_to_tokens<'a>(arg: &'a [u8], out: &'a mut Vec<ParseToken>) -> Result<(), &'static str>
 {
@@ -340,7 +390,7 @@ fn string_to_tokens<'a>(arg: &'a [u8], out: &'a mut Vec<ParseToken>) -> Result<(
 }
 
 
-unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<Vec<char>, Symbol>, predefined_funcions: &HashMap<Vec<char>, fn(f64) -> f64>)
+unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<C_String, Symbol>, predefined_funcions: &HashMap<C_String, fn(f64) -> f64>)
 {
     if LR_Type::ExpraltS != get_expr_token_type(expr) || (*expr).expr_count == 0
     {
@@ -362,8 +412,8 @@ unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<
         assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
         assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
 
-        let name_vec = vec_from_expr_token(var_name);
-        if map.insert(name_vec, Symbol::Var(var_expr)).is_some()
+        let name_str = cstr_from_expr_token(var_name);
+        if map.insert(name_str, Symbol::Var(var_expr)).is_some()
         {
             print!("redefined ");
             print_expr_token(var_name);
@@ -390,7 +440,8 @@ unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<
         assert_eq!(get_expr_token_type(func_expr), LR_Type::ExprE);
 
 
-        let func_vec: Vec<char> = vec_from_expr_token(func_name);
+
+        let func: C_String = cstr_from_expr_token(func_name);
 
         let var: *const Expr = get_expr_in_array(var_expr, 0);
         if get_expr_token_type(var) != LR_Type::ExprVar
@@ -401,16 +452,16 @@ unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<
         let var_value: *const Expr = get_expr_in_array(var, 0);
         assert_eq!(get_expr_token_type(var_value), LR_Type::TokenId);
 
-        let var_vec: Vec<char> = vec_from_expr_token(var_value);
+        let var_str: C_String = cstr_from_expr_token(var_value);
 
 
-        if predefined_funcions.get(&func_vec).is_some()
+        if predefined_funcions.get(&func).is_some()
         {
             println!("Cannot redefine predefined functions");
             return;
         }
 
-        if map.insert(func_vec, Symbol::Func(Func {var_name: var_vec, expr: func_expr})).is_some()
+        if map.insert(func, Symbol::Func(Func {var_name_str: var_str, expr: func_expr})).is_some()
         {
             print!("redefined ");
             print_expr_token(func_name);
@@ -433,7 +484,7 @@ unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<
     else 
     {
         panic!("unreachable");    
-    }     
+    }
 }
 
 
@@ -939,7 +990,7 @@ fn write_string_at_pos(screen: &mut Terminal_Screen, str: &[char], x: i16, y: i1
 
     for i in 0..normalized_len
     {
-        screen.buffer[start_pos + i] = str[i];
+        screen.buffer[start_pos + i] = str[i] as char;
     }
 }
 
@@ -1047,12 +1098,17 @@ fn get_terminal_screen() -> Terminal_Screen
     }
 }
 
+
+
 fn main()
 {
+
+    println!("{}", std::mem::size_of::<char>());
+    return;
     let mut old_stdin_mode: DWORD = 0;
     let mut old_stdout_mode: DWORD = 0;
-    let mut stdin: HANDLE;
-    let mut stdout: HANDLE;
+    let stdin: HANDLE;
+    let stdout: HANDLE;
 
     unsafe
     {
@@ -1089,47 +1145,41 @@ fn main()
     }
 
 
+    let mut predefined_functions: HashMap<C_String, fn(f64) -> f64> = HashMap::new();
 
+    predefined_functions.insert(cstr_from_str("sin"), f64::sin);
+    predefined_functions.insert(cstr_from_str("cos"), f64::cos);
+    predefined_functions.insert(cstr_from_str("tan"), f64::tan);
 
+    predefined_functions.insert(cstr_from_str("asin"), f64::asin);
+    predefined_functions.insert(cstr_from_str("acos"), f64::acos);
+    predefined_functions.insert(cstr_from_str("atan"), f64::atan);
 
+    predefined_functions.insert(cstr_from_str("sqrt"), f64::sqrt);
+    predefined_functions.insert(cstr_from_str("cbrt"), f64::cbrt);
 
-    let mut predefined_functions: HashMap<&str, fn(f64) -> f64> = HashMap::new();
+    predefined_functions.insert(cstr_from_str("exp"), f64::exp);
 
-    predefined_functions.insert("sin", f64::sin);
-    predefined_functions.insert("cos", f64::cos);
-    predefined_functions.insert("tan", f64::tan);
+    predefined_functions.insert(cstr_from_str("ln"), f64::ln);
+    predefined_functions.insert(cstr_from_str("log2"), f64::log2);
+    predefined_functions.insert(cstr_from_str("log10"), f64::log10);
 
-    predefined_functions.insert("asin", f64::asin);
-    predefined_functions.insert("acos", f64::acos);
-    predefined_functions.insert("atan", f64::atan);
-
-    predefined_functions.insert("sqrt", f64::sqrt);
-    predefined_functions.insert("cbrt", f64::cbrt);
-
-    predefined_functions.insert("exp", f64::exp);
-
-    predefined_functions.insert("ln", f64::ln);
-    predefined_functions.insert("log2", f64::log2);
-    predefined_functions.insert("log10", f64::log10);
-
-    predefined_functions.insert("floor", f64::floor);
-    predefined_functions.insert("ceil", f64::ceil);
+    predefined_functions.insert(cstr_from_str("floor"), f64::floor);
+    predefined_functions.insert(cstr_from_str("ceil"), f64::ceil);
     
-    predefined_functions.insert("abs", f64::abs);
+    predefined_functions.insert(cstr_from_str("abs"), f64::abs);
 
 
     const length: usize = 32;
     const buffer_count: usize = 3;
-    let mut buffers: [([char; length], Vec<ParseToken>); buffer_count];
-    unsafe 
+    let mut buffers: Vec<([u8; 32], Vec<ParseToken>)> = Vec::new();
+    buffers.reserve_exact(buffer_count);
+    for _ in 0..buffer_count
     {
-        buffers = std::mem::zeroed();
-        for i in 0..buffer_count
-        {
-            buffers[i] = (['\0'; length], Vec::new());
-        }
-
+        let tuple = ([0; 32], Vec::new());
+        buffers.push(tuple);
     }
+
 
     let mut expr: *mut Expr = 0 as *mut Expr;
     let mut msg: [u8; 1000] = [0; 1000];
@@ -1144,6 +1194,7 @@ fn main()
     {
         loop
         {
+            let mut map: HashMap<C_String, Symbol> = HashMap::new();
             let mut screen = get_terminal_screen();
             let inputs: Input = get_console_input();
             
@@ -1161,7 +1212,7 @@ fn main()
                     break;
                 }
             }
-            
+
             for i in 0..buffer_count
             {
                 match input_string_box(&mut screen, str_as_usize("my_text_box") + i, buffers[i].0.as_mut_slice(), length, 0, i * 3, &inputs)
@@ -1169,14 +1220,18 @@ fn main()
                     Input_Box_Actions::None => {},
                     Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER => 
                     {
-                        let success: bool = parse_bin(buffers[i].1.as_mut_ptr(), buffers[i].1.len() as u32, 
-                            table.as_mut_ptr(), 0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000);
-                        if success
+                        if string_to_tokens(&buffers[i].0, &mut buffers[i].1).is_ok()
                         {
-                            graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr);
                             
-                            // print_tree(expr);
-                            add_declarations_if_needed_and_run(expr, &mut map, &predefined_functions);
+                            let success: bool = parse_bin(buffers[i].1.as_mut_ptr(), buffers[i].1.len() as u32, 
+                                table.as_mut_ptr(), 0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000);
+                            if success
+                            {
+                                graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr);
+                                
+                                // print_tree(expr);
+                                add_declarations_if_needed_and_run(expr, &mut map, &predefined_functions);
+                            }
                         }
                     }
                 }
@@ -1224,68 +1279,5 @@ fn main()
         }
         revert_console(stdout, stdin, old_stdout_mode, old_stdin_mode);
         exit(0);
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-fn main2()
-{
-    let mut map: HashMap<Vec<char>, Symbol> = HashMap::new();
-
-    let mut byte_vectors: Vec<Vec<u8>> = Vec::new();
-    const size: usize = 4096;
-    byte_vectors.reserve_exact(size);
-
-    let mut i: usize = 0;
-
-    loop 
-    { 
-        let mut token_list: Vec<ParseToken> = Vec::new();
-        assert_ne!(i, size);
-        byte_vectors.insert(i, read_str.as_bytes().to_vec()); 
-        {
-            let err = string_to_tokens(&byte_vectors.get(i).unwrap(), &mut token_list);
-            if err.is_err()
-            {
-                continue;
-            }
-        }
-
-
-        let token_count = token_list.len() as u32;
-        let success: bool = unsafe {parse_bin(token_list.as_mut_ptr(), token_count, table.as_mut_ptr(), /*PRINT_EVERY_PARSE_STEP*/0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000)};
-
-        if success
-        {
-            i += 1;
-
-
-
-        }
-        else
-        {
-            println!("{}", std::str::from_utf8(&msg).unwrap());
-        }       
     }
 }
