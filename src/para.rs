@@ -1107,8 +1107,8 @@ fn write_string_at_pos(screen: &mut Terminal_Screen, str: &[char], x: i16, y: i1
     }
 }
 
-//TODO(Johan): fix bug when pressing backspace at index 0
 //TODO(Johan): maybe switch to ReadConsoleInputEx to avoid a blocking input
+//TOD(Johan): remove old symbols that were made from stale input strings
 
 fn get_console_input() -> Input
 {
