@@ -63,13 +63,13 @@ fn i64_to_TokenType(token_type: i64) -> Result<LR_Type, &'static str>
     }
 }
 
-unsafe fn parse_number(data: *const i8, data_length: u32) -> f64
+unsafe fn parse_number(data: *const i8, data_length: u32, stride: u8) -> f64
 {
     let mut result: f64 = 0.0;
     let mut num_pos: f64 = 1.0;
     for i in (0..data_length).rev()
     {
-        let val = *(data.offset(i.try_into().unwrap())) as u8 as char;
+        let val = *(data.offset(i as isize * stride as isize)) as u8 as char;
         match val
         {
             '0' => {/*result += 0.0 * num_pos*/}
@@ -163,7 +163,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<C_String, Symbol>, in_f
         LR_Type::TokenEquals => {todo!("not implemented")}
         LR_Type::TokenOpen => {todo!("not implemented")}
         LR_Type::TokenClose => {todo!("not implemented")}
-        LR_Type::TokenNumber => {return Ok(parse_number((*expr).token.data, (*expr).token.length))}
+        LR_Type::TokenNumber => {return Ok(parse_number((*expr).token.data, (*expr).token.length, (*expr).token.stride))}
         LR_Type::TokenId => {todo!("not implemented")}
         LR_Type::TokenEnd => {panic!("unreachable")}
         LR_Type::ExpraltS => {
@@ -851,7 +851,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
 
             if str_buffer_len(str_buffer, max_len) == max_len
             {
-
+                // do nothing
             }
             else if x_in_str == 0 
             {
@@ -1305,11 +1305,11 @@ fn main()
     set_cursor_to_esc(0, 0);
     end_esc();
 
+    let mut map: HashMap<C_String, Symbol> = HashMap::new();
     unsafe
     {
         loop
         {
-            let mut map: HashMap<C_String, Symbol> = HashMap::new();
             let mut screen = get_terminal_screen();
             let inputs: Input = get_console_input();
 
