@@ -760,7 +760,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
     }
     fn move_right_in_input_string(str_buffer: &mut [char], max_len: usize)
     {
-        if unsafe {cursor.x as usize} < str_buffer_len(str_buffer, max_len)
+        if unsafe {cursor.x as usize} < str_buffer_len(str_buffer, max_len) + 1
         {
             move_cursor_esc(1, 0);
         }
@@ -770,28 +770,13 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
     {
         assert!(index < max_len);
 
-        if str_buffer_len(buffer, max_len) < max_len
+        let str_len = str_buffer_len(buffer, max_len); 
+        if str_len < max_len
         {
-            let loop_start =
-            {
-                if index == 0
-                {
-                    buffer[0] = '\0';
-                    1
-                }
-                else
-                {
-                    index
-                }
-            };
-
-            assert!(loop_start > 0);
-
-            for i in (loop_start..max_len).rev()
+            for i in (index..str_len + 1).rev()
             {
                 buffer[i] = buffer[i - 1];
             }
-
         }
     }
 
@@ -844,23 +829,37 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
         else if inputs.key_val == VK_BACK
         {
             let x_in_str = unsafe {cursor.x} as usize - x;
-            if x_in_str > 0
+
+            if x_in_str <= 0
             {
-                if x_in_str < max_len
-                {
-                    shift_string_left_from_index(str_buffer, max_len, x_in_str - 1);
-                }
-                else
-                {
-                    str_buffer[max_len - 1] = '\0';
-                }
+                // do nothing
+            }
+            else if x_in_str == max_len
+            {
+                str_buffer[max_len - 1] = '\0';
+                move_cursor_esc(-1, 0);
+            }
+            else
+            {
+                shift_string_left_from_index(str_buffer, max_len, x_in_str - 1);
                 move_cursor_esc(-1, 0);
             }
         }
         else if inputs.unicode_char != 0
         {
             let x_in_str = unsafe {cursor.x} as usize - x;
-            if x_in_str < max_len && str_buffer_len(str_buffer, max_len) != max_len
+
+            if str_buffer_len(str_buffer, max_len) == max_len
+            {
+
+            }
+            else if x_in_str == 0 
+            {
+                shift_string_right_from_index(str_buffer, max_len, 1);
+                str_buffer[x_in_str] = char::from_u32(inputs.unicode_char as u32).unwrap();
+                move_cursor_esc(1, 0);
+            }
+            else if x_in_str < max_len
             {
                 shift_string_right_from_index(str_buffer, max_len, x_in_str);
                 str_buffer[x_in_str] = char::from_u32(inputs.unicode_char as u32).unwrap();
@@ -1339,6 +1338,10 @@ fn main()
                 let mut j = 0;
                 for character in string.chars()
                 {
+                    if j == buffer.len()
+                    {
+                        break;
+                    }
                     buffer[j] = character;
                     j += 1;
                 }
@@ -1353,6 +1356,7 @@ fn main()
                     {
                         let str_len = str_buffer_len(&input_buffers[i], length);
 
+                        token_buffers[i].clear();
                         if let Err(x) = string_to_tokens(&input_buffers[i], str_len, &mut token_buffers[i])
                         {
                             write_string_to_buffer(&mut output_buffers[i], &x);
