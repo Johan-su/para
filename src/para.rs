@@ -1108,7 +1108,6 @@ fn write_string_at_pos(screen: &mut Terminal_Screen, str: &[char], x: i16, y: i1
 }
 
 //TODO(Johan): maybe switch to ReadConsoleInputEx to avoid a blocking input
-//TOD(Johan): remove old symbols that were made from stale input strings
 
 fn get_console_input() -> Input
 {
@@ -1347,15 +1346,28 @@ fn main()
                 }
             }
 
-            'outer: for i in 0..buffer_count
             {
-                match input_string_box(&mut screen, str_as_usize("my_text_box") + i, input_buffers[i].as_mut_slice(), length, 1, i * 3, &inputs)
+                let mut should_reparse: bool = false;
+                for i in 0..buffer_count
                 {
-                    Input_Box_Actions::None => {},
-                    Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER =>
+                    match input_string_box(&mut screen, str_as_usize("my_text_box") + i, input_buffers[i].as_mut_slice(), length, 1, i * 3, &inputs)
+                    {
+                        Input_Box_Actions::None => {},
+                        Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER =>
+                        {
+                            should_reparse = true;
+                        }
+                    }
+                    output_string_box(&mut screen, str_as_usize("my_output_string") + i, output_buffers[i].as_slice(), length, 1 + length + 1, 1 + i * 3);
+                }
+
+                if should_reparse
+                {
+                    map.clear();
+                    'outer: for i in 0..buffer_count
                     {
                         let str_len = str_buffer_len(&input_buffers[i], length);
-
+    
                         token_buffers[i].clear();
                         if let Err(x) = string_to_tokens(&input_buffers[i], str_len, &mut token_buffers[i])
                         {
@@ -1378,7 +1390,7 @@ fn main()
                             if get_expr_token_type(expr) != LR_Type::ExpraltS ||
                                 (*expr).expr_count == 0
                             {
-                                assert!(true, "invalid expr tree");
+                                continue 'outer;
                             }
 
                             let decl_expr = get_expr_in_array(expr, 0);
@@ -1419,8 +1431,8 @@ fn main()
                         }
                     }
                 }
-                output_string_box(&mut screen, str_as_usize("my_output_string") + i, output_buffers[i].as_slice(), length, 1 + length + 1, 1 + i * 3);
             }
+
             let bottom_y = screen.height as i16 - 1;
             let format_string: Vec<char> = format!("pos=[{} {}] unicode_u16={}, inside={:?}, active={:?}",
                 cursor.x,
