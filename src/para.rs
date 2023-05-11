@@ -324,9 +324,9 @@ impl Hash for String_View
     fn hash<H: std::hash::Hasher>(&self, state: &mut H)
     {
         self.length.hash(state);
-        for i in 0..(self.length * 4) as isize
+        for i in 0..self.length
         {
-            unsafe {*self.data.offset(i)}.hash(state);
+            unsafe {*self.data.offset((i * self.stride) as isize)}.hash(state);
         }
     }
 }
@@ -340,7 +340,7 @@ impl PartialEq for String_View
 
         for i in 0..self.length as isize
         {
-            if unsafe {*self.data.offset(i * self.stride as isize) != *other.data.offset(i * self.stride as isize)}
+            if unsafe {*self.data.offset(i * self.stride as isize) != *other.data.offset(i * other.stride as isize)}
             {
                 return false
             }
