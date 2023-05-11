@@ -1073,21 +1073,29 @@ fn render_terminal_buffer(screen: &mut Terminal_Screen)
 
 fn write_char_at_pos(screen: &mut Terminal_Screen, character: char, x: i16, y: i16)
 {
-    assert!(x >= 0);
-    assert!(y >= 0);
-    assert!((x as usize) < screen.width);
-    assert!((y as usize) < screen.height);
+    if x < 0 || y < 0
+    {
+        return;
+    }
 
+    if x as usize >= screen.width || y as usize >= screen.height
+    {
+        return;
+    }
     screen.buffer[x as usize + y as usize * screen.width] = character;
 }
 
 
 fn write_string_at_pos(screen: &mut Terminal_Screen, str: &[char], x: i16, y: i16)
 {
-    assert!(x >= 0);
-    assert!(y >= 0);
-    assert!((x as usize) < screen.width);
-    assert!((y as usize) < screen.height);
+    if x < 0 || y < 0
+    {
+        return;
+    }
+    if x as usize >= screen.width || y as usize >= screen.height
+    {
+        return;
+    }
 
     let start_pos: usize = x as usize + y as usize * screen.width;
 
@@ -1281,7 +1289,7 @@ fn main()
 
 
     const length: usize = 32;
-    const buffer_count: usize = 3;
+    const buffer_count: usize = 5;
     let mut input_buffers: Vec<[char; length]> = Vec::new();
     let mut output_buffers: Vec<[char; length]> = Vec::new();
     let mut token_buffers: Vec<Vec<ParseToken>> = Vec::new();
