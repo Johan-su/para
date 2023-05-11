@@ -141,18 +141,18 @@ unsafe fn vec_from_expr_token(expr: *const Expr) -> Vec<char>
     return vec;
 }
 
-unsafe fn cstr_from_expr_token(expr: *const Expr) -> C_String
+unsafe fn cstr_from_expr_token(expr: *const Expr) -> String_View
 {
-    return C_String { data: (*expr).token.data, length: (*expr).token.length as usize }
+    return String_View { data: (*expr).token.data, length: (*expr).token.length as usize }
 }
-fn cstr_from_str(str: &'static str) -> C_String
+fn cstr_from_str(str: &'static str) -> String_View
 {
-    let cstr: C_String = C_String { data: str as *const str as *const i8, length: str.len()};
+    let cstr: String_View = String_View { data: str as *const str as *const i8, length: str.len()};
     return cstr;
 }
 
 
-unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<C_String, Symbol>, in_func_call: Option<&(Func, f64)>, predefined_funcions: &HashMap<C_String, fn(f64) -> f64>) -> Result<f64, &'static str>
+unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<String_View, Symbol>, in_func_call: Option<&(Func, f64)>, predefined_funcions: &HashMap<String_View, fn(f64) -> f64>) -> Result<f64, &'static str>
 {
     match i64_to_TokenType((*expr).token.token_type).unwrap()
     {
@@ -243,7 +243,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<C_String, Symbol>, in_f
 
             let call_val: f64 = eval_tree(call_expr, map, in_func_call, predefined_funcions)?;
 
-            let func_name_str: C_String = cstr_from_expr_token(func_name);
+            let func_name_str: String_View = cstr_from_expr_token(func_name);
 
             let pre_func = predefined_funcions.get(&func_name_str);
             if pre_func.is_some()
@@ -268,7 +268,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<C_String, Symbol>, in_f
         LR_Type::ExprVar =>
         {
             assert_eq!((*expr).expr_count, 1);
-            let var_name_str: C_String = cstr_from_expr_token(get_expr_in_array(expr, 0));
+            let var_name_str: String_View = cstr_from_expr_token(get_expr_in_array(expr, 0));
             if in_func_call.is_some()
             {
                 let tuple = in_func_call.unwrap();
@@ -300,7 +300,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<C_String, Symbol>, in_f
 #[derive(Debug, Clone)]
 struct Func
 {
-    var_name_str: C_String,
+    var_name_str: String_View,
     expr: *const Expr,
 }
 
@@ -312,13 +312,13 @@ enum Symbol
 }
 
 #[derive(Debug, Eq, Clone, Copy)]
-struct C_String
+struct String_View
 {
     data: *const i8,
     length: usize,
 }
 
-impl Hash for C_String
+impl Hash for String_View
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H)
     {
@@ -329,7 +329,7 @@ impl Hash for C_String
         }
     }
 }
-impl PartialEq for C_String
+impl PartialEq for String_View
 {
     fn eq(&self, other: &Self) -> bool {
         if self.length != other.length
@@ -402,7 +402,7 @@ fn string_to_tokens<'a>(arg: &'a [char], str_len: usize, out: &'a mut Vec<ParseT
 }
 
 
-unsafe fn add_var_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symbol>) -> Option<String>
+unsafe fn add_var_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, Symbol>) -> Option<String>
 {
     assert_eq!((*decl_expr).expr_count, 3);
 
@@ -423,7 +423,7 @@ unsafe fn add_var_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symbo
     return None;
 }
 
-unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symbol>, predefined_functions: &HashMap<C_String, fn(f64) -> f64>) -> Result<String, String>
+unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, Symbol>, predefined_functions: &HashMap<String_View, fn(f64) -> f64>) -> Result<String, String>
 {
     assert_eq!((*decl_expr).expr_count, 6);
 
@@ -445,7 +445,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symb
 
 
 
-    let func: C_String = cstr_from_expr_token(func_name);
+    let func: String_View = cstr_from_expr_token(func_name);
 
     let var: *const Expr = get_expr_in_array(var_expr, 0);
     if get_expr_token_type(var) != LR_Type::ExprVar
@@ -455,7 +455,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symb
     let var_value: *const Expr = get_expr_in_array(var, 0);
     assert_eq!(get_expr_token_type(var_value), LR_Type::TokenId);
 
-    let var_str: C_String = cstr_from_expr_token(var_value);
+    let var_str: String_View = cstr_from_expr_token(var_value);
 
 
     if predefined_functions.get(&func).is_some()
@@ -475,7 +475,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symb
 
 
 
-// unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<C_String, Symbol>, predefined_functions: &HashMap<C_String, fn(f64) -> f64>) -> Result<(f64, String), String>
+// unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<String_View, Symbol>, predefined_functions: &HashMap<String_View, fn(f64) -> f64>) -> Result<(f64, String), String>
 // {
 //     if LR_Type::ExpraltS != get_expr_token_type(expr) || (*expr).expr_count == 0
 //     {
@@ -525,7 +525,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symb
 
 
 
-//         let func: C_String = cstr_from_expr_token(func_name);
+//         let func: String_View = cstr_from_expr_token(func_name);
 
 //         let var: *const Expr = get_expr_in_array(var_expr, 0);
 //         if get_expr_token_type(var) != LR_Type::ExprVar
@@ -536,7 +536,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<C_String, Symb
 //         let var_value: *const Expr = get_expr_in_array(var, 0);
 //         assert_eq!(get_expr_token_type(var_value), LR_Type::TokenId);
 
-//         let var_str: C_String = cstr_from_expr_token(var_value);
+//         let var_str: String_View = cstr_from_expr_token(var_value);
 
 
 //         if predefined_funcions.get(&func).is_some()
@@ -1254,7 +1254,7 @@ fn main()
     }
 
 
-    let mut predefined_functions: HashMap<C_String, fn(f64) -> f64> = HashMap::new();
+    let mut predefined_functions: HashMap<String_View, fn(f64) -> f64> = HashMap::new();
 
     predefined_functions.insert(cstr_from_str("sin"), f64::sin);
     predefined_functions.insert(cstr_from_str("cos"), f64::cos);
@@ -1304,7 +1304,7 @@ fn main()
     set_cursor_to_esc(0, 0);
     end_esc();
 
-    let mut map: HashMap<C_String, Symbol> = HashMap::new();
+    let mut map: HashMap<String_View, Symbol> = HashMap::new();
     unsafe
     {
         loop
