@@ -141,13 +141,13 @@ unsafe fn vec_from_expr_token(expr: *const Expr) -> Vec<char>
     return vec;
 }
 
-unsafe fn cstr_from_expr_token(expr: *const Expr) -> String_View
+unsafe fn str_view_from_expr_token(expr: *const Expr) -> String_View
 {
-    return String_View { data: (*expr).token.data, length: (*expr).token.length as usize }
+    return String_View { data: (*expr).token.data, stride: (*expr).token.stride as usize, length: (*expr).token.length as usize }
 }
-fn cstr_from_str(str: &'static str) -> String_View
+fn str_view_from_str(str: &'static str) -> String_View
 {
-    let cstr: String_View = String_View { data: str as *const str as *const i8, length: str.len()};
+    let cstr: String_View = String_View { data: str as *const str as *const i8, stride: 1, length: str.len()};
     return cstr;
 }
 
@@ -243,7 +243,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<String_View, Symbol>, i
 
             let call_val: f64 = eval_tree(call_expr, map, in_func_call, predefined_funcions)?;
 
-            let func_name_str: String_View = cstr_from_expr_token(func_name);
+            let func_name_str: String_View = str_view_from_expr_token(func_name);
 
             let pre_func = predefined_funcions.get(&func_name_str);
             if pre_func.is_some()
@@ -268,7 +268,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<String_View, Symbol>, i
         LR_Type::ExprVar =>
         {
             assert_eq!((*expr).expr_count, 1);
-            let var_name_str: String_View = cstr_from_expr_token(get_expr_in_array(expr, 0));
+            let var_name_str: String_View = str_view_from_expr_token(get_expr_in_array(expr, 0));
             if in_func_call.is_some()
             {
                 let tuple = in_func_call.unwrap();
@@ -315,6 +315,7 @@ enum Symbol
 struct String_View
 {
     data: *const i8,
+    stride: usize,
     length: usize,
 }
 
@@ -323,7 +324,7 @@ impl Hash for String_View
     fn hash<H: std::hash::Hasher>(&self, state: &mut H)
     {
         self.length.hash(state);
-        for i in 0..self.length as isize
+        for i in 0..(self.length * 4) as isize
         {
             unsafe {*self.data.offset(i)}.hash(state);
         }
@@ -339,7 +340,7 @@ impl PartialEq for String_View
 
         for i in 0..self.length as isize
         {
-            if unsafe {*self.data.offset(i) != *other.data.offset(i)}
+            if unsafe {*self.data.offset(i * self.stride as isize) != *other.data.offset(i * self.stride as isize)}
             {
                 return false
             }
@@ -415,7 +416,7 @@ unsafe fn add_var_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, Sy
     assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
     assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
 
-    let name_str = cstr_from_expr_token(var_name);
+    let name_str = str_view_from_expr_token(var_name);
     if map.insert(name_str, Symbol::Var(var_expr)).is_some()
     {
         return Some(format!("redefined {}", expr_token_to_string(var_name)));
@@ -445,7 +446,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, S
 
 
 
-    let func: String_View = cstr_from_expr_token(func_name);
+    let func: String_View = str_view_from_expr_token(func_name);
 
     let var: *const Expr = get_expr_in_array(var_expr, 0);
     if get_expr_token_type(var) != LR_Type::ExprVar
@@ -455,7 +456,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, S
     let var_value: *const Expr = get_expr_in_array(var, 0);
     assert_eq!(get_expr_token_type(var_value), LR_Type::TokenId);
 
-    let var_str: String_View = cstr_from_expr_token(var_value);
+    let var_str: String_View = str_view_from_expr_token(var_value);
 
 
     if predefined_functions.get(&func).is_some()
@@ -497,7 +498,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, S
 //         assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
 //         assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
 
-//         let name_str = cstr_from_expr_token(var_name);
+//         let name_str = str_view_from_expr_token(var_name);
 //         if map.insert(name_str, Symbol::Var(var_expr)).is_some()
 //         {
 //             return Ok(format!("redefined {}", expr_token_to_string(var_name)));
@@ -525,7 +526,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, S
 
 
 
-//         let func: String_View = cstr_from_expr_token(func_name);
+//         let func: String_View = str_view_from_expr_token(func_name);
 
 //         let var: *const Expr = get_expr_in_array(var_expr, 0);
 //         if get_expr_token_type(var) != LR_Type::ExprVar
@@ -536,7 +537,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, S
 //         let var_value: *const Expr = get_expr_in_array(var, 0);
 //         assert_eq!(get_expr_token_type(var_value), LR_Type::TokenId);
 
-//         let var_str: String_View = cstr_from_expr_token(var_value);
+//         let var_str: String_View = str_view_from_expr_token(var_value);
 
 
 //         if predefined_funcions.get(&func).is_some()
@@ -1256,27 +1257,27 @@ fn main()
 
     let mut predefined_functions: HashMap<String_View, fn(f64) -> f64> = HashMap::new();
 
-    predefined_functions.insert(cstr_from_str("sin"), f64::sin);
-    predefined_functions.insert(cstr_from_str("cos"), f64::cos);
-    predefined_functions.insert(cstr_from_str("tan"), f64::tan);
+    predefined_functions.insert(str_view_from_str("sin"), f64::sin);
+    predefined_functions.insert(str_view_from_str("cos"), f64::cos);
+    predefined_functions.insert(str_view_from_str("tan"), f64::tan);
 
-    predefined_functions.insert(cstr_from_str("asin"), f64::asin);
-    predefined_functions.insert(cstr_from_str("acos"), f64::acos);
-    predefined_functions.insert(cstr_from_str("atan"), f64::atan);
+    predefined_functions.insert(str_view_from_str("asin"), f64::asin);
+    predefined_functions.insert(str_view_from_str("acos"), f64::acos);
+    predefined_functions.insert(str_view_from_str("atan"), f64::atan);
 
-    predefined_functions.insert(cstr_from_str("sqrt"), f64::sqrt);
-    predefined_functions.insert(cstr_from_str("cbrt"), f64::cbrt);
+    predefined_functions.insert(str_view_from_str("sqrt"), f64::sqrt);
+    predefined_functions.insert(str_view_from_str("cbrt"), f64::cbrt);
 
-    predefined_functions.insert(cstr_from_str("exp"), f64::exp);
+    predefined_functions.insert(str_view_from_str("exp"), f64::exp);
 
-    predefined_functions.insert(cstr_from_str("ln"), f64::ln);
-    predefined_functions.insert(cstr_from_str("log2"), f64::log2);
-    predefined_functions.insert(cstr_from_str("log10"), f64::log10);
+    predefined_functions.insert(str_view_from_str("ln"), f64::ln);
+    predefined_functions.insert(str_view_from_str("log2"), f64::log2);
+    predefined_functions.insert(str_view_from_str("log10"), f64::log10);
 
-    predefined_functions.insert(cstr_from_str("floor"), f64::floor);
-    predefined_functions.insert(cstr_from_str("ceil"), f64::ceil);
+    predefined_functions.insert(str_view_from_str("floor"), f64::floor);
+    predefined_functions.insert(str_view_from_str("ceil"), f64::ceil);
 
-    predefined_functions.insert(cstr_from_str("abs"), f64::abs);
+    predefined_functions.insert(str_view_from_str("abs"), f64::abs);
 
 
     const length: usize = 32;
