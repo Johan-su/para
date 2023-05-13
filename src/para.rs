@@ -475,106 +475,6 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, S
 }
 
 
-
-// unsafe fn add_declarations_if_needed_and_run(expr: *mut Expr, map: &mut HashMap<String_View, Symbol>, predefined_functions: &HashMap<String_View, fn(f64) -> f64>) -> Result<(f64, String), String>
-// {
-//     if LR_Type::ExpraltS != get_expr_token_type(expr) || (*expr).expr_count == 0
-//     {
-//         return Err(format!("no or invalid expr tree"));
-//     }
-
-//     let decl_expr = get_expr_in_array(expr, 0);
-//     let token_type = get_expr_token_type(decl_expr);
-//     if LR_Type::ExprVarDecl == token_type
-//     {
-//         assert_eq!((*decl_expr).expr_count, 3);
-
-//         let var_name = get_expr_in_array(decl_expr, 2);
-//         let equals = get_expr_in_array(decl_expr, 1);
-//         let var_expr = get_expr_in_array(decl_expr, 0);
-
-
-//         assert_eq!(get_expr_token_type(var_name), LR_Type::TokenId);
-//         assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
-//         assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
-
-//         let name_str = str_view_from_expr_token(var_name);
-//         if map.insert(name_str, Symbol::Var(var_expr)).is_some()
-//         {
-//             return Ok(format!("redefined {}", expr_token_to_string(var_name)));
-//         }
-//     }
-//     else if LR_Type::ExprFuncDecl == token_type
-//     {
-//         assert_eq!((*decl_expr).expr_count, 6);
-
-//         let func_name = get_expr_in_array(decl_expr, 5);
-//         let open_par = get_expr_in_array(decl_expr, 4);
-//         // expr with variable instead of just Var to make parsing work
-//         let var_expr = get_expr_in_array(decl_expr, 3);
-//         let close_par = get_expr_in_array(decl_expr, 2);
-//         let equals = get_expr_in_array(decl_expr, 1);
-//         let func_expr = get_expr_in_array(decl_expr, 0);
-
-
-//         assert_eq!(get_expr_token_type(func_name), LR_Type::TokenId);
-//         assert_eq!(get_expr_token_type(open_par), LR_Type::TokenOpen);
-//         assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
-//         assert_eq!(get_expr_token_type(close_par), LR_Type::TokenClose);
-//         assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
-//         assert_eq!(get_expr_token_type(func_expr), LR_Type::ExprE);
-
-
-
-//         let func: String_View = str_view_from_expr_token(func_name);
-
-//         let var: *const Expr = get_expr_in_array(var_expr, 0);
-//         if get_expr_token_type(var) != LR_Type::ExprVar
-//         {
-//             println!("Function argument has to be a single variable");
-//             return;
-//         }
-//         let var_value: *const Expr = get_expr_in_array(var, 0);
-//         assert_eq!(get_expr_token_type(var_value), LR_Type::TokenId);
-
-//         let var_str: String_View = str_view_from_expr_token(var_value);
-
-
-//         if predefined_funcions.get(&func).is_some()
-//         {
-//             println!("Cannot redefine predefined functions");
-//             return;
-//         }
-
-//         if map.insert(func, Symbol::Func(Func {var_name_str: var_str, expr: func_expr})).is_some()
-//         {
-//             print!("redefined ");
-//             print_expr_token(func_name);
-//         }
-//         else
-//         {
-//             print!("defined ");
-//             print_expr_token(func_name);
-//         }
-//     }
-//     else if LR_Type::ExprE == token_type
-//     {
-//         let result = eval_tree(expr, map, None, predefined_funcions);
-//         match result
-//         {
-//             Ok(x) => println!(" = {}", x),
-//             Err(x) => println!("{}", x),
-//         }
-//     }
-//     else
-//     {
-//         panic!("unreachable");
-//     }
-//     return Ok("Ok".to_string());
-// }
-
-
-
 unsafe fn print_tree(expr: *const Expr)
 {
     let token_type: i64 = (*expr).token.token_type;
@@ -727,6 +627,37 @@ fn output_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer:
     write_string_at_pos(screen, str_buffer, x as i16, y as i16);
 }
 
+struct Ui_Layout
+{
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+}
+
+
+fn ui_box(screen: &mut Terminal_Screen, unique_id: usize, layout: &Ui_Layout, inputs: &Input)
+{
+    if is_active(unique_id)
+    {
+
+    }
+    else if is_hot(unique_id)
+    {
+
+    }
+    if inside(layout.x, layout.y, layout.w, layout.h)
+    {
+        unsafe
+        {
+            hot.owner = hot.index;
+            hot.item = Ui_kind::BOX;
+            hot.index = unique_id;
+        }
+    }
+
+}
+
 
 fn str_buffer_len(str_buffer: &[char], max_len: usize) -> usize
 {
@@ -800,7 +731,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
     }
 
 
-
+    let mut result = Input_Box_Actions::None;
 
     let height = 3;
     let width = max_len;
@@ -820,12 +751,12 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
         else if inputs.key_val == VK_ESCAPE
         {
             let _id = pop_active();
-            return Input_Box_Actions::LEAVE_WITH_ESCAPE;
+            result = Input_Box_Actions::LEAVE_WITH_ESCAPE;
         }
         else if inputs.key_val == VK_RETURN
         {
             let _id = pop_active();
-            return Input_Box_Actions::LEAVE_WITH_ENTER;
+            result =  Input_Box_Actions::LEAVE_WITH_ENTER;
         }
         else if inputs.key_val == VK_BACK
         {
@@ -899,7 +830,7 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
     }
     write_string_at_pos(screen, str_buffer, x as i16, (y + 1) as i16);
 
-    return Input_Box_Actions::None;
+    return result;
 }
 
 fn get_cursor_position_esc() -> (i16, i16)
@@ -926,6 +857,7 @@ enum Ui_kind
     None,
     INPUT_TEXT,
     OUTPUT_TEXT,
+    BOX,
     SCROLL_LIST,
 }
 
@@ -1117,7 +1049,6 @@ fn write_string_at_pos(screen: &mut Terminal_Screen, str: &[char], x: i16, y: i1
 }
 
 //TODO(Johan): maybe switch to ReadConsoleInputEx to avoid a blocking input
-
 fn get_console_input() -> Input
 {
     let mut input: Input = unsafe {std::mem::zeroed()};
