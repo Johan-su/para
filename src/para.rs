@@ -624,7 +624,7 @@ fn output_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer:
         }
     }
 
-    write_string_at_pos(screen, str_buffer, x as i16, y as i16);
+    write_string_at_pos(screen, str_buffer, 255, 255, 255, x as i16, y as i16);
 }
 
 struct Ui_Layout
@@ -825,10 +825,10 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
     assert!(max_len <= i16::MAX as usize);
     for i in 0..width
     {
-        write_char_at_pos(screen, '-', (x + i) as i16, y as i16);
-        write_char_at_pos(screen, '-', (x + i) as i16, (y + 2) as i16);
+        write_char_at_pos(screen, '-', 255, 255, 255, (x + i) as i16, y as i16);
+        write_char_at_pos(screen, '-', 255, 255, 255, (x + i) as i16, (y + 2) as i16);
     }
-    write_string_at_pos(screen, str_buffer, x as i16, (y + 1) as i16);
+    write_string_at_pos(screen, str_buffer, 255, 255, 255, x as i16, (y + 1) as i16);
 
     return result;
 }
@@ -908,9 +908,19 @@ fn pop_active() -> Ui_id
 
 
 #[derive(Debug)]
+struct Screen_Element
+{
+    character: char,
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
+
+#[derive(Debug)]
 struct Terminal_Screen
 {
-    buffer: Vec<char>,
+    buffer: Vec<Screen_Element>,
     width: usize,
     height: usize,
 }
@@ -968,12 +978,14 @@ fn set_cursor_to_esc(x: i16, y: i16)
     print!("\x1b[{};{}H", y + 1, x + 1);
 }
 
-fn render_terminal_buffer(screen: &mut Terminal_Screen)
+
+// static mut present_screen: Terminal_Screen = Terminal_Screen {buffer: , width: 0, height: 0};
+
+
+fn render_terminal_buffer()
 {
+    let screen: &mut Terminal_Screen = unsafe {&mut front_buffer};
     save_cursor_position();
-    begin_esc();
-    clear_screen_esc();
-    end_esc();
 
 
     for y in 0..screen.height
@@ -985,7 +997,10 @@ fn render_terminal_buffer(screen: &mut Terminal_Screen)
         for x in 0..screen.width
         {
             let char_pos = x + row;
-            let char_val = screen.buffer[char_pos];
+            let char_val: char = screen.buffer[char_pos].character;
+            // begin_esc();
+            // set_foreground_color_esc(screen.buffer[char_pos].r, screen.buffer[char_pos].g, screen.buffer[char_pos].b);
+            // end_esc();
             if char_val == '\0'
             {
                 print!(" ");
@@ -1003,7 +1018,7 @@ fn render_terminal_buffer(screen: &mut Terminal_Screen)
 }
 
 
-fn write_char_at_pos(screen: &mut Terminal_Screen, character: char, x: i16, y: i16)
+fn write_char_at_pos(screen: &mut Terminal_Screen, character: char, r: u8, g: u8, b: u8, x: i16, y: i16)
 {
     if x < 0 || y < 0
     {
@@ -1014,11 +1029,14 @@ fn write_char_at_pos(screen: &mut Terminal_Screen, character: char, x: i16, y: i
     {
         return;
     }
-    screen.buffer[x as usize + y as usize * screen.width] = character;
+    screen.buffer[x as usize + y as usize * screen.width].character = character;
+    screen.buffer[x as usize + y as usize * screen.width].r = r;
+    screen.buffer[x as usize + y as usize * screen.width].g = g;
+    screen.buffer[x as usize + y as usize * screen.width].b = b;
 }
 
 
-fn write_string_at_pos(screen: &mut Terminal_Screen, str: &[char], x: i16, y: i16)
+fn write_string_at_pos(screen: &mut Terminal_Screen, str: &[char], r: u8, g: u8, b: u8, x: i16, y: i16)
 {
     if x < 0 || y < 0
     {
@@ -1044,10 +1062,14 @@ fn write_string_at_pos(screen: &mut Terminal_Screen, str: &[char], x: i16, y: i1
 
     for i in 0..normalized_len
     {
-        screen.buffer[start_pos + i] = str[i] as char;
+        screen.buffer[start_pos + i].character = str[i] as char;
+        screen.buffer[start_pos + i].r = r;
+        screen.buffer[start_pos + i].g = g;
+        screen.buffer[start_pos + i].b = b;
     }
 }
 
+//TODO(Johan): only rerender differences in terminal screen to avoid flickering and to enable RGB in the terminal 
 //TODO(Johan): maybe switch to ReadConsoleInputEx to avoid a blocking input
 fn get_console_input() -> Input
 {
@@ -1111,6 +1133,11 @@ static mut terminal_x: SHORT = 0;
 static mut terminal_y: SHORT = 0;
 static mut terminal_w: SHORT = 0;
 static mut terminal_h: SHORT = 0;
+
+static mut back_buffer: Terminal_Screen = Terminal_Screen { buffer: vec![], width: 0, height: 0 };
+static mut front_buffer: Terminal_Screen = Terminal_Screen { buffer: vec![], width: 0, height: 0 };
+
+
 fn get_terminal_screen() -> Terminal_Screen
 {
     unsafe
@@ -1140,17 +1167,34 @@ fn get_terminal_screen() -> Terminal_Screen
         let buffer_length = (terminal_w * terminal_h) as usize;
         let width = terminal_w as usize;
         let height = terminal_h as usize;
-        let mut terminal_screen_buffer: Vec<char> = Vec::new();
+        let mut terminal_screen_buffer: Vec<Screen_Element> = Vec::new();
         terminal_screen_buffer.reserve(buffer_length);
         for _ in 0..buffer_length
         {
-            terminal_screen_buffer.insert(0, '\0');
+            terminal_screen_buffer.insert(0, Screen_Element { character: '\0', r: 0, g: 0, b: 0 });
         }
+
         return Terminal_Screen { buffer: (terminal_screen_buffer), width: (width), height: (height)}
     }
 }
 
+fn set_foreground_color_esc(r: u8, g: u8, b: u8)
+{
+    assert!(unsafe {debug_escape});
+    print!("\x1b[38;2;{};{};{}m", r, g, b);
+}
 
+fn set_background_color_esc(r: u8, g: u8, b: u8)
+{
+    assert!(unsafe {debug_escape});
+    print!("\x1b[48;2;{};{};{}m", r, g, b);
+}
+
+fn set_default_color_esc()
+{
+    assert!(unsafe {debug_escape});
+    print!("\x1b[0m");   
+}
 
 fn main()
 {
@@ -1237,14 +1281,14 @@ fn main()
 
     let mut expr: *mut Expr = 0 as *mut Expr;
     let mut msg: [u8; 1000] = [0; 1000];
+    let mut map: HashMap<String_View, Symbol> = HashMap::new();
 
+    
     begin_esc();
     // change to alternate buffer
     print!("\x1b[?1049h");
     set_cursor_to_esc(0, 0);
     end_esc();
-
-    let mut map: HashMap<String_View, Symbol> = HashMap::new();
     unsafe
     {
         loop
@@ -1381,7 +1425,7 @@ fn main()
                 hot.item,
                 active).chars().collect::<Vec<char>>();
 
-            write_string_at_pos(&mut screen, format_string.as_slice(), 0, bottom_y);
+            write_string_at_pos(&mut screen, format_string.as_slice(), 255, 255, 255, 0, bottom_y);
 
             if active.stack_count == 0
             {
