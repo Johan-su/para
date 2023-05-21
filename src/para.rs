@@ -104,10 +104,11 @@ unsafe fn expr_token_to_string(expr: *const Expr) -> String
 
     let data: *const i8 = (*expr).token.data;
     let data_length: u32 = (*expr).token.length;
+    let stride: u8 = (*expr).token.stride;
     {
         for i in 0..data_length
         {
-            vec.push(*(data.offset(i as isize)) as u8 as char);
+            vec.push(*(data.offset(i as isize * stride as isize)) as u8 as char);
         }
     }
     return vec.into_iter().collect();
