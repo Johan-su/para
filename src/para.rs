@@ -983,38 +983,51 @@ fn set_cursor_to_esc(x: i16, y: i16)
 }
 
 
-// static mut present_screen: Terminal_Screen = Terminal_Screen {buffer: , width: 0, height: 0};
 
-
-fn render_terminal_buffer()
+fn present_back_terminal_buffer()
 {
     let screen: &mut Terminal_Screen = unsafe {&mut front_buffer};
+    let back_screen: &mut Terminal_Screen = unsafe {&mut back_buffer};
     save_cursor_position();
 
 
     for y in 0..screen.height
     {
-        begin_esc();
-        set_cursor_to_esc(0, y as i16);
-        end_esc();
         let row = y * screen.width;
         for x in 0..screen.width
         {
             let char_pos = x + row;
-            let char_val: char = screen.buffer[char_pos].character;
-            // begin_esc();
-            // set_foreground_color_esc(screen.buffer[char_pos].r, screen.buffer[char_pos].g, screen.buffer[char_pos].b);
-            // end_esc();
-            if char_val == '\0'
+            
+            let character_diff: bool = screen.buffer[char_pos].character != back_screen.buffer[char_pos].character; 
+            let rgb_diff: bool = screen.buffer[char_pos].r != back_screen.buffer[char_pos].r
+                || screen.buffer[char_pos].g != back_screen.buffer[char_pos].g
+                || screen.buffer[char_pos].b != back_screen.buffer[char_pos].b;
+
+            if character_diff || rgb_diff
             {
-                print!(" ");
-            }
-            else
-            {
-                print!("{}", char_val);
+                screen.buffer[char_pos].character = back_screen.buffer[char_pos].character; 
+                screen.buffer[char_pos].r = back_screen.buffer[char_pos].r; 
+                screen.buffer[char_pos].g = back_screen.buffer[char_pos].g; 
+                screen.buffer[char_pos].b = back_screen.buffer[char_pos].b; 
+
+                let char_val: char = screen.buffer[char_pos].character;
+
+                begin_esc();
+                set_cursor_to_esc(x as i16, y as i16);
+                set_foreground_color_esc(screen.buffer[char_pos].r, screen.buffer[char_pos].g, screen.buffer[char_pos].b);
+                end_esc();
+                
+                
+                if char_val == '\0'
+                {
+                    print!(" ");
+                }
+                else
+                {
+                    print!("{}", char_val);
+                }
             }
         }
-
     }
     begin_esc();
     restore_cursor_position_esc();
@@ -1117,7 +1130,6 @@ fn get_console_input() -> Input
     return input;
 }
 
-#[derive(Debug)]
 struct Input
 {
     unicode_char: u16,
@@ -1133,16 +1145,16 @@ struct Input
     SHIFT_PRESSED: bool,
 }
 
-static mut terminal_x: SHORT = 0;
-static mut terminal_y: SHORT = 0;
-static mut terminal_w: SHORT = 0;
-static mut terminal_h: SHORT = 0;
 
 static mut back_buffer: Terminal_Screen = Terminal_Screen { buffer: vec![], width: 0, height: 0 };
 static mut front_buffer: Terminal_Screen = Terminal_Screen { buffer: vec![], width: 0, height: 0 };
 
 
-fn get_terminal_screen() -> Terminal_Screen
+static mut terminal_x: SHORT = 0;
+static mut terminal_y: SHORT = 0;
+static mut terminal_w: SHORT = 0;
+static mut terminal_h: SHORT = 0;
+fn get_terminal_screen() -> &'static mut Terminal_Screen
 {
     unsafe
     {
@@ -1159,26 +1171,45 @@ fn get_terminal_screen() -> Terminal_Screen
         let new_w = screen_buf_info.srWindow.Right - screen_buf_info.srWindow.Left;
         let new_h = screen_buf_info.srWindow.Bottom - screen_buf_info.srWindow.Top;
 
-        if terminal_x != new_x || terminal_y != new_y || terminal_w != new_w || terminal_h != new_h
+
+        let screen_resized: bool = terminal_x != new_x || terminal_y != new_y || terminal_w != new_w || terminal_h != new_h;
+        if screen_resized 
         {
+            begin_esc();
+            clear_screen_esc();
+            end_esc();
+            // resize the buffer as the window has changed size
             terminal_x = new_x;
             terminal_y = new_y;
             terminal_w = new_w;
             terminal_h = new_h;
+
+            let buffer_length = (terminal_w * terminal_h) as usize;
+
+            let width = terminal_w as usize;
+            let height = terminal_h as usize;
+            back_buffer.width = width;
+            back_buffer.height = height;
+
+            back_buffer.buffer.reserve(buffer_length);
+            for _ in 0..buffer_length
+            {
+                back_buffer.buffer.insert(0, Screen_Element { character: '\0', r: 0, g: 0, b: 0 });
+            }
+
+
+            front_buffer.width = width;
+            front_buffer.height = height;
+
+            front_buffer.buffer.reserve(buffer_length);
+            for _ in 0..buffer_length
+            {
+                front_buffer.buffer.insert(0, Screen_Element { character: '\0', r: 0, g: 0, b: 0 });
+            }
+
             // println!("terminal terminal_x = {}, terminal_y = {}, terminal_w = {}, terminal_h = {}", terminal_x, terminal_y, terminal_w, terminal_h);
         }
-
-        let buffer_length = (terminal_w * terminal_h) as usize;
-        let width = terminal_w as usize;
-        let height = terminal_h as usize;
-        let mut terminal_screen_buffer: Vec<Screen_Element> = Vec::new();
-        terminal_screen_buffer.reserve(buffer_length);
-        for _ in 0..buffer_length
-        {
-            terminal_screen_buffer.insert(0, Screen_Element { character: '\0', r: 0, g: 0, b: 0 });
-        }
-
-        return Terminal_Screen { buffer: (terminal_screen_buffer), width: (width), height: (height)}
+        return &mut back_buffer; 
     }
 }
 
@@ -1333,7 +1364,9 @@ fn main()
                     j += 1;
                 }
             }
+            
 
+            // ui
             {
                 let mut should_reparse: bool = false;
                 for i in 0..buffer_count
@@ -1457,7 +1490,7 @@ fn main()
                 }
             }
 
-            render_terminal_buffer(&mut screen);
+            present_back_terminal_buffer();
             io::stdout().flush().unwrap();
         }
         revert_console(stdout, stdin, old_stdout_mode, old_stdin_mode);
