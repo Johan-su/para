@@ -641,6 +641,8 @@ struct Ui_Layout
 
 fn ui_box(screen: &mut Terminal_Screen, unique_id: usize, layout: &Ui_Layout, inputs: &Input)
 {
+    let _ = screen; // pass screen incase we want to render different when in hot/active vs not active
+    let _ = inputs;
     if is_active(unique_id)
     {
 
@@ -658,7 +660,6 @@ fn ui_box(screen: &mut Terminal_Screen, unique_id: usize, layout: &Ui_Layout, in
             hot.index = unique_id;
         }
     }
-
 }
 
 
