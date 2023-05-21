@@ -467,11 +467,11 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, S
 
     if map.insert(func, Symbol::Func(Func {var_name_str: var_str, expr: func_expr})).is_some()
     {
-        return Ok(format!("redefined {}", expr_token_to_string(func_name)));
+        return Ok(format!("Redefined {}", expr_token_to_string(func_name)));
     }
     else
     {
-        return Ok(format!("defined {}", expr_token_to_string(func_name)));
+        return Ok(format!("Defined {}", expr_token_to_string(func_name)));
     }
 }
 
