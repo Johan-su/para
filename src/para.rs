@@ -1386,10 +1386,8 @@ fn main()
 
                             if token_type == LR_Type::ExprVarDecl
                             {
-                                if let Some(x) = add_var_decl(decl_expr, &mut map)
-                                {
-                                    write_string_to_buffer(&mut output_buffers[i], &x);
-                                }
+                                let str: String = add_var_decl(decl_expr, &mut map);
+                                write_string_to_buffer(&mut output_buffers[i], &str);
                             }
                             else if LR_Type::ExprFuncDecl == token_type
                             {
