@@ -741,8 +741,15 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
     let width = max_len;
 
 
+    let mut r: u8 = 255;
+    let mut g: u8 = 255;
+    let mut b: u8 = 255;
+
     if is_active(unique_id)
     {
+        r = 154;
+        g = 205;
+        b = 50;
         begin_esc();
         if inputs.key_val == VK_LEFT
         {
@@ -813,6 +820,10 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
             set_cursor_to_esc((x + str_buffer_len(str_buffer, max_len)) as i16, y as i16 + 1);
             end_esc();
         }
+
+        r = 255;
+        g = 255;
+        b = 0;
     }
 
     if inside(x, y, width, height)
@@ -829,8 +840,8 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
     assert!(max_len <= i16::MAX as usize);
     for i in 0..width
     {
-        write_char_at_pos(screen, '-', 255, 255, 255, (x + i) as i16, y as i16);
-        write_char_at_pos(screen, '-', 255, 255, 255, (x + i) as i16, (y + 2) as i16);
+        write_char_at_pos(screen, '-', r, g, b, (x + i) as i16, y as i16);
+        write_char_at_pos(screen, '-', r, g, b, (x + i) as i16, (y + 2) as i16);
     }
     write_string_at_pos(screen, str_buffer, 255, 255, 255, x as i16, (y + 1) as i16);
 
