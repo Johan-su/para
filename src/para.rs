@@ -404,7 +404,7 @@ fn string_to_tokens<'a>(arg: &'a [char], str_len: usize, out: &'a mut Vec<ParseT
 }
 
 
-unsafe fn add_var_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, Symbol>) -> Option<String>
+unsafe fn add_var_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, Symbol>) -> String 
 {
     assert_eq!((*decl_expr).expr_count, 3);
 
@@ -420,9 +420,9 @@ unsafe fn add_var_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, Sy
     let name_str = str_view_from_expr_token(var_name);
     if map.insert(name_str, Symbol::Var(var_expr)).is_some()
     {
-        return Some(format!("redefined {}", expr_token_to_string(var_name)));
+        return format!("Redefined {}", expr_token_to_string(var_name));
     }
-    return None;
+    return format!("Defined {}", expr_token_to_string(var_name));
 }
 
 unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, Symbol>, predefined_functions: &HashMap<String_View, fn(f64) -> f64>) -> Result<String, String>
