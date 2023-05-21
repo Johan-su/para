@@ -526,6 +526,7 @@ enum Mode
 
 fn begin_esc() -> bool
 {
+    assert!(unsafe {!debug_escape});
     unsafe {debug_escape = true};
     let console: HANDLE = unsafe {GetStdHandle(STD_OUTPUT_HANDLE)};
 
@@ -544,6 +545,7 @@ fn begin_esc() -> bool
 
 fn end_esc() -> bool
 {
+    assert!(unsafe {debug_escape});
     unsafe {debug_escape = false};
     io::stdout().flush().unwrap();
     let console: HANDLE = unsafe {GetStdHandle(STD_OUTPUT_HANDLE)};
