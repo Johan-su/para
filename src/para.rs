@@ -604,12 +604,17 @@ fn inside(x: usize, y: usize, width: usize, height: usize) -> bool
 }
 
 
-fn output_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: &[char], max_len: usize, x: usize, y: usize)
+fn output_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: &[char], max_len: usize)
 {
     assert!(max_len <= i16::MAX as usize);
 
-    let height = 1;
+    let height = OUTPUT_STR_HEIGHT;
     let width = max_len;
+
+
+    let xy = get_xy_with_current_layout(width, height);
+    let x: usize = xy.0;
+    let y: usize = xy.1;
 
     if is_active(unique_id)
     {
@@ -630,16 +635,38 @@ fn output_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer:
     write_string_at_pos(screen, str_buffer, 255, 255, 255, x as i16, y as i16);
 }
 
+#[derive(Clone, Copy)]
+enum Flow
+{
+    INVALID,
+
+    UPPER_LEFT_FLOW_RIGHT,
+    UPPER_LEFT_FLOW_DOWN,
+
+    UPPER_RIGHT_FLOW_LEFT,
+    UPPER_RIGHT_FLOW_DOWN,
+
+    BOTTOM_LEFT_FLOW_RIGHT,
+    BOTTOM_LEFT_FLOW_UP,
+    
+    BOTTOM_RIGHT_FLOW_LEFT,
+    BOTTOM_RIGHT_FLOW_UP,
+}
+
+
+
+#[derive(Clone, Copy)]
 struct Ui_Layout
 {
     x: usize,
     y: usize,
     w: usize,
     h: usize,
+    flow: Flow,
 }
 
 
-fn ui_box(screen: &mut Terminal_Screen, unique_id: usize, layout: &Ui_Layout, inputs: &Input)
+fn ui_box(screen: &mut Terminal_Screen, unique_id: usize, layout: &mut Ui_Layout, inputs: &Input)
 {
     let _ = screen; // pass screen incase we want to render different when in hot/active vs not active
     let _ = inputs;
@@ -660,6 +687,10 @@ fn ui_box(screen: &mut Terminal_Screen, unique_id: usize, layout: &Ui_Layout, in
             hot.index = unique_id;
         }
     }
+    layout.x += 1;
+    layout.y += 1;
+    layout.w -= 1;
+    layout.h -= 1;
 }
 
 
@@ -685,23 +716,8 @@ enum Input_Box_Actions
 }
 
 
-fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: &mut [char], max_len: usize, x: usize, y: usize, inputs: &Input) -> Input_Box_Actions
+fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: &mut [char], max_len: usize, inputs: &Input) -> Input_Box_Actions
 {
-    fn move_left_in_input_string(x: i16)
-    {
-        if unsafe {cursor.x} > x
-        {
-            move_cursor_esc(-1, 0);
-        }
-    }
-    fn move_right_in_input_string(str_buffer: &mut [char], max_len: usize)
-    {
-        if unsafe {cursor.x as usize} < str_buffer_len(str_buffer, max_len) + 1
-        {
-            move_cursor_esc(1, 0);
-        }
-    }
-
     fn shift_string_right_from_index(buffer: &mut [char], max_len: usize, index: usize)
     {
         assert!(index < max_len);
@@ -737,13 +753,22 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
 
     let mut result = Input_Box_Actions::None;
 
-    let height = 3;
+    let height = INPUT_STR_HEIGHT;
     let width = max_len;
+
+    let tup = get_xy_with_current_layout(width, height);
+    let x: usize = tup.0;
+    let y: usize = tup.1;
+
+
+
+
 
 
     let mut r: u8 = 255;
     let mut g: u8 = 255;
     let mut b: u8 = 255;
+
 
     if is_active(unique_id)
     {
@@ -753,11 +778,17 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
         begin_esc();
         if inputs.key_val == VK_LEFT
         {
-            move_left_in_input_string(x as i16);
+            if unsafe {cursor.x} > x as i16
+            {
+                move_cursor_esc(-1, 0);
+            }
         }
         else if inputs.key_val == VK_RIGHT
         {
-            move_right_in_input_string(str_buffer, max_len);
+            if unsafe {cursor.x as usize} < str_buffer_len(str_buffer, max_len) + 1
+            {
+                move_cursor_esc(1, 0);
+            }
         }
         else if inputs.key_val == VK_ESCAPE
         {
@@ -853,8 +884,6 @@ fn get_cursor_position_esc() -> (i16, i16)
     return unsafe {(cursor.x, cursor.y)};
 }
 
-
-
 struct Cursor
 {
     x: i16,
@@ -885,6 +914,10 @@ struct Ui_id
 }
 
 
+const INPUT_STR_HEIGHT: usize = 3;
+const OUTPUT_STR_HEIGHT: usize = 1;
+
+
 #[derive(Debug)]
 struct Active_Stack
 {
@@ -892,20 +925,28 @@ struct Active_Stack
     stack: [Ui_id; 8],
 }
 
+struct Layout_Stack
+{
+    stack_count: usize,
+    stack: [Ui_Layout; 16],
+}
 
 static mut cursor: Cursor = Cursor {x: 0, y: 0, stack_count: 0, save_stack: [(0, 0); 8]};
 // static mut last_input: u16 = 0;
 
 static mut hot: Ui_id = Ui_id {owner: 0, item: Ui_kind::None, index: 0};
-static mut active: Active_Stack = Active_Stack {stack_count: 0, stack: [Ui_id {owner: 0, item: Ui_kind::None, index: 0}; 8]} ;
-
+static mut active: Active_Stack = Active_Stack {stack_count: 0, stack: [Ui_id {owner: 0, item: Ui_kind::None, index: 0}; 8]};
+static mut layout_stack: Layout_Stack = Layout_Stack {
+    stack_count: 0, 
+    stack: [Ui_Layout {x: 0, y: 0, w: 0, h: 0, flow: Flow::INVALID}; 16]
+};
 static mut debug_escape: bool = false;
 
 fn push_active(id: Ui_id)
 {
     unsafe
     {
-        assert!(active.stack_count < 8);
+        assert!(active.stack_count < active.stack.len());
         active.stack[active.stack_count] = id;
         active.stack_count += 1;
     }
@@ -920,6 +961,118 @@ fn pop_active() -> Ui_id
         return active.stack[active.stack_count];
     }
 }
+
+
+fn push_layout(layout: Ui_Layout)
+{
+    unsafe
+    {
+        // ignore if no parent
+        if layout_stack.stack_count != 0
+        {
+            let parent = layout_stack.stack[layout_stack.stack_count - 1];
+            let bx: bool = layout.x + layout.w >= parent.x && layout.x <= parent.x + parent.w;
+            let by: bool = layout.y + layout.h >= parent.y && layout.y <= parent.y + parent.h;
+
+            if !(bx && by)
+            {
+                assert!(false, "child layout is out of parent layout's bounds") //TODO(Johan): change to real error
+            }
+        }
+
+
+        assert!(layout_stack.stack_count < layout_stack.stack.len());
+        layout_stack.stack[layout_stack.stack_count] = layout;
+        layout_stack.stack_count += 1;
+    } 
+}
+
+fn pop_layout() -> Ui_Layout
+{
+    unsafe
+    {
+        assert!(layout_stack.stack_count > 0);
+        layout_stack.stack_count -= 1;
+        return layout_stack.stack[layout_stack.stack_count];
+    }
+}
+
+fn get_current_layout() -> &'static mut Ui_Layout
+{
+    unsafe 
+    {
+        assert!(layout_stack.stack_count > 0);
+        return &mut layout_stack.stack[layout_stack.stack_count - 1];
+    }
+}
+
+fn get_xy_with_current_layout(width: usize, height: usize) -> (usize, usize)
+{
+    let layout: &mut Ui_Layout = get_current_layout();
+    
+    assert!(layout.w >= width);
+    assert!(layout.h >= height);
+    
+    let x: usize;
+    let y: usize;
+    match layout.flow
+    {
+        Flow::INVALID => {panic!("unreachable")},
+        Flow::UPPER_LEFT_FLOW_RIGHT => 
+        {
+
+            x = layout.x;
+            y = layout.y;
+            layout.x += width;
+
+        },
+        Flow::UPPER_LEFT_FLOW_DOWN => 
+        {
+            x = layout.x;
+            y = layout.y;
+            layout.y += height;
+        },
+        Flow::UPPER_RIGHT_FLOW_LEFT => 
+        {
+            x = layout.x + layout.w - width;
+            y = layout.y;
+            layout.w -= width;
+        },
+        Flow::UPPER_RIGHT_FLOW_DOWN => 
+        {
+            x = layout.x + layout.w - width;
+            y = layout.y;
+            layout.y += height;
+        },
+        Flow::BOTTOM_LEFT_FLOW_RIGHT => 
+        {
+            x = layout.x;
+            y = layout.y + layout.h - height;
+            layout.x += width;
+        },
+        Flow::BOTTOM_LEFT_FLOW_UP => 
+        {
+            x = layout.x;
+            y = layout.y + layout.h - height;
+            layout.h -= height;
+        },
+        Flow::BOTTOM_RIGHT_FLOW_LEFT => 
+        {
+            x = layout.x + layout.w - width;
+            y = layout.y + layout.h - height;
+            layout.w -= width;
+        },
+        Flow::BOTTOM_RIGHT_FLOW_UP => 
+        {
+            x = layout.x + layout.w - width;
+            y = layout.y + layout.h - height;
+            layout.h -= height;
+        },
+    }
+    return (x, y);
+}
+
+
 
 
 #[derive(Debug)]
@@ -981,8 +1134,8 @@ fn set_cursor_to_esc(x: i16, y: i16)
     assert!(unsafe {debug_escape});
     let mut x = x;
     let mut y = y;
-    if x < 0 { x = 0; } ;
-    if y < 0 { y = 0; } ;
+    if x < 0 { x = 0; };
+    if y < 0 { y = 0; };
 
     unsafe
     {
@@ -1242,6 +1395,11 @@ fn set_default_color_esc()
     print!("\x1b[0m");   
 }
 
+
+
+
+
+
 fn main()
 {
     let mut old_stdin_mode: DWORD = 0;
@@ -1379,10 +1537,30 @@ fn main()
 
             // ui
             {
+                let layout: Ui_Layout = Ui_Layout { 
+                    x: 0, 
+                    y: 0, 
+                    w: screen.width, 
+                    h: screen.height, 
+                    flow: Flow::UPPER_LEFT_FLOW_DOWN,
+                };
+
                 let mut should_reparse: bool = false;
+
+                push_layout(layout);
                 for i in 0..buffer_count
                 {
-                    match input_string_box(&mut screen, str_as_usize("my_text_box") + i, input_buffers[i].as_mut_slice(), length, 1, i * 3, &inputs)
+                    let xy = get_xy_with_current_layout(length, INPUT_STR_HEIGHT);
+
+                    let layout2: Ui_Layout = Ui_Layout { 
+                        x: xy.0, 
+                        y: xy.1, 
+                        w: 1 + 2 * length, 
+                        h: INPUT_STR_HEIGHT, 
+                        flow: Flow::UPPER_LEFT_FLOW_RIGHT,
+                    };
+                    push_layout(layout2);
+                    match input_string_box(&mut screen, str_as_usize("my_text_box") + i, input_buffers[i].as_mut_slice(), length, &inputs)
                     {
                         Input_Box_Actions::None => {},
                         Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER =>
@@ -1390,9 +1568,10 @@ fn main()
                             should_reparse = true;
                         }
                     }
-                    output_string_box(&mut screen, str_as_usize("my_output_string") + i, output_buffers[i].as_slice(), length, 1 + length + 1, 1 + i * 3);
+                    output_string_box(&mut screen, str_as_usize("my_output_string") + i, output_buffers[i].as_slice(), length);
+                    pop_layout();
                 }
-
+                pop_layout();
                 if should_reparse
                 {
                     map.clear();
