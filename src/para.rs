@@ -611,8 +611,13 @@ fn output_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer:
     let height = OUTPUT_STR_HEIGHT;
     let width = max_len;
 
-
-    let xy = get_xy_with_current_layout(width, height);
+    let xy: (usize, usize);
+    match get_xy_with_current_layout(width, height)
+    {
+        Some(x) => {xy = x}
+        None => {return;}
+    }
+    
     let x: usize = xy.0;
     let y: usize = xy.1;
 
@@ -756,7 +761,13 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
     let height = INPUT_STR_HEIGHT;
     let width = max_len;
 
-    let tup = get_xy_with_current_layout(width, height);
+    let tup: (usize, usize);
+    match get_xy_with_current_layout(width, height)
+    {
+        Some(x) => {tup = x}
+        None => {return result}
+    }
+
     let x: usize = tup.0;
     let y: usize = tup.1;
 
@@ -1008,12 +1019,15 @@ fn get_current_layout() -> &'static mut Ui_Layout
     }
 }
 
-fn get_xy_with_current_layout(width: usize, height: usize) -> (usize, usize)
+fn get_xy_with_current_layout(width: usize, height: usize) -> Option<(usize, usize)>
 {
     let layout: &mut Ui_Layout = get_current_layout();
     
-    assert!(layout.w >= width);
-    assert!(layout.h >= height);
+
+    if layout.w < width || layout.h < height
+    {
+        return None;
+    }
     
     let x: usize;
     let y: usize;
@@ -1071,7 +1085,7 @@ fn get_xy_with_current_layout(width: usize, height: usize) -> (usize, usize)
             layout.h -= height;
         },
     }
-    return (x, y);
+    return Some((x, y));
 }
 
 
@@ -1552,7 +1566,12 @@ fn main()
                 push_layout(layout);
                 for i in 0..buffer_count
                 {
-                    let xy = get_xy_with_current_layout(length, INPUT_STR_HEIGHT);
+                    let xy: (usize, usize);
+                    match get_xy_with_current_layout(length, INPUT_STR_HEIGHT)
+                    {
+                        Some(x) => {xy = x}
+                        None => {continue;}
+                    }
 
                     let layout2: Ui_Layout = Ui_Layout { 
                         x: xy.0, 
