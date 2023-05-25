@@ -785,7 +785,9 @@ fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: 
         }
         else if inputs.key_val == VK_RIGHT
         {
-            if unsafe {cursor.x as usize} < str_buffer_len(str_buffer, max_len) + 1
+            let x_in_str = unsafe {cursor.x} as usize - x;
+            let str_len = str_buffer_len(str_buffer, max_len);
+            if x_in_str < str_len
             {
                 move_cursor_esc(1, 0);
             }
