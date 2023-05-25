@@ -1622,6 +1622,10 @@ fn main()
                             if get_expr_token_type(expr) != LR_Type::ExpraltS ||
                                 (*expr).expr_count == 0
                             {
+                                for j in 0..length
+                                {
+                                    output_buffers[i][j] = '\0';
+                                }
                                 continue 'outer;
                             }
 
