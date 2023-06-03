@@ -3,30 +3,33 @@ TOKENS
 -;
 *;
 /;
+^;
 =;
 (;
 );
 Number;
 Id;
+Sep;
 End;
 :
 BNF
-<S> := <S'>;
-<S'> := <FuncDecl> | <VarDecl> | <E> | ;
-<FuncDecl> := 'Id' '('<E>')' '=' <E>;
+<S> := <Construction'>*;
+<Construction'> := <Construction> 'Sep'
+<Construction> := <FuncDecl> | <VarDecl> | <E> | ;
+<FuncDecl> := 'Id' '('Id')' '=' <E>;
 <VarDecl> := 'Id' '=' <E>;
 <E> := '('<E>')' | 
         'Number' | 
-        <Var> | 
+        'Id' | 
         <FuncCall> | 
         '-'<E> | 
         '+'<E> | 
+        <E> '^' <E> |
         <E> '/' <E> | 
         <E> '*' <E> | 
         <E> '-' <E> | 
         <E> '+' <E>;
 <FuncCall> := 'Id''('<E>')';
-<Var> := 'Id';
 :
 
 
