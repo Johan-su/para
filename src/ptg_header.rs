@@ -115,7 +115,7 @@ pub struct ParseTable {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ParseToken {
-    pub token_type: I64,
+    pub token_type: I32,
     pub data: *const ::std::os::raw::c_char,
     pub length: U32,
     pub stride: U8,
@@ -236,9 +236,9 @@ fn bindgen_test_layout_Expr() {
 extern "C" {
     pub fn write_parse_table_from_bnf(
         buffer: *mut ::std::os::raw::c_void,
-        buffer_size: U32,
+        buffer_size: *mut U32,
         src: *const ::std::os::raw::c_char,
-    ) -> U32;
+    ) -> bool;
 }
 extern "C" {
     pub fn create_parse_table_from_bnf(
@@ -274,8 +274,14 @@ extern "C" {
     ) -> bool;
 }
 extern "C" {
-    pub fn get_table_size(table: *mut ParseTable) -> U32;
+    pub fn get_table_size(table: *const ParseTable) -> U32;
 }
 extern "C" {
-    pub fn print_table(table: *mut ParseTable);
+    pub fn print_table(table: *const ParseTable);
+}
+extern "C" {
+    pub fn get_last_error() -> *const ::std::os::raw::c_char;
+}
+extern "C" {
+    pub fn get_error_size() -> Usize;
 }
