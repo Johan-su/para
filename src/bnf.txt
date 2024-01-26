@@ -13,10 +13,10 @@ Sep;
 End;
 :
 BNF
-<S> := <Construction'>*;
-<Construction'> := <Construction> 'Sep'
+<S> := <Constructions>'End';
+<Constructions> := <Construction>'Sep'<Constructions> | <Construction>;
 <Construction> := <FuncDecl> | <VarDecl> | <E> | ;
-<FuncDecl> := 'Id' '('Id')' '=' <E>;
+<FuncDecl> := 'Id' '(' 'Id' ')' '=' <E>;
 <VarDecl> := 'Id' '=' <E>;
 <E> := '('<E>')' | 
         'Number' | 
@@ -31,5 +31,3 @@ BNF
         <E> '+' <E>;
 <FuncCall> := 'Id''('<E>')';
 :
-
-

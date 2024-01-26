@@ -25,21 +25,24 @@ enum LR_Type
     TokenMinus,
     TokenTimes,
     TokenDivide,
+    TokenPower,
     TokenEquals,
     TokenOpen,
     TokenClose,
     TokenNumber,
     TokenId,
+    TokenSep,
     TokenEnd,
-    ExpraltS,
-    ExprFuncDecl,
-    ExprVarDecl,
-    ExprE,
-    ExprFuncCall,
-    ExprVar,
+    NtS,
+    NtConstructions,
+    NtConstruction,
+    NtFuncDecl,
+    NtVarDecl,
+    NtE, 
+    NtFuncCall,
 }
 
-fn i64_to_TokenType(token_type: i64) -> Result<LR_Type, &'static str>
+fn i32_to_TokenType(token_type: i32) -> Result<LR_Type, &'static str>
 {
     match token_type
     {
@@ -47,18 +50,21 @@ fn i64_to_TokenType(token_type: i64) -> Result<LR_Type, &'static str>
         1 => Ok(LR_Type::TokenMinus),
         2 => Ok(LR_Type::TokenTimes),
         3 => Ok(LR_Type::TokenDivide),
-        4 => Ok(LR_Type::TokenEquals),
-        5 => Ok(LR_Type::TokenOpen),
-        6 => Ok(LR_Type::TokenClose),
-        7 => Ok(LR_Type::TokenNumber),
-        8 => Ok(LR_Type::TokenId),
-        9 => Ok(LR_Type::TokenEnd),
-        10 => Ok(LR_Type::ExpraltS),
-        11 => Ok(LR_Type::ExprFuncDecl),
-        12 => Ok(LR_Type::ExprVarDecl),
-        13 => Ok(LR_Type::ExprE),
-        14 => Ok(LR_Type::ExprFuncCall),
-        15 => Ok(LR_Type::ExprVar),
+        4 => Ok(LR_Type::TokenPower),
+        5 => Ok(LR_Type::TokenEquals),
+        6 => Ok(LR_Type::TokenOpen),
+        7 => Ok(LR_Type::TokenClose),
+        8 => Ok(LR_Type::TokenNumber),
+        9 => Ok(LR_Type::TokenId),
+        10 => Ok(LR_Type::TokenSep),
+        11 => Ok(LR_Type::TokenEnd),
+        12 => Ok(LR_Type::NtS),
+        13 => Ok(LR_Type::NtConstructions),
+        14 => Ok(LR_Type::NtConstruction),
+        15 => Ok(LR_Type::NtFuncDecl),
+        16 => Ok(LR_Type::NtVarDecl),
+        17 => Ok(LR_Type::NtE), 
+        18 => Ok(LR_Type::NtFuncCall), 
         _ => Err("Invalid token type"),
     }
 }
@@ -128,7 +134,7 @@ unsafe fn get_expr_in_array(expr: *const Expr, index: isize) -> *const Expr
 
 unsafe fn get_expr_token_type(expr: *const Expr) -> LR_Type
 {
-    return i64_to_TokenType((*expr).token.token_type).unwrap();
+    return i32_to_TokenType((*expr).token.token_type).unwrap();
 }
 
 unsafe fn vec_from_expr_token(expr: *const Expr) -> Vec<char>
@@ -155,34 +161,36 @@ fn str_view_from_str(str: &'static str) -> String_View
 
 unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<String_View, Symbol>, in_func_call: Option<&(Func, f64)>, predefined_funcions: &HashMap<String_View, fn(f64) -> f64>) -> Result<f64, &'static str>
 {
-    match i64_to_TokenType((*expr).token.token_type).unwrap()
+    match i32_to_TokenType((*expr).token.token_type).unwrap()
     {
         LR_Type::TokenPlus => {panic!("unreachable")}
         LR_Type::TokenMinus => {panic!("unreachable")}
         LR_Type::TokenTimes => {panic!("unreachable")}
         LR_Type::TokenDivide => {panic!("unreachable")}
+        LR_Type::TokenPower => {panic!("unreachable")}
         LR_Type::TokenEquals => {todo!("not implemented")}
         LR_Type::TokenOpen => {todo!("not implemented")}
         LR_Type::TokenClose => {todo!("not implemented")}
         LR_Type::TokenNumber => {return Ok(parse_number((*expr).token.data, (*expr).token.length, (*expr).token.stride))}
         LR_Type::TokenId => {todo!("not implemented")}
+        LR_Type::TokenSep => {panic!("unreachable")}
         LR_Type::TokenEnd => {panic!("unreachable")}
-        LR_Type::ExpraltS => {
-            if (*expr).expr_count != 1
-            {
-                panic!("unreachable");
-            }
-            return eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions);
-        }
-        LR_Type::ExprFuncDecl => {panic!("unreachable")}
-        LR_Type::ExprVarDecl => {panic!("unreachable")}
-        LR_Type::ExprE => {
+        // LR_Type::ExpraltS => {
+        //     if (*expr).expr_count != 1
+        //     {
+        //         panic!("unreachable");
+        //     }
+        //     return eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions);
+        // }
+        LR_Type::NtFuncDecl => {panic!("unreachable")}
+        LR_Type::NtVarDecl => {panic!("unreachable")}
+        LR_Type::NtE => {
             match (*expr).expr_count
             {
                 1 => return eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions),
                 2 =>
                 {
-                    let token = i64_to_TokenType((*get_expr_in_array(expr, 1)).token.token_type).unwrap();
+                    let token = i32_to_TokenType((*get_expr_in_array(expr, 1)).token.token_type).unwrap();
                     match token
                     {
                         LR_Type::TokenPlus => {return eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)}
@@ -192,7 +200,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<String_View, Symbol>, i
                 }
                 3 =>
                 {
-                    match i64_to_TokenType((*get_expr_in_array(expr, 1)).token.token_type).unwrap()
+                    match i32_to_TokenType((*get_expr_in_array(expr, 1)).token.token_type).unwrap()
                     {
                         LR_Type::TokenPlus =>
                         {
@@ -218,7 +226,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<String_View, Symbol>, i
                             let num2 = eval_tree(get_expr_in_array(expr, 0), map, in_func_call, predefined_funcions)?;
                             return Ok(num1 / num2);
                         }
-                        LR_Type::ExprE =>
+                        LR_Type::NtE =>
                         {
                             return eval_tree(get_expr_in_array(expr, 1), map, in_func_call, predefined_funcions);
                         }
@@ -228,7 +236,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<String_View, Symbol>, i
                 _ => panic!("unreachable")
             }
         }
-        LR_Type::ExprFuncCall =>
+        LR_Type::NtFuncCall =>
         {
             assert_eq!((*expr).expr_count, 4);
 
@@ -239,7 +247,7 @@ unsafe fn eval_tree(expr: *const Expr, map: &mut HashMap<String_View, Symbol>, i
 
             assert_eq!(get_expr_token_type(func_name), LR_Type::TokenId);
             assert_eq!(get_expr_token_type(open), LR_Type::TokenOpen);
-            assert_eq!(get_expr_token_type(call_expr), LR_Type::ExprE);
+            assert_eq!(get_expr_token_type(call_expr), LR_Type::NtE);
             assert_eq!(get_expr_token_type(close), LR_Type::TokenClose);
 
             let call_val: f64 = eval_tree(call_expr, map, in_func_call, predefined_funcions)?;
@@ -365,7 +373,7 @@ fn string_to_tokens<'a>(arg: &'a [char], str_len: usize, out: &'a mut Vec<ParseT
                 {
                     count += 1;
                 }
-                token_list.push(ParseToken {token_type: LR_Type::TokenId as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: count as u32, stride: 4});
+                token_list.push(ParseToken {token_type: LR_Type::TokenId as i32, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: count as u32, stride: 4});
                 i += count as usize - 1;
             }
             else if arg[i].is_ascii_digit()
@@ -375,20 +383,20 @@ fn string_to_tokens<'a>(arg: &'a [char], str_len: usize, out: &'a mut Vec<ParseT
                 {
                     count += 1;
                 }
-                token_list.push(ParseToken {token_type: LR_Type::TokenNumber as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: count as u32, stride: 4});
+                token_list.push(ParseToken {token_type: LR_Type::TokenNumber as i32, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: count as u32, stride: 4});
                 i += count as usize - 1;
             }
             else
             {
                 match arg[i] as char
                 {
-                    '+' => token_list.push(ParseToken {token_type: LR_Type::TokenPlus as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
-                    '-' => token_list.push(ParseToken {token_type: LR_Type::TokenMinus as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
-                    '*' => token_list.push(ParseToken {token_type: LR_Type::TokenTimes as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
-                    '/' => token_list.push(ParseToken {token_type: LR_Type::TokenDivide as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
-                    '=' => token_list.push(ParseToken {token_type: LR_Type::TokenEquals as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
-                    '(' => token_list.push(ParseToken {token_type: LR_Type::TokenOpen as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
-                    ')' => token_list.push(ParseToken {token_type: LR_Type::TokenClose as i64, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    '+' => token_list.push(ParseToken {token_type: LR_Type::TokenPlus as i32, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    '-' => token_list.push(ParseToken {token_type: LR_Type::TokenMinus as i32, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    '*' => token_list.push(ParseToken {token_type: LR_Type::TokenTimes as i32, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    '/' => token_list.push(ParseToken {token_type: LR_Type::TokenDivide as i32, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    '=' => token_list.push(ParseToken {token_type: LR_Type::TokenEquals as i32, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    '(' => token_list.push(ParseToken {token_type: LR_Type::TokenOpen as i32, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
+                    ')' => token_list.push(ParseToken {token_type: LR_Type::TokenClose as i32, data: unsafe {arg.as_ptr().offset(i as isize) as *const i8}, length: 1, stride: 4}),
                     ' ' => {}
                     '\n' => {}
                     '\r' => {}
@@ -398,7 +406,7 @@ fn string_to_tokens<'a>(arg: &'a [char], str_len: usize, out: &'a mut Vec<ParseT
             }
             i += 1;
         }
-        token_list.push(ParseToken {token_type: LR_Type::TokenEnd as i64, data: 0 as *const i8, length: 0, stride: 4});
+        token_list.push(ParseToken {token_type: LR_Type::TokenEnd as i32, data: 0 as *const i8, length: 0, stride: 4});
     }
     return Ok(());
 }
@@ -415,7 +423,7 @@ unsafe fn add_var_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, Sy
 
     assert_eq!(get_expr_token_type(var_name), LR_Type::TokenId);
     assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
-    assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
+    assert_eq!(get_expr_token_type(var_expr), LR_Type::NtE);
 
     let name_str = str_view_from_expr_token(var_name);
     if map.insert(name_str, Symbol::Var(var_expr)).is_some()
@@ -440,10 +448,10 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, S
 
     assert_eq!(get_expr_token_type(func_name), LR_Type::TokenId);
     assert_eq!(get_expr_token_type(open_par), LR_Type::TokenOpen);
-    assert_eq!(get_expr_token_type(var_expr), LR_Type::ExprE);
+    assert_eq!(get_expr_token_type(var_expr), LR_Type::NtE);
     assert_eq!(get_expr_token_type(close_par), LR_Type::TokenClose);
     assert_eq!(get_expr_token_type(equals), LR_Type::TokenEquals);
-    assert_eq!(get_expr_token_type(func_expr), LR_Type::ExprE);
+    assert_eq!(get_expr_token_type(func_expr), LR_Type::NtE);
 
 
 
@@ -478,7 +486,7 @@ unsafe fn add_func_decl(decl_expr: *const Expr, map: &mut HashMap<String_View, S
 
 unsafe fn print_tree(expr: *const Expr)
 {
-    let token_type: i64 = (*expr).token.token_type;
+    let token_type: i32 = (*expr).token.token_type;
     let token_length = (*expr).token.length;
     print!("token_type = {}, length = {}, ptr = {:#x} val = ", token_type, token_length, (*expr).token.data as usize);
     print_expr_token(expr);
@@ -721,6 +729,54 @@ enum Input_Box_Actions
 }
 
 
+fn graph_box(screen: &mut Terminal_Screen, unique_id: usize, x_scale: f32, y_scale: f32, x_offset: f32, y_offset: f32)
+{
+    let height = GRAPH_BOX_SIZE;
+    let width = GRAPH_BOX_SIZE;
+
+    let tup: (usize, usize);
+    match get_xy_with_current_layout(width, height)
+    {
+        Some(x) => {tup = x}
+        None => {return;}
+    }
+
+    let x: usize = tup.0;
+    let y: usize = tup.1;
+
+
+    let mut r: u8 = 255;
+    let mut g: u8 = 255;
+    let mut b: u8 = 255;
+
+
+    if is_active(unique_id)
+    {
+    }
+    else if is_hot(unique_id)
+    {
+    }
+    if inside(x, y, width, height)
+    {
+        unsafe
+        {
+            hot.owner = hot.index;
+            hot.item = Ui_kind::INPUT_TEXT;
+            hot.index = unique_id;
+        }
+    }
+
+
+    for i in 0..width
+    {
+        write_char_at_pos(screen, '-', r, g, b, (x + i) as i16, y as i16);
+        write_char_at_pos(screen, '-', r, g, b, (x + i) as i16, (y + 2) as i16);
+    }
+
+    return;
+}
+
+
 fn input_string_box(screen: &mut Terminal_Screen, unique_id: usize, str_buffer: &mut [char], max_len: usize, inputs: &Input) -> Input_Box_Actions
 {
     fn shift_string_right_from_index(buffer: &mut [char], max_len: usize, index: usize)
@@ -929,9 +985,10 @@ struct Ui_id
 
 const INPUT_STR_HEIGHT: usize = 3;
 const OUTPUT_STR_HEIGHT: usize = 1;
+const GRAPH_BOX_SIZE: usize = 100;
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Active_Stack
 {
     stack_count: usize,
@@ -1266,8 +1323,7 @@ fn write_string_at_pos(screen: &mut Terminal_Screen, str: &[char], r: u8, g: u8,
     }
 }
 
-//TODO(Johan): only rerender differences in terminal screen to avoid flickering and to enable RGB in the terminal 
-//TODO(Johan): maybe switch to ReadConsoleInputEx to avoid a blocking input
+//TODO(Johan): maybe switch to ReadConsoleInputEx to avoid blocking input
 fn get_console_input() -> Input
 {
     let mut input: Input = unsafe {std::mem::zeroed()};
@@ -1448,15 +1504,17 @@ fn main()
 
     let bnf_src = include_str!("bnf.txt");
 
+    const table_size: usize = 10000;
 
-    let mut table: [u8; 10000] = [0; 10000];
-    let table_size_diff: u32 = unsafe {write_parse_table_from_bnf(&mut table as *mut u8 as *mut c_void, 10000, bnf_src.as_ptr() as *const i8)};
-    if table_size_diff != 0
+    let mut table_size_diff: u32 = table_size as u32;
+    let mut table: [u8; table_size] = [0; table_size];
+    if !unsafe {write_parse_table_from_bnf(&mut table as *mut u8 as *mut c_void, &mut table_size_diff as *mut u32, bnf_src.as_ptr() as *const i8)}
     {
-        println!("failed to read table {}", table_size_diff);
+        unsafe {print_i8(get_last_error(), get_error_size() as u32)};
+        let _table_size_diff: u32 = table_size_diff;
         return;
     }
-
+    // unsafe {print_table(table.as_ptr() as *const ParseTable)}
 
     let mut predefined_functions: HashMap<String_View, fn(f64) -> f64> = HashMap::new();
 
@@ -1509,206 +1567,203 @@ fn main()
     print!("\x1b[?1049h");
     set_cursor_to_esc(0, 0);
     end_esc();
-    unsafe
+    loop
     {
-        loop
+        let mut screen = get_terminal_screen();
+        let inputs: Input = get_console_input();
+
+        if inputs.key_val == 'Q' as u16
         {
-            let mut screen = get_terminal_screen();
-            let inputs: Input = get_console_input();
-
-            if inputs.key_val == 'Q' as u16
+            if inputs.LEFT_ALT_PRESSED
             {
-                if inputs.LEFT_ALT_PRESSED
+                break;
+            }
+        }
+        if inputs.key_val == 'C' as u16
+        {
+            if inputs.LEFT_CTRL_PRESSED
+            {
+                break;
+            }
+        }
+
+
+        fn write_string_to_buffer(buffer: &mut [char], string: &String)
+        {
+            for i in 0..buffer.len()
+            {
+                buffer[i] = '\0'
+            }
+            let mut j = 0;
+            for character in string.chars()
+            {
+                if j == buffer.len()
                 {
                     break;
                 }
+                buffer[j] = character;
+                j += 1;
             }
-            if inputs.key_val == 'C' as u16
-            {
-                if inputs.LEFT_CTRL_PRESSED
-                {
-                    break;
-                }
-            }
-
-
-            fn write_string_to_buffer(buffer: &mut [char], string: &String)
-            {
-                for i in 0..buffer.len()
-                {
-                    buffer[i] = '\0'
-                }
-                let mut j = 0;
-                for character in string.chars()
-                {
-                    if j == buffer.len()
-                    {
-                        break;
-                    }
-                    buffer[j] = character;
-                    j += 1;
-                }
-            }
+        }
             
 
-            // ui
+        // ui
+        let mut should_reparse: bool = false;
+        {
+            let layout: Ui_Layout = Ui_Layout { 
+                x: 0, 
+                y: 0, 
+                w: screen.width, 
+                h: screen.height, 
+                flow: Flow::UPPER_LEFT_FLOW_DOWN,
+            };
+
+            push_layout(layout);
+            for i in 0..buffer_count
             {
-                let layout: Ui_Layout = Ui_Layout { 
-                    x: 0, 
-                    y: 0, 
-                    w: screen.width, 
-                    h: screen.height, 
-                    flow: Flow::UPPER_LEFT_FLOW_DOWN,
-                };
-
-                let mut should_reparse: bool = false;
-
-                push_layout(layout);
-                for i in 0..buffer_count
+                let xy: (usize, usize);
+                match get_xy_with_current_layout(length, INPUT_STR_HEIGHT)
                 {
-                    let xy: (usize, usize);
-                    match get_xy_with_current_layout(length, INPUT_STR_HEIGHT)
-                    {
-                        Some(x) => {xy = x}
-                        None => {continue;}
-                    }
-
-                    let layout2: Ui_Layout = Ui_Layout { 
-                        x: xy.0, 
-                        y: xy.1, 
-                        w: 1 + 2 * length, 
-                        h: INPUT_STR_HEIGHT, 
-                        flow: Flow::UPPER_LEFT_FLOW_RIGHT,
-                    };
-                    push_layout(layout2);
-                    match input_string_box(&mut screen, str_as_usize("my_text_box") + i, input_buffers[i].as_mut_slice(), length, &inputs)
-                    {
-                        Input_Box_Actions::None => {},
-                        Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER =>
-                        {
-                            should_reparse = true;
-                        }
-                    }
-                    output_string_box(&mut screen, str_as_usize("my_output_string") + i, output_buffers[i].as_slice(), length);
-                    pop_layout();
+                    Some(x) => {xy = x}
+                    None => {continue;}
                 }
-                pop_layout();
-                if should_reparse
+
+                let layout2: Ui_Layout = Ui_Layout { 
+                    x: xy.0, 
+                    y: xy.1, 
+                    w: 1 + 2 * length, 
+                    h: INPUT_STR_HEIGHT, 
+                    flow: Flow::UPPER_LEFT_FLOW_RIGHT,
+                };
+                push_layout(layout2);
+                match input_string_box(&mut screen, str_as_usize("my_text_box") + i, input_buffers[i].as_mut_slice(), length, &inputs)
                 {
-                    map.clear();
-                    'outer: for i in 0..buffer_count
+                    Input_Box_Actions::None => {},
+                    Input_Box_Actions::LEAVE_WITH_ESCAPE | Input_Box_Actions::LEAVE_WITH_ENTER =>
                     {
-                        let str_len = str_buffer_len(&input_buffers[i], length);
+                        should_reparse = true;
+                    }
+                }
+                output_string_box(&mut screen, str_as_usize("my_output_string") + i, output_buffers[i].as_slice(), length);
+                pop_layout();
+            }
+            pop_layout();
+        }
+        if should_reparse
+        {
+            map.clear();
+            'outer: for i in 0..buffer_count
+            {
+                let str_len = str_buffer_len(&input_buffers[i], length);
+
+                token_buffers[i].clear();
+                if let Err(x) = string_to_tokens(&input_buffers[i], str_len, &mut token_buffers[i])
+                {
+                    write_string_to_buffer(&mut output_buffers[i], &x);
+                    continue 'outer;
+                }
+
+                unsafe 
+                {
+                    let success: bool = parse_bin(token_buffers[i].as_mut_ptr(), token_buffers[i].len() as u32,
+                        table.as_mut_ptr(), 0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000);
     
-                        token_buffers[i].clear();
-                        if let Err(x) = string_to_tokens(&input_buffers[i], str_len, &mut token_buffers[i])
+                    if success
+                    {
+                        graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr);
+    
+                        // print_tree(expr);
+    
+    
+                        if get_expr_token_type(expr) != LR_Type::ExpraltS ||
+                            (*expr).expr_count == 0
                         {
-                            write_string_to_buffer(&mut output_buffers[i], &x);
+                            for j in 0..length
+                            {
+                                output_buffers[i][j] = '\0';
+                            }
                             continue 'outer;
                         }
-
-
-                        let success: bool = parse_bin(token_buffers[i].as_mut_ptr(), token_buffers[i].len() as u32,
-                            table.as_mut_ptr(), 0, &mut expr, msg.as_mut_ptr() as *mut i8, 1000);
-
-
-                        if success
+    
+                        let decl_expr = get_expr_in_array(expr, 0);
+                        let token_type = get_expr_token_type(decl_expr);
+    
+                        if token_type == LR_Type::NtVarDecl
                         {
-                            graphviz_from_syntax_tree(b"./input.dot\0".as_ptr() as *const i8, expr);
-
-                            // print_tree(expr);
-
-
-                            if get_expr_token_type(expr) != LR_Type::ExpraltS ||
-                                (*expr).expr_count == 0
+                            let str: String = add_var_decl(decl_expr, &mut map);
+                            write_string_to_buffer(&mut output_buffers[i], &str);
+                        }
+                        else if LR_Type::NtFuncDecl == token_type
+                        {
+    
+                            let (Ok(x) | Err(x)) = add_func_decl(decl_expr, &mut map, &predefined_functions);
+                            write_string_to_buffer(&mut output_buffers[i], &x);
+                        }
+                        else if LR_Type::NtE == token_type
+                        {
+                            match eval_tree(expr, &mut map, None, &predefined_functions)
                             {
-                                for j in 0..length
-                                {
-                                    output_buffers[i][j] = '\0';
-                                }
-                                continue 'outer;
-                            }
-
-                            let decl_expr = get_expr_in_array(expr, 0);
-                            let token_type = get_expr_token_type(decl_expr);
-
-                            if token_type == LR_Type::ExprVarDecl
-                            {
-                                let str: String = add_var_decl(decl_expr, &mut map);
-                                write_string_to_buffer(&mut output_buffers[i], &str);
-                            }
-                            else if LR_Type::ExprFuncDecl == token_type
-                            {
-
-                                let (Ok(x) | Err(x)) = add_func_decl(decl_expr, &mut map, &predefined_functions);
-                                write_string_to_buffer(&mut output_buffers[i], &x);
-                            }
-                            else if LR_Type::ExprE == token_type
-                            {
-                                match eval_tree(expr, &mut map, None, &predefined_functions)
-                                {
-                                    Ok(x) => write_string_to_buffer(&mut output_buffers[i], &format!(" = {}", x)),
-                                    Err(x) => write_string_to_buffer(&mut output_buffers[i], &format!("{}", x)),
-                                }
-                            }
-                            else
-                            {
-                                panic!("unreachable");
+                                Ok(x) => write_string_to_buffer(&mut output_buffers[i], &format!(" = {}", x)),
+                                Err(x) => write_string_to_buffer(&mut output_buffers[i], &format!("{}", x)),
                             }
                         }
                         else
                         {
-                            for j in 0..length
-                            {
-                                output_buffers[i][j] = msg[j] as char;
-                            }
+                            panic!("unreachable");
+                        }
+                    }
+                    else
+                    {
+                        for j in 0..length
+                        {
+                            output_buffers[i][j] = msg[j] as char;
                         }
                     }
                 }
             }
-
-            let bottom_y = screen.height as i16 - 1;
-            let format_string: Vec<char> = format!("pos=[{} {}] unicode_u16={}, inside={:?}, active={:?}",
-                cursor.x,
-                cursor.y,
-                inputs.unicode_char,
-                hot.item,
-                active).chars().collect::<Vec<char>>();
-
-            write_string_at_pos(&mut screen, format_string.as_slice(), 255, 255, 255, 0, bottom_y);
-
-            if active.stack_count == 0
-            {
-                if inputs.key_val == VK_UP
-                {
-                    begin_esc();
-                    move_cursor_esc(0, -1);
-                    end_esc();
-                }
-                else if inputs.key_val == VK_LEFT
-                {
-                    begin_esc();
-                    move_cursor_esc(-1, 0);
-                    end_esc();
-                }
-                else if inputs.key_val == VK_DOWN
-                {
-                    begin_esc();
-                    move_cursor_esc(0, 1);
-                    end_esc();
-                }
-                else if inputs.key_val == VK_RIGHT
-                {
-                    begin_esc();
-                    move_cursor_esc(1, 0);
-                    end_esc();
-                }
-            }
-
-            present_back_terminal_buffer();
-            io::stdout().flush().unwrap();
         }
-        revert_console(stdout, stdin, old_stdout_mode, old_stdin_mode);
-        exit(0);
+
+        let bottom_y = screen.height as i16 - 1;
+        let format_string: Vec<char> = format!("pos=[{} {}] unicode_u16={}, inside={:?}, active={:?}",
+            unsafe {cursor.x},
+            unsafe {cursor.y},
+            inputs.unicode_char,
+            unsafe {hot.item},
+            unsafe {active}).chars().collect::<Vec<char>>();
+
+        write_string_at_pos(&mut screen, format_string.as_slice(), 255, 255, 255, 0, bottom_y);
+
+        if unsafe {active.stack_count} == 0
+        {
+            if inputs.key_val == VK_UP
+            {
+                begin_esc();
+                move_cursor_esc(0, -1);
+                end_esc();
+            }
+            else if inputs.key_val == VK_LEFT
+            {
+                begin_esc();
+                move_cursor_esc(-1, 0);
+                end_esc();
+            }
+            else if inputs.key_val == VK_DOWN
+            {
+                begin_esc();
+                move_cursor_esc(0, 1);
+                end_esc();
+            }
+            else if inputs.key_val == VK_RIGHT
+            {
+                begin_esc();
+                move_cursor_esc(1, 0);
+                end_esc();
+            }
+        }
+
+        present_back_terminal_buffer();
+        io::stdout().flush().unwrap();
     }
+    unsafe {revert_console(stdout, stdin, old_stdout_mode, old_stdin_mode);}
+    exit(0);
 }
