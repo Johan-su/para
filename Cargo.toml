@@ -1,9 +1,0 @@
-[package]
-name = "Para"
-version = "0.1.0"
-edition = "2021"
-build = "build.rs"
-
-[[bin]]
-name = "para"
-path = "src/para.rs"
