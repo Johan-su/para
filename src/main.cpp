@@ -830,6 +830,20 @@ Functions g_funcs[] = {
     {(f64 (*)(...))sin, "sin", 3, 1},
     {(f64 (*)(...))cos, "cos", 3, 1},
     {(f64 (*)(...))tan, "tan", 3, 1},
+    {(f64 (*)(...))exp, "exp", 3, 1},
+};
+
+
+struct Variables
+{
+    f64 num;
+    const char *var_str;
+    u32 len;
+};
+
+Variables g_vars[] = {
+    {2.718281828459045, "e", 1},
+    {3.141592653589793, "pi", 2},
 };
 
 
@@ -904,7 +918,20 @@ static f64 execute_tree(Node *tree, Lexer *lex)
             return NAN;
 
         } break;
-        case Node_Kind::VARIABLE: assert(false && "Not implemented");
+        case Node_Kind::VARIABLE:
+        {
+            for (u32 i = 0; i < ARRAY_SIZE(g_vars); ++i)
+            {
+                if (strequal(g_vars[i].var_str, g_vars[i].len, lex->data + tree->data_index, tree->len))
+                {
+                    return g_vars[i].num;
+                }
+            }
+
+            fprintf(stderr, "Undefined variable %.*s\n", tree->len, lex->data + tree->data_index);
+            return NAN;
+
+        } break;
         case Node_Kind::NUMBER:    
         {
             return tree->num;
