@@ -23,6 +23,8 @@ typedef double f64;
 
 
 
+#define ARRAY_SIZE(x) (sizeof(x)/sizeof(*(x)))
+
 #define alloc(type, amount) (type*)(calloc((amount), sizeof(type)))
 
 #define assert(condition)                                                                    \
@@ -99,6 +101,8 @@ enum class Token_Kind
     NUMBER,
     OPEN_PAREN,
     CLOSE_PAREN,
+    COMMA,
+    IDENTIFIER,
     END,
 };
 
@@ -119,6 +123,8 @@ static const char *str_from_token_kind(Token_Kind kind)
         case Token_Kind::CARET: return "CARET";
         case Token_Kind::OPEN_PAREN: return "OPEN_PAREN";
         case Token_Kind::CLOSE_PAREN: return "CLOSE_PAREN";
+        case Token_Kind::COMMA: return "COMMA";
+        case Token_Kind::IDENTIFIER: return "IDENTIFIER";
         case Token_Kind::END: return "END";
     }
     assert(false);
@@ -156,6 +162,16 @@ static bool is_digit(char c)
     return c >= '0' && c <= '9';
 }
 
+
+static bool is_alpha(char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+static bool is_alphanumeric(char c)
+{
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
 
 
 
@@ -201,7 +217,17 @@ static void print_error_here(const char *data, u32 data_length, u32 index)
 }
 
 
-
+static bool is_whitespace(char c)
+{
+    switch (c)
+    {
+        case ' ': return true;
+        case '\n': return true;
+        case '\t': return true;
+        case '\r': return true;
+    }
+    return false;
+}
 
 
 static Errcode tokenize(Lexer *lex, char *input, u32 input_length)
@@ -250,14 +276,35 @@ static Errcode tokenize(Lexer *lex, char *input, u32 input_length)
                 lex->tokens[lex->count++] = {Token_Kind::CLOSE_PAREN, i, 1};
                 i += 1;
             } break;
+            case ',':
+            {
+                lex->tokens[lex->count++] = {Token_Kind::COMMA, i, 1};
+                i += 1;
+            } break;
             default:
-            if (is_digit(input[i]))
+            if (is_whitespace(input[i]))
+            {
+                i += 1;
+            }
+            else if (is_digit(input[i]))
             {
                 Token token = {};
                 token.kind = Token_Kind::NUMBER;
                 token.data_index = i;
 
                 while (is_digit(input[i]))
+                {
+                    token.count += 1;
+                    i += 1;
+                }
+                lex->tokens[lex->count++] = token;
+            }
+            else if (is_alpha(input[i]))
+            {
+                Token token = {};
+                token.kind = Token_Kind::IDENTIFIER;
+                token.data_index = i;
+                while (is_alphanumeric(input[i]))
                 {
                     token.count += 1;
                     i += 1;
@@ -284,7 +331,6 @@ enum Node_Kind
 {
     INVALID,
     OPEN_PAREN,
-    // EXPR,
     POSITIVE,
     NEGATE,
     ADD,
@@ -292,21 +338,26 @@ enum Node_Kind
     MUL,
     DIV,
     POW,
+    COMMA,
+    FUNCTION,
+    VARIABLE,
     NUMBER
 };
-
 
 struct Node
 {
     Node_Kind kind;
 
-    Node *right;
-    Node *left;
-
     union
     {
-        f64 num;
+        Node *left;
+        Node *next;
     };
+    Node *right;
+
+    u32 data_index;
+    u32 len;
+    f64 num;
 };
 
 
@@ -320,7 +371,6 @@ struct Operator_Data
 const Operator_Data g_data[] = {
     /* INVALID */  {0, false},
     /* OPEN_PAREN */ {0, false},
-    // /* EXPR */     {0, false},
     /* POSITIVE */ {100, true},
     /* NEGATE */   {100, true},
     /* ADD */      {10, false},
@@ -328,6 +378,9 @@ const Operator_Data g_data[] = {
     /* MUL */      {20, false},
     /* DIV */      {20, false},
     /* POW */      {30, true},
+    /* COMMA */      {-9999, false},
+    /* FUNCTION */ {110, false},
+    /* VARIABLE */ {0, false},
     /* NUMBER */   {0, false},
 };
 
@@ -337,7 +390,6 @@ static const char *str_from_node_kind(Node_Kind kind)
     {
         case Node_Kind::INVALID: return "INVALID";
         case Node_Kind::OPEN_PAREN: return "OPEN_PAREN";
-        // case Node_Kind::EXPR return "EXPR";
         case Node_Kind::POSITIVE: return "POSITIVE";
         case Node_Kind::NEGATE: return "NEGATE";
         case Node_Kind::ADD: return "ADD";
@@ -345,6 +397,9 @@ static const char *str_from_node_kind(Node_Kind kind)
         case Node_Kind::MUL: return "MUL";
         case Node_Kind::DIV: return "DIV";
         case Node_Kind::POW: return "POW";
+        case Node_Kind::COMMA: return "COMMA";
+        case Node_Kind::FUNCTION: return "FUNCTION";
+        case Node_Kind::VARIABLE: return "VARIABLE";
         case Node_Kind::NUMBER: return "NUMBER";
     }
     assert(false);
@@ -352,7 +407,7 @@ static const char *str_from_node_kind(Node_Kind kind)
 }
 
 
-static void graphviz_from_tree(Node *tree)
+static void graphviz_from_tree(Node *tree, Lexer *lex)
 {
     FILE *f = fopen("./input.dot", "wb");
 
@@ -376,6 +431,10 @@ static void graphviz_from_tree(Node *tree)
             {
                 fprintf(f, "\n%.2f", top->num);
             }
+            else if (top->kind == Node_Kind::FUNCTION || top->kind == Node_Kind::VARIABLE)
+            {
+                fprintf(f, "\n%.*s", top->len, lex->data + top->data_index);
+            }
         }
         fprintf(f, "\"];\n");
 
@@ -398,10 +457,19 @@ static void graphviz_from_tree(Node *tree)
 }
 
 
+enum class Control_Flag : u8
+{
+    in_function = 1 << 0,
+};
+
+
 static Token next_token(Lexer *lex)
 {
     Token t = lex->tokens[lex->index];
-    lex->index += 1;
+    if (t.kind != Token_Kind::END)
+    {
+        lex->index += 1;
+    }
     return t;
 }
 
@@ -444,7 +512,7 @@ static void print_node_stack(Node **s, u32 size)
 }
 
 
-static Node *get_sub_node(Node **s, u32 *size)
+static Node *pop_sub_node(Node **s, u32 *size)
 {
     u32 index = *size - 1;
     Node *data = s[index];
@@ -459,73 +527,149 @@ static Node *get_sub_node(Node **s, u32 *size)
 
 
 
-static void init_bin_node(Node *bin, Node_Kind kind, Node **stack, u32 *stack_len)
+static void init_bin_node(Node *bin, Node **stack, u32 *stack_len)
 {
-    bin->kind = kind;
-    bin->right = get_sub_node(stack, stack_len);
-    bin->left = get_sub_node(stack, stack_len);
+    bin->right = pop_sub_node(stack, stack_len);
+    bin->left = pop_sub_node(stack, stack_len);
 }
 
 
-static void init_unary_node(Node *bin, Node_Kind kind, Node **stack, u32 *stack_len)
+static void init_unary_node(Node *bin, Node **stack, u32 *stack_len)
 {
-    bin->kind = kind;
-    bin->right = get_sub_node(stack, stack_len);
+    bin->next = pop_sub_node(stack, stack_len);
 }
 
 
-static Node_Kind node_kind_from_token(Token next, Token last)
+static void init_function_node(Node *bin, Node **stack, u32 *stack_len)
+{
+    bin->next = pop_sub_node(stack, stack_len);
+}
+
+
+static bool is_binary(Node_Kind kind)
+{
+    switch (kind)
+    {
+        case Node_Kind::ADD: return true;
+        case Node_Kind::SUB: return true;
+        case Node_Kind::MUL: return true;
+        case Node_Kind::DIV: return true;
+        case Node_Kind::POW: return true;
+        case Node_Kind::COMMA: return true;
+        default: return false;
+    }
+}
+
+
+static Node_Kind node_kind_from_token(Token next, Token curr, Token last)
 {
     Node_Kind kind = Node_Kind::INVALID;
 
-    if (next.kind == Token_Kind::OPEN_PAREN)
+    if (curr.kind == Token_Kind::IDENTIFIER)
+    {
+        if (next.kind == Token_Kind::OPEN_PAREN) kind = Node_Kind::FUNCTION;
+        else kind = Node_Kind::VARIABLE;
+    }
+    else if (curr.kind == Token_Kind::OPEN_PAREN)
     {
         kind = Node_Kind::OPEN_PAREN;
     }
-    else if (last.kind != Token_Kind::NUMBER && last.kind != Token_Kind::CLOSE_PAREN)
+    else if (last.kind != Token_Kind::NUMBER && 
+        last.kind != Token_Kind::IDENTIFIER && 
+        last.kind != Token_Kind::CLOSE_PAREN
+    )
     {
-        if (next.kind == Token_Kind::PLUS) kind = Node_Kind::POSITIVE;
-        else if (next.kind == Token_Kind::MINUS) kind = Node_Kind::NEGATE;
+        if (curr.kind == Token_Kind::PLUS) kind = Node_Kind::POSITIVE;
+        else if (curr.kind == Token_Kind::MINUS) kind = Node_Kind::NEGATE;
         else assert(false);
     }
     else /*if binary*/
     {
-        if (next.kind == Token_Kind::PLUS) kind = Node_Kind::ADD;
-        else if (next.kind == Token_Kind::MINUS) kind = Node_Kind::SUB;
-        else if (next.kind == Token_Kind::STAR) kind = Node_Kind::MUL;
-        else if (next.kind == Token_Kind::SLASH) kind = Node_Kind::DIV;
-        else if (next.kind == Token_Kind::CARET) kind = Node_Kind::POW;
-        else if (next.kind == Token_Kind::OPEN_PAREN) kind = Node_Kind::OPEN_PAREN;
+        if (curr.kind == Token_Kind::PLUS) kind = Node_Kind::ADD;
+        else if (curr.kind == Token_Kind::MINUS) kind = Node_Kind::SUB;
+        else if (curr.kind == Token_Kind::STAR) kind = Node_Kind::MUL;
+        else if (curr.kind == Token_Kind::SLASH) kind = Node_Kind::DIV;
+        else if (curr.kind == Token_Kind::CARET) kind = Node_Kind::POW;
+        else if (curr.kind == Token_Kind::OPEN_PAREN) kind = Node_Kind::OPEN_PAREN;
+        else if (curr.kind == Token_Kind::COMMA) kind = Node_Kind::COMMA;
         else assert(false);
     }
     return kind;
 }
 
+static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_count, Control_Flag *flag_stack, u32 *flag_count, Lexer *lex)
+{
+    if (op->kind == Node_Kind::POSITIVE || op->kind == Node_Kind::NEGATE)
+    {
+        init_unary_node(op, output_stack, output_count);
+        output_stack[(*output_count)++] = op;
+    }
+    else if (is_binary(op->kind))
+    {
+        if (op->kind == Node_Kind::COMMA)
+        {
+            if (*flag_count == 0 || flag_stack[*flag_count - 1] != Control_Flag::in_function)
+            {
+                fprintf(stderr, "ERROR: Commas can only be inside functions\n");
+                print_error_here(lex->data, lex->data_length, op->data_index);
+                return 1;
+            }
+        }
+        if (*output_count < 2)
+        {
+            fprintf(stderr, "ERROR: expected 2 args but got %u\n", *output_count);
+            print_error_here(lex->data, lex->data_length, op->data_index);
+            return 1;
+        }
+        init_bin_node(op, output_stack, output_count);
+        output_stack[(*output_count)++] = op;
+    }
+    else if (op->kind == Node_Kind::FUNCTION)
+    {
+        init_function_node(op, output_stack, output_count);
+        output_stack[(*output_count)++] = op;
+        // pop is_function
+        *flag_count -= 1;
+    }
+    else
+    {
+        fprintf(stderr, "ERROR: unhandled operator %s\n", str_from_node_kind(op->kind));
+        print_error_here(lex->data, lex->data_length, op->data_index);
+        return 1;
+    }
+    return 0;
+}
 
 // https://www.youtube.com/watch?v=fIPO4G42wYE
 static Node *parse_expression(Lexer *lex)
 {
-    Node **operator_stack = alloc(Node *, 2048);
+    Node **operator_stack = alloc(Node *, 32);
     u32 operator_count = 0;
-
 
     Node *output_stack[8] = {};
     u32 output_count = 0;
 
+
+    Control_Flag flag_stack[8] = {};
+    u32 flag_count = 0;
+
+
     Token last = {};
+    Token curr = next_token(lex);
     Token next = next_token(lex);
 
-    while (next.kind != Token_Kind::END)
+    while (curr.kind != Token_Kind::END)
     {
-        assert(next.kind != Token_Kind::INVALID);
+        assert(curr.kind != Token_Kind::INVALID);
 
-        switch (next.kind)
+        switch (curr.kind)
         {
             case Token_Kind::PLUS:
             case Token_Kind::MINUS:
             case Token_Kind::STAR:
             case Token_Kind::SLASH:
             case Token_Kind::CARET:
+            case Token_Kind::COMMA:
             {
 
                 while (operator_count != 0)
@@ -536,59 +680,18 @@ static Node *parse_expression(Lexer *lex)
                         break;
                     }
 
-                    // Node_Kind node_op = {};
-                    // if (unary)
-                    // {
-                        
-                    //     if (op->kind == Token_Kind::PLUS) node_op = Node_Kind::POSITIVE;
-                    //     else if (op.kind == Token_Kind::MINUS) node_op = Node_Kind::NEGATE;
-                    //     else assert(false);
-                    // }
-                    // else /*if binary*/
-                    // {
-
-                    //     if (op.kind == Token_Kind::PLUS) node_op = Node_Kind::ADD;
-                    //     else if (op.kind == Token_Kind::MINUS) node_op = Node_Kind::SUB;
-                    //     else if (op.kind == Token_Kind::STAR) node_op = Node_Kind::MUL;
-                    //     else if (op.kind == Token_Kind::SLASH) node_op = Node_Kind::DIV;
-                    //     else if (op.kind == Token_Kind::CARET) node_op = Node_Kind::POW;
-                    //     else assert(false);
-                    // }
-
-                    const Operator_Data *p_next = g_data + node_kind_from_token(next, last);
+                    const Operator_Data *p_next = g_data + node_kind_from_token(next, curr, last);
                     const Operator_Data *p_op = g_data + op->kind;
 
                     if (p_next->precendence < p_op->precendence || 
                         (p_next->precendence == p_op->precendence && !p_next->right_associative)
                     )
                     {
-                        
-                        if (op->kind == Node_Kind::POSITIVE || op->kind == Node_Kind::NEGATE)
+                        if (make_node_from_output(op, output_stack, &output_count, flag_stack, &flag_count, lex))
                         {
-                            Node *node = alloc(Node, 1);
-                            init_unary_node(node, op->kind, output_stack, &output_count);
-                            output_stack[output_count++] = node;
-                            operator_count -= 1;
-                        }
-                        else if (
-                            op->kind == Node_Kind::ADD ||
-                            op->kind == Node_Kind::SUB ||
-                            op->kind == Node_Kind::MUL ||
-                            op->kind == Node_Kind::DIV ||
-                            op->kind == Node_Kind::POW
-                        )
-                        {
-                            Node *node = alloc(Node, 1);
-                            init_bin_node(node, op->kind, output_stack, &output_count);
-                            output_stack[output_count++] = node;
-                            operator_count -= 1;
-                        }
-                        else
-                        {
-                            fprintf(stderr, "ERROR: expected 1 or 2 expressions but got %u\n", operator_count);
-                            print_error_here(lex->data, lex->data_length, next.data_index);
                             return nullptr;
                         }
+                        operator_count -= 1;
                     }
                     else
                     {
@@ -597,15 +700,23 @@ static Node *parse_expression(Lexer *lex)
 
                 }
                 Node *node = alloc(Node, 1);
-                node->kind = node_kind_from_token(next, last);
+                node->kind = node_kind_from_token(next, curr, last);
+                node->data_index = curr.data_index;
+                node->len = curr.count;
                 operator_stack[operator_count++] = node; 
 
 
             } break;
             case Token_Kind::OPEN_PAREN:
             {
+                if (next.kind == Token_Kind::CLOSE_PAREN)
+                {
+                    fprintf(stderr, "ERROR: cannot have empty parenthesis pair\n");
+                    print_error_here(lex->data, lex->data_length, next.data_index);
+                    return nullptr;
+                }
                 Node *node = alloc(Node, 1);
-                node->kind = node_kind_from_token(next, last);
+                node->kind = node_kind_from_token(next, curr, last);
                 operator_stack[operator_count++] = node; 
             } break;
             case Token_Kind::CLOSE_PAREN:
@@ -630,29 +741,8 @@ static Node *parse_expression(Lexer *lex)
                         return nullptr;
                     }
 
-
-                    if (op->kind == Node_Kind::POSITIVE || op->kind == Node_Kind::NEGATE)
+                    if (make_node_from_output(op, output_stack, &output_count, flag_stack, &flag_count, lex))
                     {
-                        Node *node = alloc(Node, 1);
-                        init_unary_node(node, op->kind, output_stack, &output_count);
-                        output_stack[output_count++] = node;
-                    }
-                    else if (
-                        op->kind == Node_Kind::ADD ||
-                        op->kind == Node_Kind::SUB ||
-                        op->kind == Node_Kind::MUL ||
-                        op->kind == Node_Kind::DIV ||
-                        op->kind == Node_Kind::POW
-                    )
-                    {
-                        Node *node = alloc(Node, 1);
-                        init_bin_node(node, op->kind, output_stack, &output_count);
-                        output_stack[output_count++] = node;
-                    }
-                    else
-                    {
-                        fprintf(stderr, "ERROR: expected 1 or 2 expressions but got %u\n", operator_count);
-                        print_error_here(lex->data, lex->data_length, next.data_index);
                         return nullptr;
                     }
                 }
@@ -662,14 +752,31 @@ static Node *parse_expression(Lexer *lex)
             {
                 Node *node = alloc(Node, 1);
                 node->kind = Node_Kind::NUMBER;
-                node->num = atof(lex->data + next.data_index);
+                node->num = atof(lex->data + curr.data_index);
                 output_stack[output_count++] = node;
+            } break;
+            case Token_Kind::IDENTIFIER:
+            {
+                Node *node = alloc(Node, 1);
+                node->kind = node_kind_from_token(next, curr, last);
+                node->data_index = curr.data_index;
+                node->len = curr.count;
+                if (node->kind == Node_Kind::FUNCTION)
+                {
+                    operator_stack[operator_count++] = node;
+                    flag_stack[flag_count++] = Control_Flag::in_function;
+                }
+                else /* if VARIABLE */
+                {
+                    output_stack[output_count++] = node;
+                }
             } break;
 
             default: 
                 assert(false);
-        }                
-        last = next;
+        }
+        last = curr;
+        curr = next;
         next = next_token(lex);
     }
     while (operator_count > 0)
@@ -682,28 +789,9 @@ static Node *parse_expression(Lexer *lex)
             return nullptr;
         }
 
-        if (op->kind == Node_Kind::POSITIVE || op->kind == Node_Kind::NEGATE)
+
+        if (make_node_from_output(op, output_stack, &output_count, flag_stack, &flag_count, lex))
         {
-            Node *node = alloc(Node, 1);
-            init_unary_node(node, op->kind, output_stack, &output_count);
-            output_stack[output_count++] = node;
-        }
-        else if (
-            op->kind == Node_Kind::ADD ||
-            op->kind == Node_Kind::SUB ||
-            op->kind == Node_Kind::MUL ||
-            op->kind == Node_Kind::DIV ||
-            op->kind == Node_Kind::POW
-        )
-        {
-            Node *node = alloc(Node, 1);
-            init_bin_node(node, op->kind, output_stack, &output_count);
-            output_stack[output_count++] = node;
-        }
-        else
-        {
-            fprintf(stderr, "ERROR: expected 1 or 2 expressions but got %u\n", operator_count);
-            print_error_here(lex->data, lex->data_length, next.data_index);
             return nullptr;
         }
     }
@@ -711,35 +799,153 @@ static Node *parse_expression(Lexer *lex)
     return output_stack[0];
 }
 
+#include <math.h>
+
+
+static bool strequal(const char *d0, u32 l0, const char *d1, u32 l1)
+{
+    if (l0 != l1) return false;
+
+    for (u32 i = 0; i < l0; ++i)
+    {
+        if (d0[i] != d1[i]) return false;
+    }
+    return true;
+}
+
+
+struct Functions
+{
+    f64 (*func)(...);
+    const char *func_str;
+    u32 len;
+    u32 args;
+};
+
+
+Functions g_funcs[] = {
+    {(f64 (*)(...))sin, "sin", 3, 1},
+    {(f64 (*)(...))cos, "cos", 3, 1},
+    {(f64 (*)(...))tan, "tan", 3, 1},
+};
+
+
+static f64 execute_tree(Node *tree, Lexer *lex)
+{
+    switch (tree->kind)
+    {
+        case Node_Kind::INVALID: assert(false);
+        case Node_Kind::OPEN_PAREN: assert(false);
+        case Node_Kind::POSITIVE:
+        {
+            return execute_tree(tree->next, lex);
+        } break;
+        case Node_Kind::NEGATE:
+        {
+            return -execute_tree(tree->next, lex);
+        } break;
+        case Node_Kind::ADD:
+        {
+            return execute_tree(tree->left, lex) + execute_tree(tree->right, lex);
+        } break;
+        case Node_Kind::SUB:
+        {
+            return execute_tree(tree->left, lex) - execute_tree(tree->right, lex);
+        } break;
+        case Node_Kind::MUL:
+        {
+            return execute_tree(tree->left, lex) * execute_tree(tree->right, lex);
+        } break;
+        case Node_Kind::DIV:
+        {
+            return execute_tree(tree->left, lex) / execute_tree(tree->right, lex);
+        } break;
+        case Node_Kind::POW:
+        {
+            return pow(execute_tree(tree->left, lex), execute_tree(tree->right, lex));
+        } break;
+        case Node_Kind::COMMA: assert(false);
+        case Node_Kind::FUNCTION:
+        {
+            Node *function_args[64] = {};
+            u32 args_count = 0;
+            Node *sub_tree = tree->next;
+            while (sub_tree->kind == Node_Kind::COMMA)
+            {
+                function_args[args_count++] = sub_tree->right;
+                sub_tree = sub_tree->left;
+            }
+
+            function_args[args_count++] = sub_tree;
+
+
+            Node *arg = function_args[args_count - 1];
+
+            for (u32 i = 0; i < ARRAY_SIZE(g_funcs); ++i)
+            {
+                if (strequal(g_funcs[i].func_str, g_funcs[i].len, lex->data + tree->data_index, tree->len))
+                {
+                    if (g_funcs[i].args == args_count)
+                    {
+                        return g_funcs[i].func(execute_tree(arg, lex));
+                    }
+                    else
+                    {
+                        fprintf(stderr, "Expected %u args but got %u\n", g_funcs[i].args, args_count);
+                        return NAN;
+                    }
+                }
+            }
+
+            fprintf(stderr, "Undefined function %.*s\n", tree->len, lex->data + tree->data_index);
+            return NAN;
+
+        } break;
+        case Node_Kind::VARIABLE: assert(false && "Not implemented");
+        case Node_Kind::NUMBER:    
+        {
+            return tree->num;
+        } break;
+    }
+}
+
 
 int main(void)
 {
-    // char input[256];
-    // fgets(input, sizeof(input), stdin)
 
-    // usize input_len = strlen(input) - 1;
-
-    char input[] = "----5*(---5+5)/---5";
-    usize input_len = strlen(input);
-
-    
-
-    Lexer lexer;
-
-    if (tokenize(&lexer, input, (u32) input_len))
+    while (true)
     {
-        exit(1);
+        char input[256];
+        fgets(input, sizeof(input), stdin);
+        if (input[0] == 'q') break;
+
+        usize input_len = strlen(input) - 1;
+
+        // char input[] = "cos(5^5)";
+        // char input[] = "f(1,2+2)";
+        // usize input_len = strlen(input);
+
+        
+
+        Lexer lexer;
+
+        if (tokenize(&lexer, input, (u32) input_len))
+        {
+            continue;
+        }
+
+        Node *tree = parse_expression(&lexer);
+        if (tree == nullptr)
+        {
+            continue;
+        }
+
+        graphviz_from_tree(tree, &lexer);
+
+
+        f64 val = execute_tree(tree, &lexer);
+        printf("val: %g\n", val);
+
     }
-
-    Node *tree = parse_expression(&lexer);
-    if (tree == nullptr)
-    {
-        exit(1);
-    }
-
-
-    graphviz_from_tree(tree);
-
-
     return 0;
 }
