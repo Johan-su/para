@@ -712,7 +712,7 @@ static Node *parse_expression(Lexer *lex)
                 if (next.kind == Token_Kind::CLOSE_PAREN)
                 {
                     fprintf(stderr, "ERROR: cannot have empty parenthesis pair\n");
-                    print_error_here(lex->data, lex->data_length, next.data_index);
+                    print_error_here(lex->data, lex->data_length, curr.data_index);
                     return nullptr;
                 }
                 Node *node = alloc(Node, 1);
@@ -724,6 +724,7 @@ static Node *parse_expression(Lexer *lex)
                 if (operator_count == 0)
                 {
                     fprintf(stderr, "ERROR: unmatched parenthesis\n");
+                    print_error_here(lex->data, lex->data_length, curr.data_index);
                     return nullptr;
                 }
                 while (operator_count != 0)
@@ -738,6 +739,7 @@ static Node *parse_expression(Lexer *lex)
                     else if (operator_count == 0)
                     {
                         fprintf(stderr, "ERROR: unmatched parenthesis\n");
+                        print_error_here(lex->data, lex->data_length, curr.data_index);
                         return nullptr;
                     }
 
@@ -786,6 +788,7 @@ static Node *parse_expression(Lexer *lex)
         if (op->kind == Node_Kind::OPEN_PAREN)
         {
             fprintf(stderr, "ERROR: Missing closing parenthesis\n");
+            print_error_here(lex->data, lex->data_length, op->data_index);
             return nullptr;
         }
 
@@ -944,7 +947,10 @@ int main(void)
 
 
         f64 val = execute_tree(tree, &lexer);
-        printf("val: %g\n", val);
+        if (!isnan(val))
+        {
+            printf("val: %g\n", val);
+        }
 
     }
     return 0;
