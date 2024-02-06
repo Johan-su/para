@@ -141,11 +141,11 @@ struct Token
 
 struct Lexer
 {
-    Token tokens[4096];
     u32 count;
     char *data;
     u32 data_length;
     u32 index;
+    Token *tokens;
 };
 
 
@@ -172,8 +172,6 @@ static bool is_alphanumeric(char c)
 {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
-
-
 
 static void print_error_here(const char *data, u32 data_length, u32 index)
 {
@@ -216,6 +214,12 @@ static void print_error_here(const char *data, u32 data_length, u32 index)
 
 }
 
+static void print_error_here_token(const Lexer *lex, u32 token_index)
+{
+    print_error_here(lex->data, lex->data_length, lex->tokens[token_index].data_index);
+}
+
+
 
 static bool is_whitespace(char c)
 {
@@ -233,6 +237,8 @@ static bool is_whitespace(char c)
 static Errcode tokenize(Lexer *lex, char *input, u32 input_length)
 {
     memset(lex, 0, sizeof(*lex));
+
+    lex->tokens = alloc(Token, input_length);
 
     lex->data = input;
     lex->data_length = input_length;
@@ -297,6 +303,12 @@ static Errcode tokenize(Lexer *lex, char *input, u32 input_length)
                     token.count += 1;
                     i += 1;
                 }
+                if (is_alpha(input[i]))
+                {
+                    fprintf(stderr, "ERROR: invalid numeric literal\n");
+                    print_error_here(lex->data, lex->data_length, i);
+                    return 1;
+                }
                 lex->tokens[lex->count++] = token;
             }
             else if (is_alpha(input[i]))
@@ -314,6 +326,7 @@ static Errcode tokenize(Lexer *lex, char *input, u32 input_length)
             else
             {
                 fprintf(stderr, "ERROR: unrecognized input %c\n", input[i]);
+                print_error_here(lex->data, lex->data_length, i);
                 return 1;
             }
         }
@@ -355,8 +368,8 @@ struct Node
     };
     Node *right;
 
-    u32 data_index;
-    u32 len;
+
+    u32 token_index;
     f64 num;
 };
 
@@ -433,7 +446,8 @@ static void graphviz_from_tree(Node *tree, Lexer *lex)
             }
             else if (top->kind == Node_Kind::FUNCTION || top->kind == Node_Kind::VARIABLE)
             {
-                fprintf(f, "\n%.*s", top->len, lex->data + top->data_index);
+                Token t = lex->tokens[top->token_index];
+                fprintf(f, "\n%.*s", t.count, lex->data + t.data_index);
             }
         }
         fprintf(f, "\"];\n");
@@ -561,9 +575,40 @@ static bool is_binary(Node_Kind kind)
 }
 
 
+static bool is_unary_operator(Token next, Token curr, Token last)
+{
+    if (last.kind == Token_Kind::NUMBER) return false;
+    if (last.kind == Token_Kind::IDENTIFIER) return false;
+
+
+    if (curr.kind == Token_Kind::STAR) return false;
+    if (curr.kind == Token_Kind::SLASH) return false;
+    if (curr.kind == Token_Kind::CARET) return false;
+    if (curr.kind == Token_Kind::NUMBER) return false;
+    if (curr.kind == Token_Kind::OPEN_PAREN) return false;
+    if (curr.kind == Token_Kind::CLOSE_PAREN) return false;
+    if (curr.kind == Token_Kind::COMMA) return false;
+    if (curr.kind == Token_Kind::IDENTIFIER) return false;
+    if (curr.kind == Token_Kind::END) return false;
+
+
+
+    if (next.kind == Token_Kind::STAR) return false;
+    if (next.kind == Token_Kind::SLASH) return false;
+    if (next.kind == Token_Kind::CARET) return false;
+    if (next.kind == Token_Kind::CLOSE_PAREN) return false;
+    if (next.kind == Token_Kind::COMMA) return false;
+    if (next.kind == Token_Kind::END) return false;
+
+    return true;
+}
+
+
 static Node_Kind node_kind_from_token(Token next, Token curr, Token last)
 {
     Node_Kind kind = Node_Kind::INVALID;
+
+
 
     if (curr.kind == Token_Kind::IDENTIFIER)
     {
@@ -574,10 +619,7 @@ static Node_Kind node_kind_from_token(Token next, Token curr, Token last)
     {
         kind = Node_Kind::OPEN_PAREN;
     }
-    else if (last.kind != Token_Kind::NUMBER && 
-        last.kind != Token_Kind::IDENTIFIER && 
-        last.kind != Token_Kind::CLOSE_PAREN
-    )
+    else if (is_unary_operator(next, curr, last))
     {
         if (curr.kind == Token_Kind::PLUS) kind = Node_Kind::POSITIVE;
         else if (curr.kind == Token_Kind::MINUS) kind = Node_Kind::NEGATE;
@@ -611,14 +653,14 @@ static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_
             if (*flag_count == 0 || flag_stack[*flag_count - 1] != Control_Flag::in_function)
             {
                 fprintf(stderr, "ERROR: Commas can only be inside functions\n");
-                print_error_here(lex->data, lex->data_length, op->data_index);
+                print_error_here_token(lex, op->token_index);
                 return 1;
             }
         }
         if (*output_count < 2)
         {
             fprintf(stderr, "ERROR: expected 2 args but got %u\n", *output_count);
-            print_error_here(lex->data, lex->data_length, op->data_index);
+            print_error_here_token(lex, op->token_index);
             return 1;
         }
         init_bin_node(op, output_stack, output_count);
@@ -634,14 +676,16 @@ static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_
     else
     {
         fprintf(stderr, "ERROR: unhandled operator %s\n", str_from_node_kind(op->kind));
-        print_error_here(lex->data, lex->data_length, op->data_index);
+        print_error_here_token(lex, op->token_index);
         return 1;
     }
     return 0;
 }
 
+
+
 // https://www.youtube.com/watch?v=fIPO4G42wYE
-static Node *parse_expression(Lexer *lex)
+static Node *parse_arithmetic(Lexer *lex)
 {
     Node **operator_stack = alloc(Node *, 32);
     u32 operator_count = 0;
@@ -701,8 +745,7 @@ static Node *parse_expression(Lexer *lex)
                 }
                 Node *node = alloc(Node, 1);
                 node->kind = node_kind_from_token(next, curr, last);
-                node->data_index = curr.data_index;
-                node->len = curr.count;
+                node->token_index = lex->index - 1;
                 operator_stack[operator_count++] = node; 
 
 
@@ -755,14 +798,14 @@ static Node *parse_expression(Lexer *lex)
                 Node *node = alloc(Node, 1);
                 node->kind = Node_Kind::NUMBER;
                 node->num = atof(lex->data + curr.data_index);
+                node->token_index = lex->index - 1;
                 output_stack[output_count++] = node;
             } break;
             case Token_Kind::IDENTIFIER:
             {
                 Node *node = alloc(Node, 1);
                 node->kind = node_kind_from_token(next, curr, last);
-                node->data_index = curr.data_index;
-                node->len = curr.count;
+                node->token_index = lex->index - 1;
                 if (node->kind == Node_Kind::FUNCTION)
                 {
                     operator_stack[operator_count++] = node;
@@ -788,7 +831,7 @@ static Node *parse_expression(Lexer *lex)
         if (op->kind == Node_Kind::OPEN_PAREN)
         {
             fprintf(stderr, "ERROR: Missing closing parenthesis\n");
-            print_error_here(lex->data, lex->data_length, op->data_index);
+            print_error_here_token(lex, op->token_index);
             return nullptr;
         }
 
@@ -800,6 +843,12 @@ static Node *parse_expression(Lexer *lex)
     }
 
     return output_stack[0];
+}
+
+
+static Node *parse(Lexer *lex)
+{
+    return parse_arithmetic(lex);
 }
 
 #include <math.h>
@@ -830,6 +879,14 @@ Functions g_funcs[] = {
     {(f64 (*)(...))sin, "sin", 3, 1},
     {(f64 (*)(...))cos, "cos", 3, 1},
     {(f64 (*)(...))tan, "tan", 3, 1},
+    //
+    {(f64 (*)(...))asin, "asin", 4, 1},
+    {(f64 (*)(...))acos, "acos", 4, 1},
+    {(f64 (*)(...))atan, "atan", 4, 1},
+    //
+    {(f64 (*)(...))sqrt, "sqrt", 4, 1},
+    {(f64 (*)(...))cbrt, "cbrt", 4, 1},
+    //
     {(f64 (*)(...))exp, "exp", 3, 1},
 };
 
@@ -846,89 +903,108 @@ Variables g_vars[] = {
     {3.141592653589793, "pi", 2},
 };
 
+static f64 exe_expression(Node *tree, Lexer *lex, bool *err);
 
-static f64 execute_tree(Node *tree, Lexer *lex)
+static f64 call_func(Node **arg_stack, s64 func_index, Lexer *lex, bool *err)
+{
+    Node **s = arg_stack;
+    s64 i = func_index;
+    u32 a = g_funcs[i].args;
+    f64 (*f)(...) = g_funcs[i].func;
+
+    switch (a)
+    {
+        case 0: assert(false);
+        case 1: return f(exe_expression(s[a - 1], lex, err));
+        case 2: return f(exe_expression(s[a - 1], lex, err), exe_expression(s[a - 2], lex, err));
+        case 3: return f(exe_expression(s[a - 1], lex, err), exe_expression(s[a - 2], lex, err), exe_expression(s[a - 3], lex, err));
+        case 4: return f(exe_expression(s[a - 1], lex, err), exe_expression(s[a - 2], lex, err), exe_expression(s[a - 3], lex, err), exe_expression(s[a - 4], lex, err));
+
+
+        default: assert(false);
+    }
+}
+
+
+static f64 exe_expression(Node *tree, Lexer *lex, bool *err)
 {
     switch (tree->kind)
     {
         case Node_Kind::INVALID: assert(false);
         case Node_Kind::OPEN_PAREN: assert(false);
-        case Node_Kind::POSITIVE:
-        {
-            return execute_tree(tree->next, lex);
-        } break;
-        case Node_Kind::NEGATE:
-        {
-            return -execute_tree(tree->next, lex);
-        } break;
-        case Node_Kind::ADD:
-        {
-            return execute_tree(tree->left, lex) + execute_tree(tree->right, lex);
-        } break;
-        case Node_Kind::SUB:
-        {
-            return execute_tree(tree->left, lex) - execute_tree(tree->right, lex);
-        } break;
-        case Node_Kind::MUL:
-        {
-            return execute_tree(tree->left, lex) * execute_tree(tree->right, lex);
-        } break;
-        case Node_Kind::DIV:
-        {
-            return execute_tree(tree->left, lex) / execute_tree(tree->right, lex);
-        } break;
-        case Node_Kind::POW:
-        {
-            return pow(execute_tree(tree->left, lex), execute_tree(tree->right, lex));
-        } break;
+
+        case Node_Kind::POSITIVE: return exe_expression(tree->next, lex, err);
+        case Node_Kind::NEGATE: return -exe_expression(tree->next, lex, err);
+
+        case Node_Kind::ADD: return exe_expression(tree->left, lex, err) + exe_expression(tree->right, lex, err);
+        case Node_Kind::SUB: return exe_expression(tree->left, lex, err) - exe_expression(tree->right, lex, err);
+        case Node_Kind::MUL: return exe_expression(tree->left, lex, err) * exe_expression(tree->right, lex, err);
+        case Node_Kind::DIV: return exe_expression(tree->left, lex, err) / exe_expression(tree->right, lex, err);
+        case Node_Kind::POW: return pow(exe_expression(tree->left, lex, err), exe_expression(tree->right, lex, err));
+
         case Node_Kind::COMMA: assert(false);
         case Node_Kind::FUNCTION:
         {
-            Node *function_args[64] = {};
+
+            Token t = lex->tokens[tree->token_index];
+            s64 func_index = -1;
+            u32 expected_args = 0;
+            for (u32 i = 0; i < ARRAY_SIZE(g_funcs); ++i)
+            {
+                if (strequal(g_funcs[i].func_str, g_funcs[i].len, lex->data + t.data_index, t.count))
+                {
+                    expected_args = g_funcs[i].args;
+                    func_index = i;
+                    break;
+                }
+            }
+
+
+            if (func_index == -1)
+            {
+                // could not find function 
+                fprintf(stderr, "Undefined function %.*s\n", t.count, lex->data + t.data_index);
+                *err = true;
+                return NAN;
+            }
+            assert(expected_args > 0);
+
+            Node *arg_stack[64] = {};
             u32 args_count = 0;
             Node *sub_tree = tree->next;
             while (sub_tree->kind == Node_Kind::COMMA)
             {
-                function_args[args_count++] = sub_tree->right;
+                arg_stack[args_count++] = sub_tree->right;
                 sub_tree = sub_tree->left;
             }
+            arg_stack[args_count++] = sub_tree;
 
-            function_args[args_count++] = sub_tree;
 
-
-            Node *arg = function_args[args_count - 1];
-
-            for (u32 i = 0; i < ARRAY_SIZE(g_funcs); ++i)
+            if (args_count > expected_args)
             {
-                if (strequal(g_funcs[i].func_str, g_funcs[i].len, lex->data + tree->data_index, tree->len))
-                {
-                    if (g_funcs[i].args == args_count)
-                    {
-                        return g_funcs[i].func(execute_tree(arg, lex));
-                    }
-                    else
-                    {
-                        fprintf(stderr, "Expected %u args but got %u\n", g_funcs[i].args, args_count);
-                        return NAN;
-                    }
-                }
+                fprintf(stderr, "ERROR: Expected %u args but got more\n", expected_args);
+                print_error_here_token(lex, arg_stack[args_count - expected_args - 1]->token_index);
+                *err = true;
+                return NAN;
             }
 
-            fprintf(stderr, "Undefined function %.*s\n", tree->len, lex->data + tree->data_index);
-            return NAN;
+
+            return call_func(arg_stack, func_index, lex, err);
 
         } break;
         case Node_Kind::VARIABLE:
         {
+            Token t = lex->tokens[tree->token_index];
             for (u32 i = 0; i < ARRAY_SIZE(g_vars); ++i)
             {
-                if (strequal(g_vars[i].var_str, g_vars[i].len, lex->data + tree->data_index, tree->len))
+                if (strequal(g_vars[i].var_str, g_vars[i].len, lex->data + t.data_index, t.count))
                 {
                     return g_vars[i].num;
                 }
             }
 
-            fprintf(stderr, "Undefined variable %.*s\n", tree->len, lex->data + tree->data_index);
+            fprintf(stderr, "Undefined variable %.*s\n", t.count, lex->data + t.data_index);
+            *err = true;
             return NAN;
 
         } break;
@@ -945,7 +1021,7 @@ int main(void)
 
     while (true)
     {
-        char input[256];
+        char input[1<<16];
         fgets(input, sizeof(input), stdin);
         if (input[0] == 'q') break;
 
@@ -964,7 +1040,7 @@ int main(void)
             continue;
         }
 
-        Node *tree = parse_expression(&lexer);
+        Node *tree = parse(&lexer);
         if (tree == nullptr)
         {
             continue;
@@ -972,9 +1048,9 @@ int main(void)
 
         graphviz_from_tree(tree, &lexer);
 
-
-        f64 val = execute_tree(tree, &lexer);
-        if (!isnan(val))
+        bool err = false;
+        f64 val = exe_expression(tree, &lexer, &err);
+        if (!err)
         {
             printf("val: %g\n", val);
         }
