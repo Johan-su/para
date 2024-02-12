@@ -36,6 +36,7 @@ static s32 screen_height = 0;
 
 static bool mouse_left = false;
 static bool mouse_left_pressed = false;
+static bool mouse_left_released = false;
 
 static bool key_down[512] = {};
 static bool key_pressed[512] = {};
@@ -50,6 +51,7 @@ enum UI_Flags : u32
     UI_Flags_draw_border = (1 << 3),
     UI_Flags_draw_background = (1 << 4),
     UI_Flags_brighten_background_when_hot = (1 << 5),
+    UI_Flags_brighten_background_when_active = (1 << 6),
 };
 
 struct UI_Element
@@ -57,12 +59,12 @@ struct UI_Element
     u32 flags;
 
     u64 id;
-    u32 index;
+    s32 index;
     s32 parent_index;
 
 
-    u32 text_index;
-    u32 text_capacity;
+    s32 text_index;
+    s32 text_capacity;
     char *text;
 
     Color background_color;
@@ -76,16 +78,16 @@ static UI_Element parent = {};
 
 
 static UI_Element last_stack[128] = {};
-static u32 last_count = 0;
+static s32 last_count = 0;
 
 static UI_Element element_stack[128] = {};
-static u32 element_count = 0;
+static s32 element_count = 0;
 
 
 
 static void push_element(UI_Element element)
 {
-    assert(element_count < sizeof(element_stack));
+    assert(element_count < (s32) sizeof(element_stack));
     element_stack[element_count++] = element;
 }
 
@@ -118,7 +120,7 @@ static bool hover(s32 x, s32 y, s32 w, s32 h)
 
 static void begin_children()
 {
-    parent = hot;
+    parent = active;
 }
 
 static void end_children()
@@ -126,9 +128,122 @@ static void end_children()
     parent = {};
 }
 
+static bool button(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
+{
+    u64 id = (u64) buf;
+    UI_Element e = {};
+
+    e.flags = UI_Flags_clickable|UI_Flags_draw_background|UI_Flags_brighten_background_when_hot|UI_Flags_draw_border|UI_Flags_draw_text;
+    e.id = id;
+    e.index = element_count;
+    e.parent_index = parent.index;
+    e.text_capacity = buf_size;
+    e.text = buf;
+
+    e.background_color = ColorFromHSV(236.0f, 0.45f, 0.45f);
+
+    e.x = x;
+    e.y = y;
+    e.w = w;
+    e.h = h;
+
+    bool is_hover = hover(x + 1, y + 1, w - 1, h - 1);
 
 
-static bool text_output(char *buf, u32 buf_size, s32 x, s32 y, s32 w, s32 h)
+    bool result = false;
+
+    if (is_active(id))
+    {
+        if (mouse_left_released)
+        {
+            active = {};
+        }
+        result = true;
+    }
+    else if (is_hot(id))
+    {
+        if (mouse_left_released && is_hover)
+        {
+            e.text_index = 0;
+            active = e;
+        }
+    }
+    else if (is_hover)
+    {
+        set_hot(e);
+    }
+
+
+
+
+
+    push_element(e);
+    return result;
+}
+
+static bool dropdown_menu(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
+{
+    u64 id = (u64) buf;
+    UI_Element e = {};
+
+    e.flags = UI_Flags_clickable|UI_Flags_draw_background|UI_Flags_brighten_background_when_hot|UI_Flags_brighten_background_when_active|UI_Flags_draw_border|UI_Flags_draw_text;
+    e.id = id;
+    e.index = element_count;
+    e.parent_index = parent.index;
+    e.text_capacity = buf_size;
+    e.text = buf;
+
+    e.background_color = ColorFromHSV(236.0f, 0.45f, 0.45f);
+
+    e.x = x;
+    e.y = y;
+    e.w = w;
+    e.h = h;
+
+    bool is_hover = hover(x + 1, y + 1, w - 1, h - 1);
+
+    bool result = false;
+
+
+
+
+    if (is_active(id))
+    {
+        if (mouse_left_released)
+        {
+            active = {};
+        }
+        result = true;
+    }
+    else if (is_hot(id))
+    {
+        if (mouse_left_released && is_hover)
+        {
+            e.text_index = 0;
+            active = e;
+        }
+    }
+    else if (is_hover)
+    {
+        set_hot(e);
+    }
+
+
+
+
+
+    push_element(e);
+    return result;
+}
+
+
+static bool slider(f32 *data, f32 min, f32 max, s32 x, s32 y, s32 w, s32 h)
+{
+     
+}
+
+
+static bool text_output(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
 {
     u64 id = (u64) buf;
     UI_Element e = {};
@@ -137,8 +252,9 @@ static bool text_output(char *buf, u32 buf_size, s32 x, s32 y, s32 w, s32 h)
     e.id = id;
     e.index = element_count;
     e.parent_index = parent.index;
+    e.text_capacity = buf_size;
     e.text = buf;
-    e.background_color = ColorFromHSV(236, 0.45, 0.45);
+    e.background_color = ColorFromHSV(236.0f, 0.45f, 0.45f);
     e.x = x;
     e.y = y;
     e.w = w;
@@ -153,7 +269,6 @@ static bool text_output(char *buf, u32 buf_size, s32 x, s32 y, s32 w, s32 h)
         {
             active = {};
         }
-        //TODO(Johan) add input for text
     }
     else if (is_hot(id))
     {
@@ -171,10 +286,10 @@ static bool text_output(char *buf, u32 buf_size, s32 x, s32 y, s32 w, s32 h)
 
     push_element(e);
     return false;
-    }
+}
 
 // uses buf pointer as unique id
-static bool text_input(char *buf, u32 buf_size, s32 x, s32 y, s32 w, s32 h)
+static bool text_input(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
 {
     u64 id = (u64) buf;
     UI_Element e = {};
@@ -186,7 +301,7 @@ static bool text_input(char *buf, u32 buf_size, s32 x, s32 y, s32 w, s32 h)
     e.text_index = last_stack[e.index].text_index;
     e.text_capacity = buf_size;
     e.text = buf;
-    e.background_color = ColorFromHSV(236, 0.47, 0.45);
+    e.background_color = ColorFromHSV(236.0f, 0.47f, 0.45f);
     e.x = x;
     e.y = y;
     e.w = w;
@@ -197,7 +312,7 @@ static bool text_input(char *buf, u32 buf_size, s32 x, s32 y, s32 w, s32 h)
 
     if (is_active(id))
     {
-        if ((mouse_left_pressed || key_pressed[KEY_ENTER]) && !is_hover)
+        if ((mouse_left_pressed && !is_hover ) || key_pressed[KEY_ENTER])
         {
             active = {};
             return true;
@@ -245,11 +360,11 @@ static void begin_ui()
 
 s32 font_size = 18;
 
-s32 glyph_width = font_size*0.65f;
+s32 glyph_width = (s32)((f32)font_size*0.65f);
 
-static void draw_text(const char *text, usize text_len, int pos_x, int pos_y, Color color)
+static void draw_text(const char *text, s32 text_len, int pos_x, int pos_y, Color color)
 {
-    for (usize i = 0; i < text_len; ++i)
+    for (s32 i = 0; i < text_len; ++i)
     {
         char buf[2];
         buf[0] = text[i];
@@ -277,6 +392,13 @@ static void end_ui()
                     color = ColorBrightness(e->background_color, 0.4f);
                 }
             }
+            if (e->flags & UI_Flags_brighten_background_when_active)
+            {
+                if (is_active(e->id))
+                {
+                    color = ColorBrightness(e->background_color, 0.4f);
+                }
+            }
             DrawRectangle(e->x, e->y, e->w, e->h, color);                
         }
 
@@ -290,8 +412,12 @@ static void end_ui()
                     e->text_index = 0;
                 }
 
-
-                usize len = strlen(e->text);
+                s32 len = 0;
+                {
+                    usize len_ = strlen(e->text);
+                    assert(len_ < INT32_MAX);
+                    len = (s32) len_;
+                }
 
                 if (key_pressed[KEY_RIGHT])
                 {
@@ -307,7 +433,7 @@ static void end_ui()
                 {
                     if (e->text_index != 0)
                     {
-                        for (u32 i = e->text_index; i < len; ++i)
+                        for (s32 i = e->text_index; i < len; ++i)
                         {
                             e->text[i - 1] = e->text[i];
                         }
@@ -341,11 +467,11 @@ static void end_ui()
 
                     if (key != 0 && len + 1 < e->text_capacity)
                     {
-                        for (u32 i = len; i-- > e->text_index; )
+                        for (s32 i = len; i-- > e->text_index; )
                         {
                             e->text[i + 1] = e->text[i];
                         }
-                        e->text[e->text_index] = key;
+                        e->text[e->text_index] = (char) key;
                         len += 1;
                         e->text_index += 1;
                     }
@@ -365,7 +491,13 @@ static void end_ui()
         if (e->flags & UI_Flags_draw_text)
         {
             s32 center_y = e->y + e->h / 2;
-            usize len = strlen(e->text);
+
+            s32 len = 0;
+            {
+                usize len_ = strlen(e->text);
+                assert(len_ < INT32_MAX);
+                len = (s32) len_;
+            }
 
 
             draw_text(e->text, len, e->x + 8, center_y - font_size / 2, WHITE);
@@ -406,9 +538,9 @@ int main()
         {
             bool data = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
             mouse_left_pressed = data && !mouse_left;
+            mouse_left_released = !data && mouse_left;
             mouse_left = data;
         }
-
         for (int i = 0; i <= 348; ++i)
         {
             bool data = IsKeyDown(i);
@@ -416,10 +548,8 @@ int main()
             key_down[i] = data;
         }
 
-        Vector2 vec = GetMousePosition();
-        
-        mx = vec.x;
-        my = vec.y;
+        mx = GetMouseX();
+        my = GetMouseY();
 
         screen_width = GetScreenWidth();
         screen_height = GetScreenHeight();
@@ -433,12 +563,34 @@ int main()
 
 
         begin_ui();
+        
+        char menu_buf[] = "menu1";
 
-        for (u32 i = 0; i < 5; ++i)
+        char button_bufs[4][16] = {"button1", "button2", "button3", "button4"};
+
+        if (dropdown_menu(menu_buf, sizeof(menu_buf), 128, 0, 128, 128))
+        {
+            begin_children();
+
+            for (s32 i = 0;  i < 4; ++i)
+            {
+                if (button(button_bufs[i], sizeof(*button_bufs), 130, (i + 1) * 128, 126, 128))
+                {
+                    printf("%.*s was pressed\n", (int)sizeof(*button_bufs), button_bufs[i]);
+                }
+            }
+        
+
+
+
+            end_children();
+        }
+
+        for (s32 i = 0; i < 5; ++i)
         {
             if (text_input(buf[i], sizeof(*buf), 0, i * 48, 128, 48))
             {
-                printf("buf%u: %.*s\n", i, (int)sizeof(*buf), buf[i]);
+                printf("buf%d: %.*s\n", i, (int)sizeof(*buf), buf[i]);
             }
         }
 
@@ -446,7 +598,7 @@ int main()
 
 
         char buf1[32] = {};
-        snprintf(buf1, sizeof(buf1), "mouse {%g, %g}", vec.x, vec.y);
+        snprintf(buf1, sizeof(buf1), "mouse {%d, %d}", mx, my);
 
         DrawText(buf1, 0, screen_height - 24, 12, BLACK);
 
