@@ -19,7 +19,17 @@ typedef size_t usize;
 typedef float f32;
 typedef double f64;
 
-
+static bool is_whitespace(char c)
+{
+    switch (c)
+    {
+        case ' ': return true;
+        case '\n': return true;
+        case '\t': return true;
+        case '\r': return true;
+    }
+    return false;
+}
 
 #define BLINKING_TIME_SEC 3
 
@@ -67,20 +77,20 @@ struct UI_Element
     s32 text_capacity;
     char *text;
 
+    bool active;
     Color background_color;
 
     s32 x, y, w, h;
 };
 
 static UI_Element hot = {};
-static UI_Element active = {};
 static UI_Element parent = {};
 
 
-static UI_Element last_stack[128] = {};
+static UI_Element last_stack[512] = {};
 static s32 last_count = 0;
 
-static UI_Element element_stack[128] = {};
+static UI_Element element_stack[512] = {};
 static s32 element_count = 0;
 
 
@@ -92,10 +102,15 @@ static void push_element(UI_Element element)
 }
 
 
-static bool is_active(u64 id)
+static bool is_active(u64 id, u64 index)
 {
-    return id == active.id;
+    UI_Element *last_e = last_stack + index;
+
+    if (id != last_e->id) return false;
+
+    return last_e->active;
 }
+
 
 static bool is_hot(u64 id)
 {
@@ -120,7 +135,8 @@ static bool hover(s32 x, s32 y, s32 w, s32 h)
 
 static void begin_children()
 {
-    parent = active;
+    assert(element_count > 0);
+    parent = element_stack[element_count - 1];
 }
 
 static void end_children()
@@ -140,6 +156,7 @@ static bool button(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
     e.text_capacity = buf_size;
     e.text = buf;
 
+    e.active = last_stack[e.index].active;
     e.background_color = ColorFromHSV(236.0f, 0.45f, 0.45f);
 
     e.x = x;
@@ -152,11 +169,11 @@ static bool button(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
 
     bool result = false;
 
-    if (is_active(id))
+    if (is_active(id, e.index))
     {
         if (mouse_left_released)
         {
-            active = {};
+            e.active = false;
         }
         result = true;
     }
@@ -165,7 +182,7 @@ static bool button(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
         if (mouse_left_released && is_hover)
         {
             e.text_index = 0;
-            active = e;
+            e.active = true;
         }
     }
     else if (is_hover)
@@ -193,6 +210,7 @@ static bool dropdown_menu(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
     e.text_capacity = buf_size;
     e.text = buf;
 
+    e.active = last_stack[e.index].active;
     e.background_color = ColorFromHSV(236.0f, 0.45f, 0.45f);
 
     e.x = x;
@@ -207,11 +225,11 @@ static bool dropdown_menu(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
 
 
 
-    if (is_active(id))
+    if (is_active(id, e.index))
     {
         if (mouse_left_released)
         {
-            active = {};
+            e.active = false;
         }
         result = true;
     }
@@ -220,7 +238,7 @@ static bool dropdown_menu(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
         if (mouse_left_released && is_hover)
         {
             e.text_index = 0;
-            active = e;
+            e.active = true;
         }
     }
     else if (is_hover)
@@ -254,6 +272,7 @@ static bool text_output(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
     e.parent_index = parent.index;
     e.text_capacity = buf_size;
     e.text = buf;
+    e.active = last_stack[e.index].active;
     e.background_color = ColorFromHSV(236.0f, 0.45f, 0.45f);
     e.x = x;
     e.y = y;
@@ -263,11 +282,11 @@ static bool text_output(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
     bool is_hover = hover(x + 1, y + 1, w - 1, h - 1);
 
 
-    if (is_active(id))
+    if (is_active(id, e.index))
     {
         if (mouse_left_pressed && !is_hover)
         {
-            active = {};
+            e.active = false;
         }
     }
     else if (is_hot(id))
@@ -275,7 +294,7 @@ static bool text_output(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
         if (mouse_left_pressed)
         {
             e.text_index = 0;
-            active = e;
+            e.active = true;
         }
     }
     else if (is_hover)
@@ -301,6 +320,7 @@ static bool text_input(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
     e.text_index = last_stack[e.index].text_index;
     e.text_capacity = buf_size;
     e.text = buf;
+    e.active = last_stack[e.index].active;
     e.background_color = ColorFromHSV(236.0f, 0.47f, 0.45f);
     e.x = x;
     e.y = y;
@@ -309,13 +329,14 @@ static bool text_input(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
 
     bool is_hover = hover(x + 1, y + 1, w - 1, h - 1);
 
+    bool result = false;
 
-    if (is_active(id))
+    if (is_active(id, e.index))
     {
         if ((mouse_left_pressed && !is_hover ) || key_pressed[KEY_ENTER])
         {
-            active = {};
-            return true;
+            e.active = false;
+            result = true;
         }
     }
     else if (is_hot(id))
@@ -323,7 +344,7 @@ static bool text_input(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
         if (mouse_left_pressed)
         {
             e.text_index = 0;
-            active = e;
+            e.active = true;
         }
     }
     if (is_hover)
@@ -394,7 +415,7 @@ static void end_ui()
             }
             if (e->flags & UI_Flags_brighten_background_when_active)
             {
-                if (is_active(e->id))
+                if (is_active(e->id, e->index))
                 {
                     color = ColorBrightness(e->background_color, 0.4f);
                 }
@@ -404,7 +425,7 @@ static void end_ui()
 
         if ((e->flags & UI_Flags_clickable) && (e->flags & UI_Flags_text_input))
         {
-            if (is_active(e->id))
+            if (is_active(e->id, e->index))
             {
                 if (mouse_left_pressed && hover(e->x + 1, e->y + 1, e->w - 1, e->h - 1))
                 {
@@ -433,17 +454,54 @@ static void end_ui()
                 {
                     if (e->text_index != 0)
                     {
-                        for (s32 i = e->text_index; i < len; ++i)
+                        if (key_down[KEY_LEFT_CONTROL])
                         {
-                            e->text[i - 1] = e->text[i];
+                            s32 search_start = e->text_index;
+                            for (s32 i = e->text_index; i-- > 0; )
+                            {
+                                if (!is_whitespace(e->text[i]))
+                                {
+                                    search_start = i;
+                                    break;
+                                }
+                            }
+
+                            s32 whitespace_index = -1;
+                            
+                            for (s32 i = search_start; i-- > 0; )
+                            {
+                                if (is_whitespace(e->text[i]))
+                                {
+                                    whitespace_index = i;
+                                    break;
+                                }
+                            }
+                            // test1
+                            // test1
+                            //   ^
+                            // t1
+                            s32 right_len = len - e->text_index;
+                            memmove(e->text + whitespace_index, e->text + e->text_index, right_len);
+
+                            s32 left_len = e->text_index - whitespace_index - 1;
+                            memset(e->text + whitespace_index + 1, 0, left_len);
+
+                            e->text_index = whitespace_index + 1;
                         }
-                        e->text[len - 1] = '\0';
-                        e->text_index -= 1;
+                        else
+                        {
+                            for (s32 i = e->text_index; i < len; ++i)
+                            {
+                                e->text[i - 1] = e->text[i];
+                            }
+                            e->text[len - 1] = '\0';
+                            e->text_index -= 1;
+                        }
                     }
                 }
                 else if (key_pressed[KEY_ENTER])
                 {
-                    active = {};
+                    element_stack[e->index].active = false;
                 }
                 else
                 {
@@ -531,6 +589,10 @@ int main()
 
     char buf[5][32] = {"test1","test2","test3","test4","test5"};
 
+    char menu_buf[] = "menu1";
+
+    char button_bufs[4][16] = {"button1", "button2", "button3", "button4"};
+
     while (!WindowShouldClose())
     {
         dt = GetFrameTime();
@@ -564,9 +626,6 @@ int main()
 
         begin_ui();
         
-        char menu_buf[] = "menu1";
-
-        char button_bufs[4][16] = {"button1", "button2", "button3", "button4"};
 
         if (dropdown_menu(menu_buf, sizeof(menu_buf), 128, 0, 128, 128))
         {
