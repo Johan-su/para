@@ -440,64 +440,122 @@ static void end_ui()
                     len = (s32) len_;
                 }
 
-                if (key_pressed[KEY_RIGHT])
+                if (key_pressed[KEY_RIGHT] && e->text_index < len)
                 {
-                    if (e->text_index < len)
-                        e->text_index += 1;   
-                }
-                else if (key_pressed[KEY_LEFT])
-                {
-                    if (e->text_index != 0)
-                        e->text_index -= 1;   
-                }
-                else if (key_pressed[KEY_BACKSPACE])
-                {
-                    if (e->text_index != 0)
+                    if (key_down[KEY_LEFT_CONTROL])
                     {
-                        if (key_down[KEY_LEFT_CONTROL])
+                        s32 new_index = e->text_index;
+
+                        while (new_index < len && is_whitespace(e->text[new_index])) 
                         {
-                            s32 search_start = e->text_index;
-                            for (s32 i = e->text_index; i-- > 0; )
-                            {
-                                if (!is_whitespace(e->text[i]))
-                                {
-                                    search_start = i;
-                                    break;
-                                }
-                            }
-
-                            s32 whitespace_index = -1;
-                            
-                            for (s32 i = search_start; i-- > 0; )
-                            {
-                                if (is_whitespace(e->text[i]))
-                                {
-                                    whitespace_index = i;
-                                    break;
-                                }
-                            }
-                            // test1
-                            // test1
-                            //   ^
-                            // t1
-                            s32 right_len = len - e->text_index;
-                            memmove(e->text + whitespace_index, e->text + e->text_index, right_len);
-
-                            s32 left_len = e->text_index - whitespace_index - 1;
-                            memset(e->text + whitespace_index + 1, 0, left_len);
-
-                            e->text_index = whitespace_index + 1;
+                            new_index += 1;
                         }
-                        else
+                        while (new_index < len && !is_whitespace(e->text[new_index])) 
                         {
-                            for (s32 i = e->text_index; i < len; ++i)
-                            {
-                                e->text[i - 1] = e->text[i];
-                            }
-                            e->text[len - 1] = '\0';
-                            e->text_index -= 1;
+                            new_index += 1;
                         }
+                        e->text_index = new_index;
                     }
+                    else
+                    {
+                        e->text_index += 1;   
+                    }
+                }
+                else if (key_pressed[KEY_LEFT] && e->text_index != 0)
+                {
+                    if (key_down[KEY_LEFT_CONTROL])
+                    {  
+                        s32 new_index = e->text_index - 1;
+
+                        while (new_index >= 0 && is_whitespace(e->text[new_index])) 
+                        {
+                            new_index -= 1;
+                        }
+                        while (new_index >= 0 && !is_whitespace(e->text[new_index])) 
+                        {
+                            new_index -= 1;
+                        }
+                        e->text_index = new_index + 1;
+                    }
+                    else
+                    {
+                        e->text_index -= 1;   
+                    }
+                }
+                else if (key_pressed[KEY_BACKSPACE] && e->text_index != 0)
+                {
+                    if (key_down[KEY_LEFT_CONTROL])
+                    {
+
+                        s32 start_index = e->text_index - 1; 
+                        s32 new_index = e->text_index - 1;
+
+                        while (new_index >= 0 && is_whitespace(e->text[new_index])) 
+                        {
+                            new_index -= 1;
+                        }
+                        while (new_index >= 0 && !is_whitespace(e->text[new_index])) 
+                        {
+                            new_index -= 1;
+                        }
+                        e->text_index = new_index + 1;
+
+
+
+                        // printf("start_index %d e->text_index %d\n", start_index, e->text_index); 
+                        // t2 es t1
+                        // t2 es t1
+                        //      ^
+                        // t2 t1000
+                        //   ^ 
+                        // t1
+                        // printf("Before------\n");
+                        // for (s32 i = 0; i < len; ++i)
+                        // {
+                        //     printf("%2x ", e->text[i]);   
+                        // }
+                        // printf("\n");
+
+                        s32 left_len = start_index - e->text_index + 1;
+                        s32 right_len = len - start_index - 1;
+                        memmove(e->text + e->text_index, e->text + start_index + 1, right_len);
+
+                        memset(e->text + e->text_index + right_len, 0, left_len);
+
+
+                        // printf("After------\n");
+                        // for (s32 i = 0; i < len; ++i)
+                        // {
+                        //     printf("%2x ", e->text[i]);   
+                        // }
+                        // printf("\n");
+
+                    }
+                    else
+                    {
+                        for (s32 i = e->text_index; i < len; ++i)
+                        {
+                            e->text[i - 1] = e->text[i];
+                        }
+                        e->text[len - 1] = '\0';
+                        e->text_index -= 1;
+                    }
+                }
+                else if (key_pressed[KEY_DELETE] && e->text_index != len)
+                {
+                    for (s32 i = e->text_index + 1; i < len; ++i)
+                    {
+                        e->text[i - 1] = e->text[i];
+                    }
+                    e->text[len - 1] = '\0';
+                }
+                else if (key_pressed[KEY_HOME])
+                {
+                    e->text_index = 0;
+                }
+                else if (key_pressed[KEY_END])
+                {
+                    e->text_index = len;
                 }
                 else if (key_pressed[KEY_ENTER])
                 {
@@ -515,10 +573,11 @@ static void end_ui()
                         }
                     }
 
-                    if (key_pressed[32]) key = 32;
+                    if (key_pressed[32]) 
+                        key = 32;
 
 
-                    if (key >= 'A' && key <= 'Z')
+                    if (!key_down[KEY_LEFT_SHIFT] && (key >= 'A' && key <= 'Z'))
                     {
                         key += 32;
                     }
