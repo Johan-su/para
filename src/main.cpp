@@ -31,6 +31,13 @@ static bool is_whitespace(char c)
     return false;
 }
 
+
+static s32 min(s32 a, s32 b)
+{
+    if (a < b) return a;
+    return b;
+}
+
 #define BLINKING_TIME_SEC 3
 
 
@@ -50,6 +57,7 @@ static bool mouse_left_released = false;
 
 static bool key_down[512] = {};
 static bool key_pressed[512] = {};
+static bool key_released[512] = {};
 
 
 
@@ -75,6 +83,9 @@ struct UI_Element
 
     s32 text_index;
     s32 text_capacity;
+    bool text_mark;
+    bool text_select;
+    s32 text_mark_start_index;
     char *text;
 
     bool active;
@@ -312,15 +323,19 @@ static bool text_input(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
 {
     u64 id = (u64) buf;
     UI_Element e = {};
+    const UI_Element *last_e = last_stack +element_count;
 
     e.flags = UI_Flags_text_input|UI_Flags_clickable|UI_Flags_draw_text|UI_Flags_draw_background|UI_Flags_draw_border|UI_Flags_brighten_background_when_hot;
     e.id = id;
     e.index = element_count;
     e.parent_index = parent.index;
-    e.text_index = last_stack[e.index].text_index;
+    e.text_index = last_e->text_index;
+    e.text_mark = last_e->text_mark;
+    e.text_select = last_e->text_select;
+    e.text_mark_start_index = last_e->text_mark_start_index;
     e.text_capacity = buf_size;
     e.text = buf;
-    e.active = last_stack[e.index].active;
+    e.active = last_e->active;
     e.background_color = ColorFromHSV(236.0f, 0.47f, 0.45f);
     e.x = x;
     e.y = y;
@@ -397,6 +412,53 @@ static void draw_text(const char *text, s32 text_len, int pos_x, int pos_y, Colo
     }
 }
 
+static void remove_text_region_and_set_cursor(char *text, s32 *text_len, s32 *text_index, s32 start, s32 end)
+{
+    s32 region_len = end - start + 1;
+    s32 right_len = *text_len - end - 1;
+
+    memmove(text + start, text + end + 1, right_len);
+    memset(text + start + right_len, 0, region_len);
+
+    *text_len -= region_len;
+
+    s32 cursor_change = start - *text_index;
+    if (cursor_change > 0) cursor_change = 0;
+    if (cursor_change < -region_len) cursor_change = -region_len; 
+
+    *text_index += cursor_change;
+}
+
+static void remove_marked_region_and_set_cursor(UI_Element *e, s32 *text_len)
+{
+    s32 start_index = 0;
+    s32 end_index = 0;
+    if (e->text_index < e->text_mark_start_index)
+    {
+        start_index = e->text_index;
+        end_index = e->text_mark_start_index;
+    }
+    else
+    {
+        start_index = e->text_mark_start_index;
+        end_index = e->text_index;
+    }
+
+    remove_text_region_and_set_cursor(e->text, text_len, &e->text_index, start_index, end_index - 1);
+}
+
+
+
+// static void remove_text_region(char *text, s32 *text_len, s32 start, s32 end)
+// {
+//     s32 region_len = end - start;
+//     s32 right_len = *text_len - end;
+
+//     memmove(text + start, text + end, right_len);
+//     memset(text + start + right_len, 0, region_len);
+
+//     *text_len -= region_len;
+// }
 
 static void end_ui()
 {
@@ -440,8 +502,23 @@ static void end_ui()
                     len = (s32) len_;
                 }
 
+
+                if (key_pressed[KEY_LEFT_SHIFT] && !e->text_select)
+                {
+                    e->text_mark = true;
+                    e->text_select = true;
+                    e->text_mark_start_index = e->text_index;
+                }
+                else if (key_released[KEY_LEFT_SHIFT] && e->text_select)
+                {
+                    e->text_select = false;
+                }
+
                 if (key_pressed[KEY_RIGHT] && e->text_index < len)
                 {
+                    if (!e->text_select)
+                        e->text_mark = false;
+
                     if (key_down[KEY_LEFT_CONTROL])
                     {
                         s32 new_index = e->text_index;
@@ -463,6 +540,9 @@ static void end_ui()
                 }
                 else if (key_pressed[KEY_LEFT] && e->text_index != 0)
                 {
+                    if (!e->text_select)
+                        e->text_mark = false;
+
                     if (key_down[KEY_LEFT_CONTROL])
                     {  
                         s32 new_index = e->text_index - 1;
@@ -482,72 +562,74 @@ static void end_ui()
                         e->text_index -= 1;   
                     }
                 }
-                else if (key_pressed[KEY_BACKSPACE] && e->text_index != 0)
+                else if (key_pressed[KEY_BACKSPACE])
                 {
-                    if (key_down[KEY_LEFT_CONTROL])
+                    if (e->text_mark)
                     {
+                        e->text_mark = false;
 
-                        s32 start_index = e->text_index - 1; 
-                        s32 new_index = e->text_index - 1;
-
-                        while (new_index >= 0 && is_whitespace(e->text[new_index])) 
-                        {
-                            new_index -= 1;
-                        }
-                        while (new_index >= 0 && !is_whitespace(e->text[new_index])) 
-                        {
-                            new_index -= 1;
-                        }
-                        e->text_index = new_index + 1;
-
-
-
-                        // printf("start_index %d e->text_index %d\n", start_index, e->text_index); 
-                        // t2 es t1
-                        // t2 es t1
-                        //      ^
-                        // t2 t1000
-                        //   ^ 
-                        // t1
-                        // printf("Before------\n");
-                        // for (s32 i = 0; i < len; ++i)
-                        // {
-                        //     printf("%2x ", e->text[i]);   
-                        // }
-                        // printf("\n");
-
-                        s32 left_len = start_index - e->text_index + 1;
-                        s32 right_len = len - start_index - 1;
-                        memmove(e->text + e->text_index, e->text + start_index + 1, right_len);
-
-                        memset(e->text + e->text_index + right_len, 0, left_len);
-
-
-                        // printf("After------\n");
-                        // for (s32 i = 0; i < len; ++i)
-                        // {
-                        //     printf("%2x ", e->text[i]);   
-                        // }
-                        // printf("\n");
-
+                        remove_marked_region_and_set_cursor(e, &len);
                     }
-                    else
+                    else if (e->text_index != 0)
                     {
-                        for (s32 i = e->text_index; i < len; ++i)
+                        if (key_down[KEY_LEFT_CONTROL])
+                        {
+
+                            s32 end_index = e->text_index - 1; 
+                            s32 start_index = e->text_index - 1;
+
+                            while (start_index >= 0 && is_whitespace(e->text[start_index])) 
+                            {
+                                start_index -= 1;
+                            }
+                            while (start_index >= 0 && !is_whitespace(e->text[start_index])) 
+                            {
+                                start_index -= 1;
+                            }
+
+                            remove_text_region_and_set_cursor(e->text, &len, &e->text_index, start_index, end_index);
+
+                        }
+                        else
+                        {
+                            for (s32 i = e->text_index; i < len; ++i)
+                            {
+                                e->text[i - 1] = e->text[i];
+                            }
+                            e->text[len - 1] = '\0';
+                            e->text_index -= 1;
+                        }
+                    }
+                }
+                else if (key_pressed[KEY_DELETE])
+                {
+                    if (e->text_mark)
+                    {
+                        e->text_mark = false;
+
+                        s32 start_index = 0;
+                        s32 end_index = 0;
+                        if (e->text_index < e->text_mark_start_index)
+                        {
+                            start_index = e->text_index;
+                            end_index = e->text_mark_start_index;
+                        }
+                        else
+                        {
+                            start_index = e->text_mark_start_index;
+                            end_index = e->text_index;
+                        }
+
+                        remove_text_region_and_set_cursor(e->text, &len, &e->text_index, start_index, end_index);
+                    }
+                    else if (e->text_index != len)
+                    {
+                        for (s32 i = e->text_index + 1; i < len; ++i)
                         {
                             e->text[i - 1] = e->text[i];
                         }
                         e->text[len - 1] = '\0';
-                        e->text_index -= 1;
                     }
-                }
-                else if (key_pressed[KEY_DELETE] && e->text_index != len)
-                {
-                    for (s32 i = e->text_index + 1; i < len; ++i)
-                    {
-                        e->text[i - 1] = e->text[i];
-                    }
-                    e->text[len - 1] = '\0';
                 }
                 else if (key_pressed[KEY_HOME])
                 {
@@ -563,6 +645,8 @@ static void end_ui()
                 }
                 else
                 {
+                    
+
                     u32 key = 0;
                     for (u32 j = 44; j <= 93; ++j)
                     {
@@ -582,15 +666,32 @@ static void end_ui()
                         key += 32;
                     }
 
-                    if (key != 0 && len + 1 < e->text_capacity)
+
+                    if (key != 0)
                     {
-                        for (s32 i = len; i-- > e->text_index; )
+                        // TODO(Johan) maybe change so, shift still can mark after typing
+                        if (e->text_select)
                         {
-                            e->text[i + 1] = e->text[i];
+                            e->text_select = false;
+                            e->text_mark = false;
                         }
-                        e->text[e->text_index] = (char) key;
-                        len += 1;
-                        e->text_index += 1;
+                        
+                        if (e->text_mark)
+                        {
+                            e->text_mark = false;
+                            remove_marked_region_and_set_cursor(e, &len);
+                        }
+
+                        if (len + 1 < e->text_capacity)
+                        {
+                            for (s32 i = len; i-- > e->text_index; )
+                            {
+                                e->text[i + 1] = e->text[i];
+                            }
+                            e->text[e->text_index] = (char) key;
+                            len += 1;
+                            e->text_index += 1;
+                        }
                     }
                 }
 
@@ -601,6 +702,28 @@ static void end_ui()
 
 
                 DrawRectangle(e->x + 7 + glyph_width * e->text_index, text_start_y, 1, font_size, RED);
+
+                // draw selected area
+
+
+                if (e->text_mark)
+                {
+                    s32 start_index = 0;
+                    s32 end_index = 0;
+                    if (e->text_index < e->text_mark_start_index)
+                    {
+                        start_index = e->text_index;
+                        end_index = e->text_mark_start_index;
+                    }
+                    else
+                    {
+                        start_index = e->text_mark_start_index;
+                        end_index = e->text_index;
+                    }
+                    s32 mark_len = end_index - start_index;
+
+                    DrawRectangle(e->x + 7 + glyph_width * start_index, text_start_y, glyph_width * mark_len, font_size, BLUE);
+                }
             }
         }
 
@@ -666,6 +789,7 @@ int main()
         {
             bool data = IsKeyDown(i);
             key_pressed[i] = data && !key_down[i];
+            key_released[i] = !data && key_down[i];
             key_down[i] = data;
         }
 
