@@ -657,6 +657,7 @@ static void end_ui()
                         }
                     }
 
+
                     if (key_pressed[32]) 
                         key = 32;
 
