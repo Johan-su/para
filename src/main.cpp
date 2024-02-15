@@ -61,6 +61,20 @@ static bool key_released[512] = {};
 
 
 
+
+struct UI_Result
+{
+    bool pressed;
+    bool down;
+    bool released;
+
+    bool active;
+
+
+    bool finished;
+};
+
+
 enum UI_Flags : u32
 {
     UI_Flags_clickable = (1 << 0),
@@ -70,6 +84,7 @@ enum UI_Flags : u32
     UI_Flags_draw_background = (1 << 4),
     UI_Flags_brighten_background_when_hot = (1 << 5),
     UI_Flags_brighten_background_when_active = (1 << 6),
+    UI_Flags_toggle_on_click = (1 << 7),
 };
 
 struct UI_Element
@@ -82,14 +97,16 @@ struct UI_Element
 
 
     s32 text_index;
-    s32 text_capacity;
     bool text_mark;
     bool text_select;
     s32 text_mark_start_index;
     char *text;
+    s32 text_capacity;
 
     bool active;
     Color background_color;
+
+    UI_Result result;
 
     s32 x, y, w, h;
 };
@@ -155,116 +172,134 @@ static void end_children()
     parent = {};
 }
 
-static bool button(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
-{
-    u64 id = (u64) buf;
-    UI_Element e = {};
+// static bool bounding_box(u64 id, s32 x, s32 y, s32 w, s32 h)
+// {
+//     UI_Element e = {};
 
-    e.flags = UI_Flags_clickable|UI_Flags_draw_background|UI_Flags_brighten_background_when_hot|UI_Flags_draw_border|UI_Flags_draw_text;
+//     e.flags = UI_Flags_clickable|UI_Flags_draw_background|UI_Flags_draw_border|UI_Flags_resizeable|UI_Flags_change_cursor_at_border;
+//     e.id = id;
+//     e.index = element_count;
+//     e.parent_index = parent.index;
+
+//     e.active = last_stack[e.index].active;
+//     e.background_color = ColorFromHSV(236.0f, 0.45f, 0.45f);
+
+//     e.x = x;
+//     e.y = y;
+//     e.w = w;
+//     e.h = h;
+
+//     bool is_hover = hover(x + 1, y + 1, w - 1, h - 1);
+
+
+//     bool result = false;
+
+//     if (is_active(id, e.index))
+//     {
+//         if (mouse_left_pressed && !is_hover)
+//         {
+//             e.active = false;
+//         }
+//     }
+//     else if (is_hot(id))
+//     {
+//         if (mouse_left_pressed && is_hover)
+//         {
+//             e.text_index = 0;
+//             e.active = true;
+//         }
+//     }
+//     else if (is_hover)
+//     {
+//         set_hot(e);
+//     }
+
+
+
+
+
+//     push_element(e);
+//     return result;
+// }
+
+
+
+static UI_Element create_push_element(
+    u32 flags, 
+    u64 id, 
+    char *text,
+    s32 text_capacity, 
+    Color background_color, 
+    s32 x, 
+    s32 y, 
+    s32 w, 
+    s32 h
+)
+{
+    UI_Element e = {};
+    e.flags = flags;
+
     e.id = id;
     e.index = element_count;
     e.parent_index = parent.index;
-    e.text_capacity = buf_size;
-    e.text = buf;
 
-    e.active = last_stack[e.index].active;
-    e.background_color = ColorFromHSV(236.0f, 0.45f, 0.45f);
+    const UI_Element *le = last_stack + element_count;
+
+    e.text_index = le->text_index;
+    e.text_mark = le->text_mark;
+    e.text_select = le->text_select;
+    e.text_mark_start_index = le->text_mark_start_index;
+
+    e.text = text;
+    e.text_capacity = text_capacity;
+
+    e.active = le->active;
+    e.background_color = background_color;
+
+    e.result = le->result;
 
     e.x = x;
     e.y = y;
     e.w = w;
     e.h = h;
 
-    bool is_hover = hover(x + 1, y + 1, w - 1, h - 1);
-
-
-    bool result = false;
-
-    if (is_active(id, e.index))
-    {
-        if (mouse_left_released)
-        {
-            e.active = false;
-        }
-        result = true;
-    }
-    else if (is_hot(id))
-    {
-        if (mouse_left_released && is_hover)
-        {
-            e.text_index = 0;
-            e.active = true;
-        }
-    }
-    else if (is_hover)
-    {
-        set_hot(e);
-    }
-
-
-
-
-
     push_element(e);
-    return result;
+    return e;
 }
 
-static bool dropdown_menu(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
+static UI_Result button(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
 {
-    u64 id = (u64) buf;
-    UI_Element e = {};
+    UI_Element e = create_push_element( 
+        UI_Flags_clickable|
+        UI_Flags_draw_background|
+        UI_Flags_brighten_background_when_hot|
+        UI_Flags_draw_border|
+        UI_Flags_draw_text,
+        (u64) buf, 
+        buf, buf_size, 
+        ColorFromHSV(236.0f, 0.45f, 0.45f), x, y, w, h
+    );
 
-    e.flags = UI_Flags_clickable|UI_Flags_draw_background|UI_Flags_brighten_background_when_hot|UI_Flags_brighten_background_when_active|UI_Flags_draw_border|UI_Flags_draw_text;
-    e.id = id;
-    e.index = element_count;
-    e.parent_index = parent.index;
-    e.text_capacity = buf_size;
-    e.text = buf;
-
-    e.active = last_stack[e.index].active;
-    e.background_color = ColorFromHSV(236.0f, 0.45f, 0.45f);
-
-    e.x = x;
-    e.y = y;
-    e.w = w;
-    e.h = h;
-
-    bool is_hover = hover(x + 1, y + 1, w - 1, h - 1);
-
-    bool result = false;
-
-
-
-
-    if (is_active(id, e.index))
-    {
-        if (mouse_left_released)
-        {
-            e.active = false;
-        }
-        result = true;
-    }
-    else if (is_hot(id))
-    {
-        if (mouse_left_released && is_hover)
-        {
-            e.text_index = 0;
-            e.active = true;
-        }
-    }
-    else if (is_hover)
-    {
-        set_hot(e);
-    }
-
-
-
-
-
-    push_element(e);
-    return result;
+    return e.result;
 }
 
+static UI_Result dropdown_menu(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
+{
+    UI_Element e = create_push_element(
+        UI_Flags_clickable|
+        UI_Flags_draw_background|
+        UI_Flags_brighten_background_when_hot|
+        UI_Flags_brighten_background_when_active|
+        UI_Flags_draw_border|
+        UI_Flags_draw_text|
+        UI_Flags_toggle_on_click,
+        (u64) buf, 
+        buf, buf_size, 
+        ColorFromHSV(236.0f, 0.45f, 0.45f), x, y, w, h
+    );
+
+    return e.result;
+}
 
 static bool slider(f32 *data, f32 min, f32 max, s32 x, s32 y, s32 w, s32 h)
 {
@@ -272,104 +307,44 @@ static bool slider(f32 *data, f32 min, f32 max, s32 x, s32 y, s32 w, s32 h)
 }
 
 
-static bool text_output(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
+static UI_Result text_output(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
 {
-    u64 id = (u64) buf;
-    UI_Element e = {};
+    UI_Element e = create_push_element(
+        UI_Flags_draw_text|UI_Flags_draw_background|UI_Flags_draw_border,
+        (u64) buf,
+        buf,
+        buf_size,
+        ColorFromHSV(236.0f, 0.45f, 0.45f),
+        x,
+        y,
+        w,
+        h
+    );
 
-    e.flags = UI_Flags_draw_text|UI_Flags_draw_background|UI_Flags_draw_border;
-    e.id = id;
-    e.index = element_count;
-    e.parent_index = parent.index;
-    e.text_capacity = buf_size;
-    e.text = buf;
-    e.active = last_stack[e.index].active;
-    e.background_color = ColorFromHSV(236.0f, 0.45f, 0.45f);
-    e.x = x;
-    e.y = y;
-    e.w = w;
-    e.h = h;
-
-    bool is_hover = hover(x + 1, y + 1, w - 1, h - 1);
-
-
-    if (is_active(id, e.index))
-    {
-        if (mouse_left_pressed && !is_hover)
-        {
-            e.active = false;
-        }
-    }
-    else if (is_hot(id))
-    {
-        if (mouse_left_pressed)
-        {
-            e.text_index = 0;
-            e.active = true;
-        }
-    }
-    else if (is_hover)
-    {
-        set_hot(e);
-    }
-
-
-    push_element(e);
-    return false;
+    return e.result;
 }
 
 // uses buf pointer as unique id
-static bool text_input(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
+static UI_Result text_input(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
 {
-    u64 id = (u64) buf;
-    UI_Element e = {};
-    const UI_Element *last_e = last_stack +element_count;
+    UI_Element e = create_push_element(
+        UI_Flags_text_input|
+        UI_Flags_clickable|
+        UI_Flags_draw_text|
+        UI_Flags_draw_background|
+        UI_Flags_draw_border|
+        UI_Flags_brighten_background_when_hot,
+        (u64) buf,
+        buf,
+        buf_size,
+        ColorFromHSV(236.0f, 0.47f, 0.45f),
+        x,
+        y,
+        w,
+        h
+    );
 
-    e.flags = UI_Flags_text_input|UI_Flags_clickable|UI_Flags_draw_text|UI_Flags_draw_background|UI_Flags_draw_border|UI_Flags_brighten_background_when_hot;
-    e.id = id;
-    e.index = element_count;
-    e.parent_index = parent.index;
-    e.text_index = last_e->text_index;
-    e.text_mark = last_e->text_mark;
-    e.text_select = last_e->text_select;
-    e.text_mark_start_index = last_e->text_mark_start_index;
-    e.text_capacity = buf_size;
-    e.text = buf;
-    e.active = last_e->active;
-    e.background_color = ColorFromHSV(236.0f, 0.47f, 0.45f);
-    e.x = x;
-    e.y = y;
-    e.w = w;
-    e.h = h;
-
-    bool is_hover = hover(x + 1, y + 1, w - 1, h - 1);
-
-    bool result = false;
-
-    if (is_active(id, e.index))
-    {
-        if ((mouse_left_pressed && !is_hover ) || key_pressed[KEY_ENTER])
-        {
-            e.active = false;
-            result = true;
-        }
-    }
-    else if (is_hot(id))
-    {
-        if (mouse_left_pressed)
-        {
-            e.text_index = 0;
-            e.active = true;
-        }
-    }
-    if (is_hover)
-    {
-        set_hot(e);
-    }
-
-
-    push_element(e);
-    return false;
+    return e.result;
 }
 
 static void begin_ui()
@@ -464,7 +439,41 @@ static void end_ui()
 {
     for (UI_Element *e = element_stack; e < element_stack + element_count; ++e)
     {
-         
+        UI_Result result = {};
+
+        bool is_hover = hover(e->x + 1, e->y + 1, e->w - 1, e->h - 1);
+        if (e->flags & UI_Flags_clickable)
+        {
+            if (is_hover)
+            {
+                result.pressed = mouse_left_pressed;
+                result.released = mouse_left_released;
+                result.down = mouse_left;
+
+                if ((e->flags & UI_Flags_toggle_on_click) && mouse_left_pressed)
+                {
+                    e->active = !e->active;
+                }
+            }
+
+
+
+            if (!is_active(e->id, e->index) && is_hot(e->id))
+            {
+                if (mouse_left_pressed)
+                {
+                    e->active = true;
+                }
+            }
+            if (is_hover)
+            {
+                set_hot(*e);
+            }
+
+
+        }
+
+
         if (e->flags & UI_Flags_draw_background)
         {
             Color color = e->background_color;
@@ -489,10 +498,18 @@ static void end_ui()
         {
             if (is_active(e->id, e->index))
             {
-                if (mouse_left_pressed && hover(e->x + 1, e->y + 1, e->w - 1, e->h - 1))
+                if (mouse_left_pressed)
                 {
-                    // maybe set according to mouse position
-                    e->text_index = 0;
+                    if (!is_hover)
+                    {
+                        e->active = false;
+                        result.finished = true;
+                    }
+                    else
+                    {
+                        // TODO(Johan) maybe set according to mouse position
+                        e->text_index = 0;
+                    }
                 }
 
                 s32 len = 0;
@@ -607,20 +624,7 @@ static void end_ui()
                     {
                         e->text_mark = false;
 
-                        s32 start_index = 0;
-                        s32 end_index = 0;
-                        if (e->text_index < e->text_mark_start_index)
-                        {
-                            start_index = e->text_index;
-                            end_index = e->text_mark_start_index;
-                        }
-                        else
-                        {
-                            start_index = e->text_mark_start_index;
-                            end_index = e->text_index;
-                        }
-
-                        remove_text_region_and_set_cursor(e->text, &len, &e->text_index, start_index, end_index);
+                        remove_marked_region_and_set_cursor(e, &len);
                     }
                     else if (e->text_index != len)
                     {
@@ -641,7 +645,8 @@ static void end_ui()
                 }
                 else if (key_pressed[KEY_ENTER])
                 {
-                    element_stack[e->index].active = false;
+                    e->active = false;
+                    result.finished = true;
                 }
                 else
                 {
@@ -749,8 +754,10 @@ static void end_ui()
             DrawRectangleLines(e->x, e->y, e->w, e->h, YELLOW);
         }
 
-
+        result.active = e->active;
+        e->result = result;
     }
+
 
     memcpy(last_stack, element_stack, sizeof(element_stack));
     last_count = element_count;
@@ -810,13 +817,13 @@ int main()
         begin_ui();
         
 
-        if (dropdown_menu(menu_buf, sizeof(menu_buf), 128, 0, 128, 128))
+        if (dropdown_menu(menu_buf, sizeof(menu_buf), 128, 0, 128, 128).active)
         {
             begin_children();
 
             for (s32 i = 0;  i < 4; ++i)
             {
-                if (button(button_bufs[i], sizeof(*button_bufs), 130, (i + 1) * 128, 126, 128))
+                if (button(button_bufs[i], sizeof(*button_bufs), 130, (i + 1) * 128, 126, 128).released)
                 {
                     printf("%.*s was pressed\n", (int)sizeof(*button_bufs), button_bufs[i]);
                 }
@@ -830,7 +837,7 @@ int main()
 
         for (s32 i = 0; i < 5; ++i)
         {
-            if (text_input(buf[i], sizeof(*buf), 0, i * 48, 128, 48))
+            if (text_input(buf[i], sizeof(*buf), 0, i * 48, 128, 48).finished)
             {
                 printf("buf%d: %.*s\n", i, (int)sizeof(*buf), buf[i]);
             }
