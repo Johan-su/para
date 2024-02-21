@@ -277,7 +277,8 @@ static UI_Result button(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
         UI_Flags_draw_text,
         (u64) buf, 
         buf, buf_size, 
-        ColorFromHSV(236.0f, 0.45f, 0.45f), x, y, w, h
+        ColorFromHSV(236.0f, 0.45f, 0.45f), 
+        x, y, w, h
     );
 
     return e.result;
@@ -295,7 +296,8 @@ static UI_Result dropdown_menu(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32
         UI_Flags_toggle_on_click,
         (u64) buf, 
         buf, buf_size, 
-        ColorFromHSV(236.0f, 0.45f, 0.45f), x, y, w, h
+        ColorFromHSV(236.0f, 0.45f, 0.45f), 
+        x, y, w, h
     );
 
     return e.result;
@@ -440,6 +442,11 @@ static void end_ui()
     for (UI_Element *e = element_stack; e < element_stack + element_count; ++e)
     {
         UI_Result result = {};
+
+        if (e->active)
+        {
+            printf("e->index = %d\n", e->index);
+        }
 
         bool is_hover = hover(e->x + 1, e->y + 1, e->w - 1, e->h - 1);
         if (e->flags & UI_Flags_clickable)
@@ -650,8 +657,6 @@ static void end_ui()
                 }
                 else
                 {
-                    
-
                     u32 key = 0;
                     for (u32 j = 44; j <= 93; ++j)
                     {
