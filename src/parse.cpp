@@ -238,7 +238,8 @@ static Errcode tokenize(Lexer *lex, char *input, u32 input_length)
 {
     memset(lex, 0, sizeof(*lex));
 
-    lex->tokens = alloc(Token, input_length);
+    u64 token_capacity = 1 + 2 * input_length;
+    lex->tokens = alloc(Token, token_capacity);
 
     lex->data = input;
     lex->data_length = input_length;
@@ -335,6 +336,8 @@ static Errcode tokenize(Lexer *lex, char *input, u32 input_length)
     }
     
     lex->tokens[lex->count++] = {Token_Kind::END, 0, 0};
+
+    assert(lex->count < token_capacity);
 
     return 0;
 }
@@ -579,6 +582,7 @@ static bool is_unary_operator(Token next, Token curr, Token last)
 {
     if (last.kind == Token_Kind::NUMBER) return false;
     if (last.kind == Token_Kind::IDENTIFIER) return false;
+    if (last.kind == Token_Kind::CLOSE_PAREN) return false;
 
 
     if (curr.kind == Token_Kind::STAR) return false;
@@ -1016,21 +1020,289 @@ static f64 exe_expression(Node *tree, Lexer *lex, bool *err)
 }
 
 
-int main(void)
+enum class Op_Type
+{
+    INVALID,
+    ADD,
+    SUB,
+    NEGATE,
+    DIV,
+    MUL,
+    POW,
+
+    PUSH,
+    POP,
+    RETURN,
+};
+
+
+const char *str_from_op_type(Op_Type t)
+{
+    switch (t)
+    {
+
+        case Op_Type::INVALID: return "INVALID";
+        case Op_Type::ADD: return "ADD";
+        case Op_Type::SUB: return "SUB";
+        case Op_Type::NEGATE: return "NEGATE";
+        case Op_Type::DIV: return "DIV";
+        case Op_Type::MUL: return "MUL";
+        case Op_Type::POW: return "POW";
+        case Op_Type::PUSH: return "PUSH";
+        case Op_Type::POP: return "POP";
+        case Op_Type::RETURN: return "RETURN";
+    }
+    assert(false);
+    return nullptr;
+}
+
+
+struct Op
+{
+    Op_Type type;
+    f64 val;
+};
+
+
+
+static bool is_visited(Node **list, usize list_count, Node *n)
+{
+    for (usize i = 0; i < list_count; ++i)
+    {
+        if (list[i] == n)
+        {
+            return true;   
+        }
+    }
+    return false;
+}
+
+static Op *bytecode_from_tree(Node *tree, Lexer *lex)
+{
+    usize op_size = 8192;
+    Op *ops = alloc(Op, op_size);
+    u32 ops_count = 0;
+
+    Node **list = alloc(Node *, 1024);
+    usize list_count = 0;
+
+    Node **stack = alloc(Node *, 1024);
+    usize stack_count = 0;
+    
+    Node **op_order_stack = alloc(Node *, 1024);
+    usize order_count = 0;
+
+
+    stack[stack_count++] = tree;
+
+
+    while (stack_count > 0)
+    {
+        Node *active = stack[stack_count - 1];
+
+        bool end = false;
+        while (!end)
+        {
+            end = true;
+            if (active->left != nullptr && !is_visited(list, list_count, active->left))
+            {
+                stack[stack_count++] = active->left;
+                list[list_count++] = active->left;
+                active = active->left;
+                end = false;
+            }
+            else if (active->right != nullptr && !is_visited(list, list_count, active->right))
+            {
+                stack[stack_count++] = active->right;
+                list[list_count++] = active->right;
+                active = active->right;
+                end = false;
+            }
+        }
+
+
+        op_order_stack[order_count++] = active;
+        stack_count -= 1;
+    }
+
+
+    for (u32 i = 0; i < order_count; ++i)
+    {
+        Node *node = op_order_stack[i];
+        switch (node->kind)
+        {
+            case Node_Kind::INVALID: assert(false);
+            case Node_Kind::OPEN_PAREN: assert(false);
+            case Node_Kind::POSITIVE:
+            {
+                // do nothing
+            } break;
+            case Node_Kind::NEGATE:
+            {
+                Op op = {};
+                op.type = Op_Type::NEGATE;
+                op.val = 0;
+                ops[ops_count++] = op;
+            } break;
+            case Node_Kind::ADD:
+            {
+                Op op = {};
+                op.type = Op_Type::ADD;
+                ops[ops_count++] = op;
+            } break;
+            case Node_Kind::SUB:
+            {
+                Op op = {};
+                op.type = Op_Type::SUB;
+                ops[ops_count++] = op;
+            } break;
+            case Node_Kind::MUL:
+            {
+                Op op = {};
+                op.type = Op_Type::MUL;
+                ops[ops_count++] = op;
+            } break;
+            case Node_Kind::DIV:
+            {
+                Op op = {};
+                op.type = Op_Type::DIV;
+                ops[ops_count++] = op;
+            } break;
+            case Node_Kind::POW:
+            {
+                Op op = {};
+                op.type = Op_Type::POW;
+                ops[ops_count++] = op;
+            } break;
+            case Node_Kind::COMMA: assert(false);
+            case Node_Kind::FUNCTION: assert(false);
+            {
+                
+            } break;
+            case Node_Kind::VARIABLE: assert(false);
+            case Node_Kind::NUMBER:
+            {
+                Op op = {};
+                op.type = Op_Type::PUSH;
+                op.val = node->num;
+                ops[ops_count++] = op;
+            } break;
+        }
+    }
+
+    ops[ops_count++] = {.type = Op_Type::RETURN, .val = 0};
+
+
+    return ops;
+}
+
+
+static f64 execute_ops(Op *ops)
 {
 
-    while (true)
+    f64 *val_stack = alloc(f64, 1024);
+    u32 stack_count = 0;
+
+    bool running = true;
+    for (u32 i = 0; running; ++i)
     {
+        Op *op = ops + i;
+
+
+        switch (op->type)
+        {
+            case Op_Type::INVALID: assert(false);
+            case Op_Type::ADD:
+            {
+                f64 n1 = val_stack[--stack_count];
+                f64 n2 = val_stack[--stack_count];
+                val_stack[stack_count++] = n1 + n2;
+            } break;
+            case Op_Type::SUB:
+            {
+                f64 n1 = val_stack[--stack_count];
+                f64 n2 = val_stack[--stack_count];
+                val_stack[stack_count++] = n1 - n2;
+            } break;
+            case Op_Type::NEGATE: assert(false);
+            case Op_Type::DIV:
+            {
+                f64 n1 = val_stack[--stack_count];
+                f64 n2 = val_stack[--stack_count];
+                val_stack[stack_count++] = n1 / n2;
+            } break;
+            case Op_Type::MUL:
+            {
+                f64 n1 = val_stack[--stack_count];
+                f64 n2 = val_stack[--stack_count];
+                val_stack[stack_count++] = n1 * n2;
+            } break;
+            case Op_Type::POW:
+            {
+                f64 n1 = val_stack[--stack_count];
+                f64 n2 = val_stack[--stack_count];
+
+                val_stack[stack_count++] = pow(n1, n2);
+            } break;
+
+            case Op_Type::PUSH:
+            {
+                val_stack[stack_count++] = op->val;
+            } break;
+            case Op_Type::POP: assert(false);
+            case Op_Type::RETURN:
+            {
+                running = false;
+            } break;
+
+            default:
+            {
+                fprintf(stderr, "ERROR: Illegal operator\n");
+                exit(1);
+            } break;
+        }
+    }
+
+
+    assert(stack_count == 1);
+    return val_stack[0];
+}
+
+
+static void fprint_ops(Op *ops, FILE *f)
+{
+    for (usize i = 0; ; ++i)
+    {
+        fprintf(f, "index %llu: %s, %g\n", i, str_from_op_type(ops[i].type), ops[i].val);
+        if (ops[i].type == Op_Type::RETURN)
+        {
+            break;
+        }
+    }
+}
+
+int main(void)
+{
+    bool running = true;
+    while (running)
+    {
+
+        #if 0
         char input[1<<16];
         fgets(input, sizeof(input), stdin);
         if (input[0] == 'q') break;
 
         usize input_len = strlen(input) - 1;
 
-        // char input[] = "cos(5^5)";
-        // char input[] = "f(1,2+2)";
-        // usize input_len = strlen(input);
+        #else
+        running = false;
+        // char input[] = "1*2/(3^4-5)-+6+(7+8++9)";
+        // char input[] = "1+(2)--3";
 
+        char input[] = "cos(5^5)";
+        // char input[] = "f(1,2+2)";
+        usize input_len = strlen(input);
+        #endif
         
 
         Lexer lexer;
@@ -1048,12 +1320,25 @@ int main(void)
 
         graphviz_from_tree(tree, &lexer);
 
-        bool err = false;
-        f64 val = exe_expression(tree, &lexer, &err);
-        if (!err)
-        {
-            printf("val: %g\n", val);
-        }
+
+
+        Op *ops = bytecode_from_tree(tree, &lexer);
+
+
+        fprint_ops(ops, stdout);
+
+        f64 val = execute_ops(ops);
+        printf("%.*s = %g\n", (int)lexer.data_length, lexer.data, val);
+
+
+
+
+        // bool err = false;
+        // f64 val = exe_expression(tree, &lexer, &err);
+        // if (!err)
+        // {
+        //     printf("val: %g\n", val);
+        // }
 
     }
     return 0;
