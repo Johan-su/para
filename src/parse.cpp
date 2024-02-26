@@ -90,6 +90,8 @@ struct [[nodiscard]] Errcode
 // }
 
 
+
+
 enum class Token_Kind
 {
     INVALID,
@@ -491,6 +493,7 @@ static Token next_token(Lexer *lex)
 }
 
 
+
 static Node *parse_leaf(Lexer *lex)
 {
     Token next = next_token(lex);
@@ -643,7 +646,7 @@ static Node_Kind node_kind_from_token(Token next, Token curr, Token last)
     return kind;
 }
 
-static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_count, Control_Flag *flag_stack, u32 *flag_count, Lexer *lex)
+static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_count, Control_Flag *flag_stack, u32 *flag_count, const Lexer *lex)
 {
     if (op->kind == Node_Kind::POSITIVE || op->kind == Node_Kind::NEGATE)
     {
@@ -704,7 +707,7 @@ static Node *parse_arithmetic(Lexer *lex)
 
     Token last = {};
     Token curr = next_token(lex);
-    Token next = next_token(lex);
+    Token next = lex->tokens[lex->index];
 
     while (curr.kind != Token_Kind::END)
     {
@@ -764,6 +767,7 @@ static Node *parse_arithmetic(Lexer *lex)
                 }
                 Node *node = alloc(Node, 1);
                 node->kind = node_kind_from_token(next, curr, last);
+                node->token_index = lex->index - 1;
                 operator_stack[operator_count++] = node; 
             } break;
             case Token_Kind::CLOSE_PAREN:
@@ -825,8 +829,8 @@ static Node *parse_arithmetic(Lexer *lex)
                 assert(false);
         }
         last = curr;
-        curr = next;
-        next = next_token(lex);
+        curr = next_token(lex);
+        next = lex->tokens[lex->index];
     }
     while (operator_count > 0)
     {
@@ -834,7 +838,7 @@ static Node *parse_arithmetic(Lexer *lex)
 
         if (op->kind == Node_Kind::OPEN_PAREN)
         {
-            fprintf(stderr, "ERROR: Missing closing parenthesis\n");
+            fprintf(stderr, "ERROR: Missing closing paren for this opening\n");
             print_error_here_token(lex, op->token_index);
             return nullptr;
         }
@@ -870,28 +874,27 @@ static bool strequal(const char *d0, u32 l0, const char *d1, u32 l1)
 }
 
 
-struct Functions
+struct Function
 {
     f64 (*func)(...);
     const char *func_str;
-    u32 len;
     u32 args;
 };
 
 
-Functions g_funcs[] = {
-    {(f64 (*)(...))sin, "sin", 3, 1},
-    {(f64 (*)(...))cos, "cos", 3, 1},
-    {(f64 (*)(...))tan, "tan", 3, 1},
+Function g_funcs[] = {
+    {(f64 (*)(...))sin, "sin", 1},
+    {(f64 (*)(...))cos, "cos", 1},
+    {(f64 (*)(...))tan, "tan", 1},
     //
-    {(f64 (*)(...))asin, "asin", 4, 1},
-    {(f64 (*)(...))acos, "acos", 4, 1},
-    {(f64 (*)(...))atan, "atan", 4, 1},
+    {(f64 (*)(...))asin, "asin", 1},
+    {(f64 (*)(...))acos, "acos", 1},
+    {(f64 (*)(...))atan, "atan", 1},
     //
-    {(f64 (*)(...))sqrt, "sqrt", 4, 1},
-    {(f64 (*)(...))cbrt, "cbrt", 4, 1},
+    {(f64 (*)(...))sqrt, "sqrt", 1},
+    {(f64 (*)(...))cbrt, "cbrt", 1},
     //
-    {(f64 (*)(...))exp, "exp", 3, 1},
+    {(f64 (*)(...))exp, "exp", 1},
 };
 
 
@@ -955,7 +958,8 @@ static f64 exe_expression(Node *tree, Lexer *lex, bool *err)
             u32 expected_args = 0;
             for (u32 i = 0; i < ARRAY_SIZE(g_funcs); ++i)
             {
-                if (strequal(g_funcs[i].func_str, g_funcs[i].len, lex->data + t.data_index, t.count))
+                usize func_len = strlen(g_funcs[i].func_str);
+                if (strequal(g_funcs[i].func_str, (u32)func_len, lex->data + t.data_index, t.count))
                 {
                     expected_args = g_funcs[i].args;
                     func_index = i;
@@ -1030,6 +1034,7 @@ enum class Op_Type
     MUL,
     POW,
 
+    INTERNAL_FUNC,
     PUSH,
     POP,
     RETURN,
@@ -1048,6 +1053,7 @@ const char *str_from_op_type(Op_Type t)
         case Op_Type::DIV: return "DIV";
         case Op_Type::MUL: return "MUL";
         case Op_Type::POW: return "POW";
+        case Op_Type::INTERNAL_FUNC: return "INTERNAL_FUNC";
         case Op_Type::PUSH: return "PUSH";
         case Op_Type::POP: return "POP";
         case Op_Type::RETURN: return "RETURN";
@@ -1060,7 +1066,11 @@ const char *str_from_op_type(Op_Type t)
 struct Op
 {
     Op_Type type;
-    f64 val;
+    union 
+    {
+        f64 val;
+        u64 index;
+    };
 };
 
 
@@ -1077,55 +1087,71 @@ static bool is_visited(Node **list, usize list_count, Node *n)
     return false;
 }
 
-static Op *bytecode_from_tree(Node *tree, Lexer *lex)
+static s32 get_predefined_function(const char *str, u32 str_len)
+{
+    for (s32 i = 0; i < (s32)ARRAY_SIZE(g_funcs); ++i)
+    {
+        usize func_len = strlen(g_funcs[i].func_str); 
+        if (strequal(str, str_len, g_funcs[i].func_str, (u32)func_len))
+        {
+            return i; 
+        }
+    }
+    return -1;
+}
+
+
+static Op *bytecode_from_tree(Node *tree, const Lexer *lex)
 {
     usize op_size = 8192;
     Op *ops = alloc(Op, op_size);
     u32 ops_count = 0;
 
-    Node **list = alloc(Node *, 1024);
-    usize list_count = 0;
-
-    Node **stack = alloc(Node *, 1024);
-    usize stack_count = 0;
-    
     Node **op_order_stack = alloc(Node *, 1024);
     usize order_count = 0;
 
-
-    stack[stack_count++] = tree;
-
-
-    while (stack_count > 0)
     {
-        Node *active = stack[stack_count - 1];
+        Node **list = alloc(Node *, 1024);
+        usize list_count = 0;
 
-        bool end = false;
-        while (!end)
+        Node **stack = alloc(Node *, 1024);
+        usize stack_count = 0;
+
+        stack[stack_count++] = tree;
+
+        while (stack_count > 0)
         {
-            end = true;
-            if (active->left != nullptr && !is_visited(list, list_count, active->left))
+            Node *active = stack[stack_count - 1];
+
+            bool end = false;
+            while (!end)
             {
-                stack[stack_count++] = active->left;
-                list[list_count++] = active->left;
-                active = active->left;
-                end = false;
+                end = true;
+                if (active->left != nullptr && !is_visited(list, list_count, active->left))
+                {
+                    stack[stack_count++] = active->left;
+                    list[list_count++] = active->left;
+                    active = active->left;
+                    end = false;
+                }
+                else if (active->right != nullptr && !is_visited(list, list_count, active->right))
+                {
+                    stack[stack_count++] = active->right;
+                    list[list_count++] = active->right;
+                    active = active->right;
+                    end = false;
+                }
             }
-            else if (active->right != nullptr && !is_visited(list, list_count, active->right))
-            {
-                stack[stack_count++] = active->right;
-                list[list_count++] = active->right;
-                active = active->right;
-                end = false;
-            }
+
+
+            op_order_stack[order_count++] = active;
+            stack_count -= 1;
         }
-
-
-        op_order_stack[order_count++] = active;
-        stack_count -= 1;
     }
 
 
+    u32 stack_count = 0;
+    u32 extra_func_args = 0;
     for (u32 i = 0; i < order_count; ++i)
     {
         Node *node = op_order_stack[i];
@@ -1149,35 +1175,64 @@ static Op *bytecode_from_tree(Node *tree, Lexer *lex)
                 Op op = {};
                 op.type = Op_Type::ADD;
                 ops[ops_count++] = op;
+                stack_count -= 1;
             } break;
             case Node_Kind::SUB:
             {
                 Op op = {};
                 op.type = Op_Type::SUB;
                 ops[ops_count++] = op;
+                stack_count -= 1;
             } break;
             case Node_Kind::MUL:
             {
                 Op op = {};
                 op.type = Op_Type::MUL;
                 ops[ops_count++] = op;
+                stack_count -= 1;
             } break;
             case Node_Kind::DIV:
             {
                 Op op = {};
                 op.type = Op_Type::DIV;
                 ops[ops_count++] = op;
+                stack_count -= 1;
             } break;
             case Node_Kind::POW:
             {
                 Op op = {};
                 op.type = Op_Type::POW;
                 ops[ops_count++] = op;
+                stack_count -= 1;
             } break;
-            case Node_Kind::COMMA: assert(false);
-            case Node_Kind::FUNCTION: assert(false);
+            case Node_Kind::COMMA:
             {
-                
+                extra_func_args += 1;
+            } break;
+            case Node_Kind::FUNCTION:
+            {
+                Token *t = lex->tokens + node->token_index;
+
+                s32 index = get_predefined_function(lex->data + t->data_index, t->count);
+                if (index == -1)
+                {
+                    assert(false && "TODO implement user defined functions");
+                }
+                Function *func = g_funcs + index;
+
+                if (func->args != extra_func_args + 1)
+                {
+                    fprintf(stderr, "ERROR: expected %u got %d arguments\n", func->args, stack_count);
+                    print_error_here_token(lex, node->token_index);
+                    return nullptr;
+                }
+
+                Op op = {};
+                op.type = Op_Type::INTERNAL_FUNC;
+                op.index = (u64)index;
+                ops[ops_count++] = op;
+
+                stack_count += 1 - func->args;
             } break;
             case Node_Kind::VARIABLE: assert(false);
             case Node_Kind::NUMBER:
@@ -1186,10 +1241,16 @@ static Op *bytecode_from_tree(Node *tree, Lexer *lex)
                 op.type = Op_Type::PUSH;
                 op.val = node->num;
                 ops[ops_count++] = op;
+                stack_count += 1;
             } break;
         }
     }
 
+    if (stack_count != 1)
+    {
+        fprintf(stderr, "ERROR: Expected 1 value at the end got %u\n", stack_count);
+        return nullptr;
+    }
     ops[ops_count++] = {.type = Op_Type::RETURN, .val = 0};
 
 
@@ -1224,7 +1285,11 @@ static f64 execute_ops(Op *ops)
                 f64 n2 = val_stack[--stack_count];
                 val_stack[stack_count++] = n1 - n2;
             } break;
-            case Op_Type::NEGATE: assert(false);
+            case Op_Type::NEGATE:
+            {
+                f64 n1 = val_stack[--stack_count];
+                val_stack[stack_count++] = -n1;
+            } break;
             case Op_Type::DIV:
             {
                 f64 n1 = val_stack[--stack_count];
@@ -1243,6 +1308,22 @@ static f64 execute_ops(Op *ops)
                 f64 n2 = val_stack[--stack_count];
 
                 val_stack[stack_count++] = pow(n1, n2);
+            } break;
+
+            case Op_Type::INTERNAL_FUNC:
+            {
+                Function *f = g_funcs + op->index;
+
+                switch (f->args)
+                {
+                    case 1:
+                    {
+                        f64 n1 = val_stack[--stack_count];
+                        val_stack[stack_count++] = f->func(n1);
+                    } break;
+                    default: assert(false);
+                }
+                
             } break;
 
             case Op_Type::PUSH:
@@ -1273,7 +1354,14 @@ static void fprint_ops(Op *ops, FILE *f)
 {
     for (usize i = 0; ; ++i)
     {
-        fprintf(f, "index %llu: %s, %g\n", i, str_from_op_type(ops[i].type), ops[i].val);
+        if (ops[i].type == Op_Type::INTERNAL_FUNC)
+        {
+            fprintf(f, "index %llu: %s, %llu\n", i, str_from_op_type(ops[i].type), ops[i].index);
+        }
+        else
+        {
+            fprintf(f, "index %llu: %s, %g\n", i, str_from_op_type(ops[i].type), ops[i].val);
+        }
         if (ops[i].type == Op_Type::RETURN)
         {
             break;
@@ -1287,7 +1375,7 @@ int main(void)
     while (running)
     {
 
-        #if 0
+        #if 1
         char input[1<<16];
         fgets(input, sizeof(input), stdin);
         if (input[0] == 'q') break;
@@ -1299,7 +1387,8 @@ int main(void)
         // char input[] = "1*2/(3^4-5)-+6+(7+8++9)";
         // char input[] = "1+(2)--3";
 
-        char input[] = "cos(5^5)";
+        // char input[] = "x * 5";
+        char input[] = "sqrt(5+5+5+5*5*5^5)";
         // char input[] = "f(1,2+2)";
         usize input_len = strlen(input);
         #endif
@@ -1323,7 +1412,10 @@ int main(void)
 
 
         Op *ops = bytecode_from_tree(tree, &lexer);
-
+        if (ops == nullptr)
+        {
+            continue;
+        }
 
         fprint_ops(ops, stdout);
 
