@@ -21,12 +21,9 @@ typedef int64_t s64;
 typedef float f32;
 typedef double f64;
 
-
-
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof(*(x)))
 
 #define alloc(type, amount) (type*)(calloc((amount), sizeof(type)))
-
 #define assert(condition)                                                                    \
 do                                                                                                  \
 {                                                                                                   \
@@ -108,6 +105,7 @@ enum class Token_Kind
     OPEN_PAREN,
     CLOSE_PAREN,
     COMMA,
+    SEMICOLON,
     IDENTIFIER,
     END,
 };
@@ -131,6 +129,7 @@ static const char *str_from_token_kind(Token_Kind kind)
         case Token_Kind::OPEN_PAREN: return "OPEN_PAREN";
         case Token_Kind::CLOSE_PAREN: return "CLOSE_PAREN";
         case Token_Kind::COMMA: return "COMMA";
+        case Token_Kind::SEMICOLON: return "SEMICOLON";
         case Token_Kind::IDENTIFIER: return "IDENTIFIER";
         case Token_Kind::END: return "END";
     }
@@ -300,6 +299,11 @@ static Errcode tokenize(Lexer *lex, char *input, u32 input_length)
                 lex->tokens[lex->count++] = {Token_Kind::COMMA, i, 1};
                 i += 1;
             } break;
+            case ';':
+            {
+                lex->tokens[lex->count++] = {Token_Kind::SEMICOLON, i, 1};
+                i += 1;
+            } break;
             default:
             if (is_whitespace(input[i]))
             {
@@ -369,7 +373,10 @@ enum Node_Kind
     FUNCTION,
     FUNCTIONDEF,
     VARIABLE,
+    PARAM,
     VARIABLEDEF,
+    PROGRAM,
+    EXPR,
     NUMBER
 };
 
@@ -419,7 +426,10 @@ const Operator_Data g_data[] = {
     /* FUNCTION */ {110, false},
     /* FUNCTIONDEF */ {0, false},
     /* VARIABLE */ {0, false},
+    /* PARAM */ {0, false},
     /* VARIABLEDEF */ {0, false},
+    /* PROGRAM */ {0, false},
+    /* EXPR */ {0, false},
     /* NUMBER */   {0, false},
 };
 
@@ -439,7 +449,10 @@ static const char *str_from_node_kind(Node_Kind kind)
         case Node_Kind::FUNCTION: return "FUNCTION";
         case Node_Kind::FUNCTIONDEF: return "FUNCTIONDEF";
         case Node_Kind::VARIABLE: return "VARIABLE";
+        case Node_Kind::PARAM: return "PARAM";
         case Node_Kind::VARIABLEDEF: return "VARIABLEDEF";
+        case Node_Kind::PROGRAM: return "PROGRAM";
+        case Node_Kind::EXPR: return "EXPR";
         case Node_Kind::NUMBER: return "NUMBER";
     }
     assert(false);
@@ -468,22 +481,25 @@ static void graphviz_from_tree(Node *tree, Lexer *lex)
         fprintf(f, "n%llu [label=\"%s", (usize)top, str_from_node_kind(top->kind));
         switch (top->kind)
         {
-            case Node_Kind::OPEN_PAREN: assert(false);
+            case Node_Kind::OPEN_PAREN: todo();
             case Node_Kind::INVALID:
             case Node_Kind::POSITIVE:
             case Node_Kind::NEGATE:
             case Node_Kind::ADD:
             case Node_Kind::SUB:
             case Node_Kind::MUL:
+            case Node_Kind::PROGRAM:
+            case Node_Kind::EXPR:
             {
                 // do nothing
             } break; 
-            case Node_Kind::DIV: assert(false);
-            case Node_Kind::POW: assert(false);
+            case Node_Kind::DIV: todo();
+            case Node_Kind::POW: todo();
             case Node_Kind::FUNCTIONDEF:
             case Node_Kind::FUNCTION:
-            case Node_Kind::VARIABLEDEF:
             case Node_Kind::VARIABLE:
+            case Node_Kind::PARAM:
+            case Node_Kind::VARIABLEDEF:
             {
                 Token t = lex->tokens[top->token_index];
                 fprintf(f, "\n%.*s", t.count, lex->data + t.data_index);
@@ -736,7 +752,7 @@ static Errcode parse_arithmetic(Lexer *lex, Node **output_stack, u32 *output_cou
     Token curr = next_token(lex);
     Token next = lex->tokens[lex->index];
 
-    while (curr.kind != Token_Kind::END)
+    while (curr.kind != Token_Kind::SEMICOLON && curr.kind != Token_Kind::END)
     {
         assert(curr.kind != Token_Kind::INVALID);
 
@@ -896,128 +912,159 @@ static Node *parse(Lexer *lex)
     Control_Flag flag_stack[32] = {};
     u32 flag_count = 0;
 
-    s64 equal_index = -1;
-    for (s64 i = 0; i < lex->count; ++i) 
-    {
-        Token *t = lex->tokens + i;
-        if (t->kind == Token_Kind::EQUAL)
-        {
-            equal_index = i;
-            break;
-        }
-    }
-
     u32 max_parameter_count = ARRAY_SIZE(output_stack[0]->nodes) - 1;
 
-    if (equal_index != -1)
+    while (lex->tokens[lex->index].kind != Token_Kind::END)
     {
-        
-        // parse func/var definition
-        Token id = peek_token(lex);
-
-        if (id.kind != Token_Kind::IDENTIFIER)
+        s64 equal_index = -1;
+        for (s64 i = lex->index; i < lex->count && lex->tokens[i].kind != Token_Kind::SEMICOLON; ++i) 
         {
-            todo();
+            Token *t = lex->tokens + i;
+            if (t->kind == Token_Kind::EQUAL)
+            {
+                equal_index = i;
+                break;
+            }
         }
-        u32 token_index = lex->index;
-        lex->index += 1;
 
-        Token equal_or_open = peek_token(lex);
 
-        if (equal_or_open.kind == Token_Kind::EQUAL)
+        if (equal_index != -1)
         {
+            
+            // parse func/var definition
+            Token id = peek_token(lex);
+
+            if (id.kind != Token_Kind::IDENTIFIER)
+            {
+                todo();
+            }
+            u32 token_index = lex->index;
             lex->index += 1;
-            int err = parse_arithmetic(lex, output_stack, &output_count, flag_stack, &flag_count);
-            if (err)
-                return nullptr;
 
-            Node *def = alloc(Node, 1);
+            Token equal_or_open = peek_token(lex);
 
-
-            def->kind = Node_Kind::VARIABLEDEF;
-            def->token_index = token_index;
-            def->next = output_stack[--output_count];
-            output_stack[output_count++] = def;
-        }
-        else if (equal_or_open.kind == Token_Kind::OPEN_PAREN)
-        {
-            u32 func_params = 0;
-            while (true)
+            if (equal_or_open.kind == Token_Kind::EQUAL)
             {
                 lex->index += 1;
-                Token var = peek_token(lex);
+                int err = parse_arithmetic(lex, output_stack, &output_count, flag_stack, &flag_count);
+                if (err)
+                    return nullptr;
 
-                if (var.kind != Token_Kind::IDENTIFIER)
-                    todo();
-                if (func_params > max_parameter_count)
-                    todo();
+                Node *def = alloc(Node, 1);
 
 
-                Node *n = alloc(Node, 1);
-                n->kind = Node_Kind::VARIABLE;
-                n->token_index = lex->index;
+                def->kind = Node_Kind::VARIABLEDEF;
+                def->token_index = token_index;
+                def->next = output_stack[--output_count];
+                output_stack[output_count++] = def;
+            }
+            else if (equal_or_open.kind == Token_Kind::OPEN_PAREN)
+            {
+                u32 func_params = 0;
+                while (true)
+                {
+                    lex->index += 1;
+                    Token var = peek_token(lex);
 
-                output_stack[output_count++] = n;
+                    if (var.kind != Token_Kind::IDENTIFIER)
+                        todo();
+                    if (func_params > max_parameter_count)
+                        todo();
 
-                func_params += 1;
+
+                    Node *n = alloc(Node, 1);
+                    n->kind = Node_Kind::PARAM;
+                    n->token_index = lex->index;
+
+                    output_stack[output_count++] = n;
+
+                    func_params += 1;
+                    lex->index += 1;
+                    Token comma_or_close = peek_token(lex);
+                    if (comma_or_close.kind == Token_Kind::COMMA)
+                    {
+                        continue;
+                    }
+                    else if (comma_or_close.kind == Token_Kind::CLOSE_PAREN)
+                    {
+                        break;
+                    }
+                    else
+                    {
+                        fprintf(stderr, "ERROR: expected , or )\n");
+                        print_error_here_token(lex, lex->index);
+                        return nullptr;
+                    }
+                }
+
+                Node *def = alloc(Node, 1);
+                def->kind = Node_Kind::FUNCTIONDEF;
+                def->token_index = token_index;
+                for (u32 i = max_parameter_count - 1; i-- > 0 && output_count > 0;)
+                {   
+                    Node *n = output_stack[output_count - 1];
+                    if (n->kind != Node_Kind::PARAM)
+                        break;
+                    output_count -= 1;
+                    def->nodes[i] = n;
+                }
+
                 lex->index += 1;
-                Token comma_or_close = peek_token(lex);
-                if (comma_or_close.kind == Token_Kind::COMMA)
+                if (peek_token(lex).kind != Token_Kind::EQUAL)
                 {
-                    continue;
-                }
-                else if (comma_or_close.kind == Token_Kind::CLOSE_PAREN)
-                {
-                    break;
-                }
-                else
-                {
-                    fprintf(stderr, "ERROR: expected , or )\n");
+                    fprintf(stderr, "ERROR: expected =\n");
                     print_error_here_token(lex, lex->index);
                     return nullptr;
+
                 }
-            }
+                lex->index += 1;
 
-            Node *def = alloc(Node, 1);
-            def->kind = Node_Kind::FUNCTIONDEF;
-            def->token_index = token_index;
-            for (u32 i = max_parameter_count - 1; i-- > 0 && output_count > 0;)
-            {   
-                Node *n = output_stack[--output_count];
-                assert(n->kind == Node_Kind::VARIABLE);
-                def->nodes[i] = n;
-            }
+                int err = parse_arithmetic(lex, output_stack, &output_count, flag_stack, &flag_count);
+                if (err)
+                    return nullptr;
 
-            lex->index += 1;
-            if (peek_token(lex).kind != Token_Kind::EQUAL)
+                def->nodes[max_parameter_count] = output_stack[--output_count];
+                output_stack[output_count++] = def;
+
+            }
+            else
             {
-                fprintf(stderr, "ERROR: expected =\n");
-                print_error_here_token(lex, lex->index);
-                return nullptr;
-
+                todo();
             }
-            lex->index += 1;
-
-            int err = parse_arithmetic(lex, output_stack, &output_count, flag_stack, &flag_count);
-            if (err)
-                return nullptr;
-
-            def->nodes[max_parameter_count] = output_stack[--output_count];
-            output_stack[output_count++] = def;
-
         }
         else
         {
-            todo();
+            Node *expr = alloc(Node, 1);
+            expr->kind = Node_Kind::EXPR;
+            int err = parse_arithmetic(lex, output_stack, &output_count, flag_stack, &flag_count);
+            if (err)
+                return nullptr;
+            
+            Node *arith = output_stack[--output_count];
+            expr->next = arith;
+            output_stack[output_count++] = expr;
+
         }
-    }
-    else
-    {
-        int err = parse_arithmetic(lex, output_stack, &output_count, flag_stack, &flag_count);
-        if (err)
-            return nullptr;
+
     }
     assert(output_count > 0);
+    assert(output_count < 8);
+
+    Node *n = alloc(Node, 1);
+    n->kind = Node_Kind::PROGRAM;
+
+    for (u32 i = ARRAY_SIZE((*output_stack)->nodes) - 1; i-- > 0;)
+    {
+        if (output_count == 0)
+            break;
+
+        n->nodes[i] = output_stack[--output_count];
+    }
+
+    output_stack[output_count++] = n;
+
+
+    assert(output_count == 1);
     return output_stack[0];
 }
 
@@ -1083,6 +1130,7 @@ enum class Op_Type
     POW,
 
     INTERNAL_FUNC,
+    CALL,
     PUSH,
     PUSHI,
     PUSH_RET,
@@ -1104,6 +1152,7 @@ const char *str_from_op_type(Op_Type t)
         case Op_Type::MUL: return "MUL";
         case Op_Type::POW: return "POW";
         case Op_Type::INTERNAL_FUNC: return "INTERNAL_FUNC";
+        case Op_Type::CALL: return "CALL";
         case Op_Type::PUSH: return "PUSH";
         case Op_Type::PUSHI: return "PUSHI";
         case Op_Type::PUSH_RET: return "PUSH_RET";
@@ -1158,6 +1207,7 @@ enum class Symbol_Type
     INVALID,
     FUNCTION,
     VARIABLE,
+    EXPR,
 };
 
 
@@ -1166,9 +1216,9 @@ struct Symbol
     Symbol_Type type;
     const char *name;
     u32 name_len;
-    s32 scope;
-    s32 parent_scope;
+    u32 scope;
     u32 index;
+    u32 arg_count;
 };
 
 static f64 g_var_buffer[256] = {};
@@ -1183,7 +1233,6 @@ static void init_symbols_with_predefined(Symbol *syms, u32 *sym_count)
         sym.name = g_funcs[i].func_str;
         sym.name_len = (u32)strlen(g_funcs[i].func_str);
         sym.scope = 0;
-        sym.parent_scope = -1;
         syms[*sym_count] = sym;
         *sym_count += 1;
     }
@@ -1194,7 +1243,6 @@ static void init_symbols_with_predefined(Symbol *syms, u32 *sym_count)
         sym.name = g_predefined_vars[i].var_str;
         sym.name_len = (u32)strlen(g_predefined_vars[i].var_str);
         sym.scope = 0;
-        sym.parent_scope = -1;
         g_var_buffer[g_var_count] = g_predefined_vars[i].num;
         sym.index = g_var_count;
         g_var_count += 1;
@@ -1202,6 +1250,27 @@ static void init_symbols_with_predefined(Symbol *syms, u32 *sym_count)
         *sym_count += 1;
     }
 }
+
+
+static s64 get_symbol_index_by_name(const char *name, u32 name_len, Symbol *symbols, u32 symbol_count, u32 active_scope)
+{
+    s64 index = -1;
+    for (s64 j = 0; j < symbol_count; ++j)
+    {
+        if (symbols[j].scope != active_scope && symbols[j].scope != 0)
+            continue;
+
+        if (strequal(name, name_len, symbols[j].name, symbols[j].name_len))
+        {
+            index = j;
+            if (symbols[j].scope == active_scope)
+                break;
+        }
+    }
+    return index;
+}
+
+
 
 struct Ops
 {
@@ -1215,22 +1284,21 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
     Op *ops = alloc(Op, op_size);
     u32 ops_count = 0;
 
+
     Symbol *symbols = alloc(Symbol, 2048);
     u32 symbol_count = 0;
     init_symbols_with_predefined(symbols, &symbol_count);
     
 
-
-    Symbol *scope_symbols = alloc(Symbol, 2048);
-    u32 scope_symbol_count = 0;
-
-
-
     u32 stack_count = 0;
     u32 extra_func_args = 0;
 
 
-    bool defining = false;
+    u32 active_scope = 0;
+    u32 scope_count = 1;
+
+    u32 active_index = 0;
+
     {
         Node **list = alloc(Node *, 1024);
         usize list_count = 0;
@@ -1244,24 +1312,56 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
         {
             Node *active = parse_stack[parse_stack_count - 1];
 
+
+            //TODO(Johan) fix so the postorder traversal only goes forward if it encounters a def or expr
+
+            switch (active->kind)
+            {
+                case Node_Kind::FUNCTIONDEF: 
+                case Node_Kind::VARIABLEDEF:   
+                {
+                    active_scope = scope_count++;
+                    // fallthrough
+                }
+                case Node_Kind::EXPR: 
+                {
+                    active_index = ops_count;
+                } break;
+                case Node_Kind::INVALID:
+                case Node_Kind::OPEN_PAREN:
+                case Node_Kind::POSITIVE:
+                case Node_Kind::NEGATE:
+                case Node_Kind::ADD:
+                case Node_Kind::SUB:
+                case Node_Kind::MUL:
+                case Node_Kind::DIV:
+                case Node_Kind::POW:
+                case Node_Kind::FUNCTION:
+                case Node_Kind::VARIABLE:
+                case Node_Kind::PARAM:
+                case Node_Kind::PROGRAM:
+                case Node_Kind::NUMBER:
+                {
+                    // do nothing
+                } break;
+            }
+
             bool end = false;
             while (!end)
             {
                 end = true;
 
-                if (active->left != nullptr && !is_visited(list, list_count, active->left))
+
+                for (u32 i = 0; i < ARRAY_SIZE(active->nodes); ++i)
                 {
-                    parse_stack[parse_stack_count++] = active->left;
-                    list[list_count++] = active->left;
-                    active = active->left;
-                    end = false;
-                }
-                else if (active->right != nullptr && !is_visited(list, list_count, active->right))
-                {
-                    parse_stack[parse_stack_count++] = active->right;
-                    list[list_count++] = active->right;
-                    active = active->right;
-                    end = false;
+                    if (active->nodes[i] != nullptr && !is_visited(list, list_count, active->nodes[i]))
+                    {
+
+                        parse_stack[parse_stack_count++] = active->nodes[i];
+                        list[list_count++] = active->nodes[i];
+                        active = active->nodes[i];
+                        end = false;
+                    }
                 }
             }
 
@@ -1273,6 +1373,7 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                 case Node_Kind::INVALID: assert(false);
                 case Node_Kind::OPEN_PAREN: assert(false);
                 case Node_Kind::POSITIVE:
+                case Node_Kind::PROGRAM:
                 {
                     // do nothing
                 } break;
@@ -1323,21 +1424,30 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                     Token *t = lex->tokens + node->token_index;
                     s32 index = get_predefined_function(lex->data + t->data_index, t->count);
 
-                    if (defining)
+                    if (index == -1)
                     {
-                        if (index != -1)
+                        // not predefined
+                        s64 sym_index = -1;
+                        for (s64 j = 0; j < symbol_count; ++j)
                         {
-                            // trying to use already defined
-                            todo();
+                            if (strequal(lex->data + token->data_index, token->count, symbols[j].name, symbols[j].name_len))
+                            {
+                                sym_index = symbols[j].index;
+                                break;
+                            }
                         }
-                    }
-                    else
-                    {
-                        if (index == -1)
+                        if (sym_index == -1)
                         {
                             // trying to use undefined
                             todo();
                         }
+
+                        Op op = {};
+                        op.type = Op_Type::CALL;
+                        op.index = (u64) sym_index;
+                    }
+                    else
+                    {
                         Function *func = g_funcs + index;
 
                         if (func->args != extra_func_args + 1)
@@ -1356,48 +1466,119 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                         stack_count += 1 - func->args;
                     }
                 } break;
-                case Node_Kind::FUNCTIONDEF: assert(false);
+                case Node_Kind::FUNCTIONDEF:
                 {
+                    s64 index = get_symbol_index_by_name(lex->data + token->data_index, token->count, symbols, symbol_count, active_scope);
 
+                    if (index != -1)
+                    {
+                        // function already defined
+                        todo();
+                    }
+
+                    Symbol s = {};
+
+                    s.type = Symbol_Type::FUNCTION;
+                    s.name = lex->data + token->data_index;
+                    s.name_len = token->count;
+                    s.scope = 0;
+                    s.index = active_index;
+
+                    u32 i = 0;
+                    for (; i < ARRAY_SIZE(active->nodes); ++i)
+                    {
+                        if (active->nodes[i] == nullptr)
+                            break;
+                    }
+
+                    s.arg_count = i;
+
+                    symbols[symbol_count++] = s;
+
+                    active_scope = 0;
+                    Op op = {};
+                    op.type = Op_Type::RETURN;
+                    ops[ops_count++] = op;
+                    stack_count = 0;
                 } break;
                 case Node_Kind::VARIABLE:
                 {
-                    s64 index = -1;
-                    for (s64 j = 0; j < symbol_count; ++j)
-                    {
-                        if (strequal(lex->data + token->data_index, token->count, symbols[j].name, symbols[j].name_len))
-                        {
-                            index = symbols[j].index;
-                            break;
-                        }
-                    }
+                    s64 index = get_symbol_index_by_name(lex->data + token->data_index, token->count, symbols, symbol_count, active_scope);
 
-                    if (defining)
+                    if (index != -1)
                     {
-                        if (index != -1)
-                        {
-                            // already defined
-                            todo();
-                        }
-
+                        Op op = {};
+                        op.type = Op_Type::CALL;
+                        op.index = symbols[index].index;
+                        ops[ops_count++] = op;
+                        stack_count += 1;
                     }
                     else
                     {
-                        if (index == -1)
-                        {
-                            // trying to use undefined variable
-                            todo();
-                        }
+                        todo();
                         Op op = {};
                         op.type = Op_Type::PUSH;
                         op.index = (u64)index;
                         ops[ops_count++] = op;
                         stack_count += 1;
-                    }
 
+                    }
+                } break;
+                case Node_Kind::PARAM:
+                {
+                    Symbol s = {};
+
+                    s.type = Symbol_Type::VARIABLE;
+                    Token *t = lex->tokens + node->token_index;
+                    s.name = lex->data + t->data_index;
+                    s.name_len = t->count;
+                    s.scope = active_scope;
+
+                    symbols[symbol_count++] = s;
 
                 } break;
-                case Node_Kind::VARIABLEDEF: assert(false);
+                case Node_Kind::VARIABLEDEF:
+                {
+                    s64 index = get_symbol_index_by_name(lex->data + token->data_index, token->count, symbols, symbol_count, active_scope);
+
+                    if (index != -1)
+                    {
+                        // trying to use already defined variable in global scope
+                        todo();
+                    }
+                    
+
+                    Symbol s = {};
+
+                    s.type = Symbol_Type::VARIABLE;
+                    s.name = lex->data + token->data_index;
+                    s.name_len = token->count;
+                    s.scope = 0;
+                    s.index = active_index;
+
+                    active_scope = 0;
+
+                    symbols[symbol_count++] = s;
+
+                    Op op = {};
+                    op.type = Op_Type::RETURN;
+                    ops[ops_count++] = op;
+                    stack_count = 0;
+                } break;
+                case Node_Kind::EXPR:
+                {
+                    Symbol s = {};
+                    s.type = Symbol_Type::EXPR;
+                    s.scope = 0;
+                    s.index = active_index; 
+
+                    symbols[symbol_count++] = s;
+
+                    Op op = {};
+                    op.type = Op_Type::RETURN;
+                    ops[ops_count++] = op;
+                    stack_count = 0;
+                } break;
                 case Node_Kind::NUMBER:
                 {
                     Op op = {};
@@ -1411,16 +1592,19 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
         }
     }
 
-
-    
-
-    if (stack_count != 1)
+    for (u32 i = 0;  i < symbol_count; ++i)
     {
-        fprintf(stderr, "ERROR: Expected 1 value at the end got %u\n", stack_count);
-        return {nullptr, 0};
+        if (symbols[i].type != Symbol_Type::EXPR)
+            continue;
+        if (symbols[i].scope != 0)
+            continue;
+        
+        Op op = {};
+        op.type = Op_Type::CALL;
+        op.index = symbols[i].index;
+        ops[ops_count++] = op;
     }
-    ops[ops_count++] = {Op_Type::RETURN, {0}};
-
+    
 
     return {ops, ops_count};
 }
@@ -1554,6 +1738,7 @@ static void fprint_ops(Ops ops, FILE *f)
                 fprintf(f, "index %llu: %s\n", i, str_from_op_type(ops.data[i].type));
             } break;
             case Op_Type::PUSH:
+            case Op_Type::CALL:
             case Op_Type::INTERNAL_FUNC:
             {
                 fprintf(f, "index %llu: %s, 0x%llX\n", i, str_from_op_type(ops.data[i].type), ops.data[i].index);
@@ -1586,7 +1771,12 @@ int main(void)
         // char input[] = "1*2/(3^4-5)-+6+(7+8++9)";
         // char input[] = "1+(2)--3";
 
-        char input[] = "f(x)=y(5+5)*(x*y)";
+        char input[] = 
+            "x = 5;\n"
+            "y(x) = 5;\n"
+            "f(x)=y(5+5)*(x*e);\n"
+            "f(x) + 5;"
+        ;
         // char input[] = "5 * 5";
         // char input[] = "x = 5 * y";
         // char input[] = "sqrt(5+5+5+5*5*5^5)";
