@@ -705,7 +705,7 @@ static Node_Kind node_kind_from_token(Token next, Token curr, Token last)
     return kind;
 }
 
-static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_count, Control_Flag *flag_stack, u32 *flag_count, const Lexer *lex)
+static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_count, const Lexer *lex)
 {
     if (op->kind == Node_Kind::POSITIVE || op->kind == Node_Kind::NEGATE)
     {
@@ -728,7 +728,6 @@ static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_
         init_function_node(op, output_stack, output_count);
         output_stack[(*output_count)++] = op;
         // pop is_function
-        *flag_count -= 1;
     }
     else
     {
@@ -780,7 +779,7 @@ static Errcode parse_arithmetic(Lexer *lex, Node **output_stack, u32 *output_cou
                         (p_next->precendence == p_op->precendence && !p_next->right_associative)
                     )
                     {
-                        if (make_node_from_output(op, output_stack, output_count, flag_stack, flag_count, lex))
+                        if (make_node_from_output(op, output_stack, output_count, lex))
                         {
                             return 1;
                         }
@@ -836,7 +835,7 @@ static Errcode parse_arithmetic(Lexer *lex, Node **output_stack, u32 *output_cou
                         return 1;
                     }
 
-                    if (make_node_from_output(op, output_stack, output_count, flag_stack, flag_count, lex))
+                    if (make_node_from_output(op, output_stack, output_count, lex))
                     {
                         return 1;
                     }
@@ -895,7 +894,7 @@ static Errcode parse_arithmetic(Lexer *lex, Node **output_stack, u32 *output_cou
         }
 
 
-        if (make_node_from_output(op, output_stack, output_count, flag_stack, flag_count, lex))
+        if (make_node_from_output(op, output_stack, output_count, lex))
         {
             return 1;
         }
@@ -1000,7 +999,7 @@ static Node *parse(Lexer *lex)
                 Node *def = alloc(Node, 1);
                 def->kind = Node_Kind::FUNCTIONDEF;
                 def->token_index = token_index;
-                for (u32 i = max_parameter_count - 1; i-- > 0 && output_count > 0;)
+                for (u32 i = max_parameter_count; i-- > 0 && output_count > 0;)
                 {   
                     Node *n = output_stack[output_count - 1];
                     if (n->kind != Node_Kind::PARAM)
@@ -1129,11 +1128,11 @@ enum class Op_Type
     MUL,
     POW,
 
-    INTERNAL_FUNC,
+    BUILTIN_FUNC,
+    BUILTIN_VAR,
     CALL,
     PUSH,
     PUSHI,
-    PUSH_RET,
     POP,
     RETURN,
 };
@@ -1151,11 +1150,11 @@ const char *str_from_op_type(Op_Type t)
         case Op_Type::DIV: return "DIV";
         case Op_Type::MUL: return "MUL";
         case Op_Type::POW: return "POW";
-        case Op_Type::INTERNAL_FUNC: return "INTERNAL_FUNC";
+        case Op_Type::BUILTIN_FUNC: return "BUILTIN_FUNC";
+        case Op_Type::BUILTIN_VAR: return "BUILTIN_VAR";
         case Op_Type::CALL: return "CALL";
         case Op_Type::PUSH: return "PUSH";
         case Op_Type::PUSHI: return "PUSHI";
-        case Op_Type::PUSH_RET: return "PUSH_RET";
         case Op_Type::POP: return "POP";
         case Op_Type::RETURN: return "RETURN";
     }
@@ -1170,7 +1169,11 @@ struct Op
     union 
     {
         f64 val;
-        u64 index;
+        struct
+        {
+            u32 index;
+            u32 arg_count;
+        };
     };
 };
 
@@ -1188,26 +1191,14 @@ static bool is_visited(Node **list, usize list_count, Node *n)
     return false;
 }
 
-static s32 get_predefined_function(const char *str, u32 str_len)
-{
-    for (s32 i = 0; i < (s32)ARRAY_SIZE(g_funcs); ++i)
-    {
-        usize func_len = strlen(g_funcs[i].func_str); 
-        if (strequal(str, str_len, g_funcs[i].func_str, (u32)func_len))
-        {
-            return i; 
-        }
-    }
-    return -1;
-}
-
-
 enum class Symbol_Type
 {
     INVALID,
     FUNCTION,
     VARIABLE,
     EXPR,
+    BUILTIN_FUNC,
+    BUILTIN_VAR,
 };
 
 
@@ -1221,31 +1212,28 @@ struct Symbol
     u32 arg_count;
 };
 
-static f64 g_var_buffer[256] = {};
-static u32 g_var_count = 0;
-
 static void init_symbols_with_predefined(Symbol *syms, u32 *sym_count)
 {
     for (u32 i = 0; i < ARRAY_SIZE(g_funcs); ++i)
     {
         Symbol sym = {};
-        sym.type = Symbol_Type::FUNCTION;
+        sym.type = Symbol_Type::BUILTIN_FUNC;
         sym.name = g_funcs[i].func_str;
         sym.name_len = (u32)strlen(g_funcs[i].func_str);
         sym.scope = 0;
+        sym.index = i;
+        sym.arg_count = g_funcs[i].args;
         syms[*sym_count] = sym;
         *sym_count += 1;
     }
     for (u32 i = 0; i < ARRAY_SIZE(g_predefined_vars); ++i)
     {
         Symbol sym = {};
-        sym.type = Symbol_Type::VARIABLE;
+        sym.type = Symbol_Type::BUILTIN_VAR;
         sym.name = g_predefined_vars[i].var_str;
         sym.name_len = (u32)strlen(g_predefined_vars[i].var_str);
         sym.scope = 0;
-        g_var_buffer[g_var_count] = g_predefined_vars[i].num;
-        sym.index = g_var_count;
-        g_var_count += 1;
+        sym.index = i;
         syms[*sym_count] = sym;
         *sym_count += 1;
     }
@@ -1270,12 +1258,11 @@ static s64 get_symbol_index_by_name(const char *name, u32 name_len, Symbol *symb
     return index;
 }
 
-
-
 struct Ops
 {
     Op *data;
     u32 len;
+    u32 entry;
 };
 
 static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
@@ -1291,7 +1278,6 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
     
 
     u32 stack_count = 0;
-    u32 extra_func_args = 0;
 
 
     u32 active_scope = 0;
@@ -1299,9 +1285,14 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
 
     u32 active_index = 0;
 
+    u32 param_count = 0;
+
     {
-        Node **list = alloc(Node *, 1024);
-        usize list_count = 0;
+        Node **post_list = alloc(Node *, 1024);
+        usize post_list_count = 0;
+
+        Node **pre_list = alloc(Node *, 1024);
+        usize pre_list_count = 0;
 
         Node **parse_stack = alloc(Node *, 1024);
         usize parse_stack_count = 0;
@@ -1313,55 +1304,66 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
             Node *active = parse_stack[parse_stack_count - 1];
 
 
-            //TODO(Johan) fix so the postorder traversal only goes forward if it encounters a def or expr
-
-            switch (active->kind)
-            {
-                case Node_Kind::FUNCTIONDEF: 
-                case Node_Kind::VARIABLEDEF:   
-                {
-                    active_scope = scope_count++;
-                    // fallthrough
-                }
-                case Node_Kind::EXPR: 
-                {
-                    active_index = ops_count;
-                } break;
-                case Node_Kind::INVALID:
-                case Node_Kind::OPEN_PAREN:
-                case Node_Kind::POSITIVE:
-                case Node_Kind::NEGATE:
-                case Node_Kind::ADD:
-                case Node_Kind::SUB:
-                case Node_Kind::MUL:
-                case Node_Kind::DIV:
-                case Node_Kind::POW:
-                case Node_Kind::FUNCTION:
-                case Node_Kind::VARIABLE:
-                case Node_Kind::PARAM:
-                case Node_Kind::PROGRAM:
-                case Node_Kind::NUMBER:
-                {
-                    // do nothing
-                } break;
-            }
-
             bool end = false;
-            while (!end)
+            while (true)
             {
                 end = true;
+
+                if (!is_visited(pre_list, pre_list_count, active))
+                {
+                    pre_list[pre_list_count++] = active;
+                    // printf("0x%llX preorder %s\n", (u64)active, str_from_node_kind(active->kind));
+
+                    switch (active->kind)
+                    {
+                        case Node_Kind::FUNCTIONDEF: 
+                        case Node_Kind::VARIABLEDEF:   
+                        {
+                            active_scope = scope_count++;
+                            // fallthrough
+                        }
+                        case Node_Kind::EXPR: 
+                        {
+                            active_index = ops_count;
+                        } break;
+                        case Node_Kind::INVALID:
+                        case Node_Kind::OPEN_PAREN:
+                        case Node_Kind::POSITIVE:
+                        case Node_Kind::NEGATE:
+                        case Node_Kind::ADD:
+                        case Node_Kind::SUB:
+                        case Node_Kind::MUL:
+                        case Node_Kind::DIV:
+                        case Node_Kind::POW:
+                        case Node_Kind::FUNCTION:
+                        case Node_Kind::VARIABLE:
+                        case Node_Kind::PARAM:
+                        case Node_Kind::NUMBER:
+                        case Node_Kind::PROGRAM:
+                        {
+                            // do nothing
+                        } break;
+                    }
+                }
 
 
                 for (u32 i = 0; i < ARRAY_SIZE(active->nodes); ++i)
                 {
-                    if (active->nodes[i] != nullptr && !is_visited(list, list_count, active->nodes[i]))
-                    {
 
+                    if (active->nodes[i] != nullptr && !is_visited(post_list, post_list_count, active->nodes[i]))
+                    {
                         parse_stack[parse_stack_count++] = active->nodes[i];
-                        list[list_count++] = active->nodes[i];
                         active = active->nodes[i];
                         end = false;
+                        break;
                     }
+                }
+                if (end)
+                {
+                    post_list[post_list_count++] = active;
+                    // printf("0x%llX postorder %s\n", (u64)active, str_from_node_kind(active->kind));
+
+                    break;
                 }
             }
 
@@ -1421,50 +1423,18 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                 } break;
                 case Node_Kind::FUNCTION:
                 {
-                    Token *t = lex->tokens + node->token_index;
-                    s32 index = get_predefined_function(lex->data + t->data_index, t->count);
-
+                    s64 index = get_symbol_index_by_name(lex->data + token->data_index, token->count, symbols, symbol_count, active_scope);
                     if (index == -1)
                     {
-                        // not predefined
-                        s64 sym_index = -1;
-                        for (s64 j = 0; j < symbol_count; ++j)
-                        {
-                            if (strequal(lex->data + token->data_index, token->count, symbols[j].name, symbols[j].name_len))
-                            {
-                                sym_index = symbols[j].index;
-                                break;
-                            }
-                        }
-                        if (sym_index == -1)
-                        {
-                            // trying to use undefined
-                            todo();
-                        }
-
-                        Op op = {};
-                        op.type = Op_Type::CALL;
-                        op.index = (u64) sym_index;
+                        // function not found
+                        todo();
                     }
-                    else
-                    {
-                        Function *func = g_funcs + index;
 
-                        if (func->args != extra_func_args + 1)
-                        {
-                            fprintf(stderr, "ERROR: expected %u got %d arguments\n", func->args, stack_count);
-                            print_error_here_token(lex, node->token_index);
-                            return {nullptr, 0};
-                        }
-                        extra_func_args = 0;
-
-                        Op op = {};
-                        op.type = Op_Type::INTERNAL_FUNC;
-                        op.index = (u64)index;
-                        ops[ops_count++] = op;
-
-                        stack_count += 1 - func->args;
-                    }
+                    Op op = {};
+                    op.type = Op_Type::CALL;
+                    op.index = symbols[index].index;
+                    op.arg_count = symbols[index].arg_count;
+                    ops[ops_count++] = op;
                 } break;
                 case Node_Kind::FUNCTIONDEF:
                 {
@@ -1484,14 +1454,14 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                     s.scope = 0;
                     s.index = active_index;
 
-                    u32 i = 0;
-                    for (; i < ARRAY_SIZE(active->nodes); ++i)
+                    u32 count = 0;
+                    for (u32 i = ARRAY_SIZE(active->nodes) - 1; i-- > 0;)
                     {
-                        if (active->nodes[i] == nullptr)
-                            break;
+                        if (active->nodes[i] != nullptr)
+                            count += 1;
                     }
 
-                    s.arg_count = i;
+                    s.arg_count = count;
 
                     symbols[symbol_count++] = s;
 
@@ -1500,29 +1470,39 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                     op.type = Op_Type::RETURN;
                     ops[ops_count++] = op;
                     stack_count = 0;
+                    param_count = 0;
                 } break;
                 case Node_Kind::VARIABLE:
                 {
                     s64 index = get_symbol_index_by_name(lex->data + token->data_index, token->count, symbols, symbol_count, active_scope);
-
-                    if (index != -1)
+                    if (index == -1)
                     {
-                        Op op = {};
+                        // could not find variable
+                        todo();
+                    }
+
+                    Op op = {};
+
+                    if (symbols[index].scope == active_scope)
+                    {
+                        op.type = Op_Type::POP;
+                        op.index = symbols[index].index;
+                    }
+                    else if (symbols[index].type == Symbol_Type::VARIABLE)
+                    {
                         op.type = Op_Type::CALL;
                         op.index = symbols[index].index;
-                        ops[ops_count++] = op;
-                        stack_count += 1;
+                        op.arg_count = 0;
                     }
-                    else
+                    else /*if BUILTIN_VAR*/
                     {
-                        todo();
-                        Op op = {};
-                        op.type = Op_Type::PUSH;
-                        op.index = (u64)index;
-                        ops[ops_count++] = op;
-                        stack_count += 1;
-
+                        op.type = Op_Type::PUSHI;
+                        op.val = g_predefined_vars[symbols[index].index].num;
                     }
+
+                    ops[ops_count++] = op;
+                    stack_count += 1;
+
                 } break;
                 case Node_Kind::PARAM:
                 {
@@ -1533,6 +1513,7 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                     s.name = lex->data + t->data_index;
                     s.name_len = t->count;
                     s.scope = active_scope;
+                    s.index = param_count++;
 
                     symbols[symbol_count++] = s;
 
@@ -1592,6 +1573,9 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
         }
     }
 
+
+    u32 entry = ops_count;
+
     for (u32 i = 0;  i < symbol_count; ++i)
     {
         if (symbols[i].type != Symbol_Type::EXPR)
@@ -1602,11 +1586,12 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
         Op op = {};
         op.type = Op_Type::CALL;
         op.index = symbols[i].index;
+        op.arg_count = 0;
         ops[ops_count++] = op;
     }
     
 
-    return {ops, ops_count};
+    return {ops, ops_count, entry};
 }
 
 
@@ -1616,8 +1601,8 @@ static f64 execute_ops(Ops ops)
     f64 *val_stack = alloc(f64, 1024);
     u32 val_count = 0;
 
-    u32 *ret_stack = alloc(u32, 1024);
-    u32 ret_count = 0;
+    u32 *call_stack = alloc(u32, 1024);
+    u32 call_count = 0;
 
     bool running = true;
     for (u32 i = 0; running; ++i)
@@ -1665,7 +1650,7 @@ static f64 execute_ops(Ops ops)
                 val_stack[val_count++] = pow(n1, n2);
             } break;
 
-            case Op_Type::INTERNAL_FUNC:
+            case Op_Type::BUILTIN_FUNC:
             {
                 Function *f = g_funcs + op->index;
 
@@ -1676,41 +1661,48 @@ static f64 execute_ops(Ops ops)
                         f64 n1 = val_stack[--val_count];
                         val_stack[val_count++] = f->func(n1);
                     } break;
-                    default: assert(false);
+                    default: todo();
                 }
                 
             } break;
-            case Op_Type::PUSH:
+            case Op_Type::BUILTIN_VAR: todo();
             {
-                val_stack[val_count++] = g_var_buffer[op->index];
+                val_stack[val_count++] = g_predefined_vars[op->index].num;
+            } break;
+            case Op_Type::CALL: todo();
+            {
+                call_stack[call_count++] = i;
+                i = op->index;
+            } break;
+            case Op_Type::PUSH: assert(false);
+            {
             } break;
             case Op_Type::PUSHI:
             {
                 val_stack[val_count++] = op->val;
             } break;
-            case Op_Type::PUSH_RET: assert(false);   
-            {
-                ret_stack[ret_count++] = op->index;
-            } break;
+            // case Op_Type::PUSH_RET: assert(false);   
+            // {
+            // } break;
             case Op_Type::POP: assert(false);
             case Op_Type::RETURN:
             {
                 // last return stops program
-                if (ret_count == 0)
+                if (call_count == 0)
                 {
                     running = false;
                 }
                 else
                 {
-                    i = ret_stack[--ret_count];
+                    i = call_stack[--call_count];
                 }
             } break;
 
-            default:
-            {
-                fprintf(stderr, "ERROR: Illegal operator\n");
-                exit(1);
-            } break;
+            // default:
+            // {
+            //     fprintf(stderr, "ERROR: Illegal operator\n");
+            //     exit(1);
+            // } break;
         }
     }
 
@@ -1737,18 +1729,21 @@ static void fprint_ops(Ops ops, FILE *f)
             {
                 fprintf(f, "index %llu: %s\n", i, str_from_op_type(ops.data[i].type));
             } break;
-            case Op_Type::PUSH:
             case Op_Type::CALL:
-            case Op_Type::INTERNAL_FUNC:
             {
-                fprintf(f, "index %llu: %s, 0x%llX\n", i, str_from_op_type(ops.data[i].type), ops.data[i].index);
+                fprintf(f, "index %llu: %s, 0x%X, args %u\n", i, str_from_op_type(ops.data[i].type), ops.data[i].index, ops.data[i].arg_count);
+            } break;
+            case Op_Type::PUSH:
+            case Op_Type::POP:
+            case Op_Type::BUILTIN_FUNC:
+            case Op_Type::BUILTIN_VAR:
+            {
+                fprintf(f, "index %llu: %s, 0x%X\n", i, str_from_op_type(ops.data[i].type), ops.data[i].index);
             } break;
             case Op_Type::PUSHI:
             {
                 fprintf(f, "index %llu: %s, %g\n", i, str_from_op_type(ops.data[i].type), ops.data[i].val);
             } break;
-            case Op_Type::PUSH_RET: todo();
-            case Op_Type::POP: todo();
         }
     }
 }
