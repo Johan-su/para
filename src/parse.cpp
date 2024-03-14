@@ -44,53 +44,6 @@ struct [[nodiscard]] Errcode
     Errcode(int c): code(c) {}
 };
 
-// static char *file_to_str(const char *file_path)
-// {
-//     char *str = nullptr;
-//     FILE *f = fopen(file_path, "rb");
-//     if (f == nullptr)
-//     {
-//         fprintf(stderr, "ERROR: %s\n", strerror(errno));
-//         return nullptr;
-//     }
-
-//     long file_size = -1;
-//     if (fseek(f, 0, SEEK_END) != 0)
-//     {
-//         fprintf(stderr, "ERROR: failed to seek file %s\n", file_path);
-//         goto end_close;
-//     }
-//     file_size = ftell(f);
-//     if (file_size < 0)
-//     {
-//         goto end_close;
-//     }
-//     if (fseek(f, 0, SEEK_SET) != 0)
-//     {
-//         fprintf(stderr, "ERROR: failed to seek file %s\n", file_path);
-//         goto end_close;
-//     }
-//     {
-//         usize buf_size = (usize)file_size + 1; 
-//         str = alloc(char, buf_size);
-//     }
-//     if (fread(str, sizeof(*str), (usize)file_size, f) != (usize)file_size)
-//     {
-//         fprintf(stderr, "ERROR: failed to read data from file %s\n", file_path);
-//         free(str);
-//         str = nullptr;
-//     }
-
-//     end_close:
-//     if (fclose(f) == EOF)
-//     {
-//         fprintf(stderr, "ERROR: failed to close file %s\n", file_path);
-//     }
-//     return str;
-// }
-
-
-
 
 enum class Token_Kind
 {
