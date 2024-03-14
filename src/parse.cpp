@@ -333,6 +333,10 @@ enum Node_Kind
     NUMBER
 };
 
+
+#define MAX_SUBNODES 8
+#define MAX_PARAMETER_COUNT (MAX_SUBNODES - 1)
+
 struct Node
 {
     Node_Kind kind;
@@ -349,7 +353,7 @@ struct Node
             Node *right;
 
         };
-        Node *nodes[8];
+        Node *nodes[MAX_SUBNODES];
     };
 
 
@@ -864,8 +868,6 @@ static Node *parse(Lexer *lex)
     Control_Flag flag_stack[32] = {};
     u32 flag_count = 0;
 
-    u32 max_parameter_count = ARRAY_SIZE(output_stack[0]->nodes) - 1;
-
     while (lex->tokens[lex->index].kind != Token_Kind::END)
     {
         s64 equal_index = -1;
@@ -920,7 +922,7 @@ static Node *parse(Lexer *lex)
 
                     if (var.kind != Token_Kind::IDENTIFIER)
                         todo();
-                    if (func_params > max_parameter_count)
+                    if (func_params > MAX_PARAMETER_COUNT)
                         todo();
 
 
@@ -952,7 +954,7 @@ static Node *parse(Lexer *lex)
                 Node *def = alloc(Node, 1);
                 def->kind = Node_Kind::FUNCTIONDEF;
                 def->token_index = token_index;
-                for (u32 i = max_parameter_count; i-- > 0 && output_count > 0;)
+                for (u32 i = MAX_PARAMETER_COUNT; i-- > 0 && output_count > 0;)
                 {   
                     Node *n = output_stack[output_count - 1];
                     if (n->kind != Node_Kind::PARAM)
@@ -975,7 +977,7 @@ static Node *parse(Lexer *lex)
                 if (err)
                     return nullptr;
 
-                def->nodes[max_parameter_count] = output_stack[--output_count];
+                def->nodes[MAX_PARAMETER_COUNT] = output_stack[--output_count];
                 output_stack[output_count++] = def;
 
             }
