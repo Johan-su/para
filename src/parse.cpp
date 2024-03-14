@@ -97,7 +97,6 @@ struct Token
     u32 count;
 };
 
-
 struct Lexer
 {
     u32 count;
@@ -107,20 +106,10 @@ struct Lexer
     Token *tokens;
 };
 
-
-
-
-
-
-
-
-
-
 static bool is_digit(char c)
 {
     return c >= '0' && c <= '9';
 }
-
 
 static bool is_alpha(char c)
 {
@@ -450,8 +439,8 @@ static void graphviz_from_tree(Node *tree, Lexer *lex)
             {
                 // do nothing
             } break; 
-            case Node_Kind::DIV: todo();
-            case Node_Kind::POW: todo();
+            case Node_Kind::DIV:;
+            case Node_Kind::POW:;
             case Node_Kind::FUNCTIONDEF:
             case Node_Kind::FUNCTION:
             case Node_Kind::VARIABLE:
@@ -506,26 +495,6 @@ static Token peek_token(Lexer *lex)
     Token t = lex->tokens[lex->index];
     return t;
 }
-
-
-
-static Node *parse_leaf(Lexer *lex)
-{
-    Token next = next_token(lex);
-
-
-    if (next.kind == Token_Kind::NUMBER)
-    {
-        Node *node = alloc(Node, 1);
-        node->kind = Node_Kind::NUMBER;
-        return node;
-    }
-
-    fprintf(stderr, "ERROR: got %s expected NUMBER\n", str_from_token_kind(next.kind));
-    return nullptr;
-}
-
-
 
 static void print_node_stack(Node **s, u32 size)
 {
@@ -1045,6 +1014,11 @@ struct Function
 };
 
 
+static void print_val(f64 a)
+{
+    printf("%g\n", a);
+}
+
 Function g_funcs[] = {
     {(f64 (*)(...))sin, "sin", 1},
     {(f64 (*)(...))cos, "cos", 1},
@@ -1058,6 +1032,7 @@ Function g_funcs[] = {
     {(f64 (*)(...))cbrt, "cbrt", 1},
     //
     {(f64 (*)(...))exp, "exp", 1},
+    {(f64 (*)(...))print_val, "print_val", 1},
 };
 
 
@@ -1086,9 +1061,8 @@ enum class Op_Type
     BUILTIN_FUNC,
     BUILTIN_VAR,
     CALL,
-    PUSH,
     PUSHI,
-    POP,
+    MOVE,
     RETURN,
 };
 
@@ -1108,9 +1082,8 @@ const char *str_from_op_type(Op_Type t)
         case Op_Type::BUILTIN_FUNC: return "BUILTIN_FUNC";
         case Op_Type::BUILTIN_VAR: return "BUILTIN_VAR";
         case Op_Type::CALL: return "CALL";
-        case Op_Type::PUSH: return "PUSH";
         case Op_Type::PUSHI: return "PUSHI";
-        case Op_Type::POP: return "POP";
+        case Op_Type::MOVE: return "MOVE";
         case Op_Type::RETURN: return "RETURN";
     }
     assert(false);
@@ -1220,8 +1193,11 @@ struct Ops
     u32 entry;
 };
 
-static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
+static Errcode bytecode_from_tree(Ops *out_ops, Node *tree, const Lexer *lex)
 {
+    if (out_ops == nullptr)
+        return 1;
+     
     usize op_size = 8192;
     Op *ops = alloc(Op, op_size);
     u32 ops_count = 0;
@@ -1231,8 +1207,6 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
     u32 symbol_count = 0;
     init_symbols_with_predefined(symbols, &symbol_count);
     
-
-    u32 stack_count = 0;
 
 
     u32 active_scope = 0;
@@ -1346,35 +1320,30 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                     Op op = {};
                     op.type = Op_Type::ADD;
                     ops[ops_count++] = op;
-                    stack_count -= 1;
                 } break;
                 case Node_Kind::SUB:
                 {
                     Op op = {};
                     op.type = Op_Type::SUB;
                     ops[ops_count++] = op;
-                    stack_count -= 1;
                 } break;
                 case Node_Kind::MUL:
                 {
                     Op op = {};
                     op.type = Op_Type::MUL;
                     ops[ops_count++] = op;
-                    stack_count -= 1;
                 } break;
                 case Node_Kind::DIV:
                 {
                     Op op = {};
                     op.type = Op_Type::DIV;
                     ops[ops_count++] = op;
-                    stack_count -= 1;
                 } break;
                 case Node_Kind::POW:
                 {
                     Op op = {};
                     op.type = Op_Type::POW;
                     ops[ops_count++] = op;
-                    stack_count -= 1;
                 } break;
                 case Node_Kind::FUNCTION:
                 {
@@ -1424,7 +1393,6 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                     Op op = {};
                     op.type = Op_Type::RETURN;
                     ops[ops_count++] = op;
-                    stack_count = 0;
                     param_count = 0;
                 } break;
                 case Node_Kind::VARIABLE:
@@ -1438,10 +1406,10 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
 
                     Op op = {};
 
-                    if (symbols[index].scope == active_scope)
+                    if (symbols[index].scope == active_scope && symbols[index].scope != 0)
                     {
-                        op.type = Op_Type::POP;
-                        op.index = symbols[index].index;
+                        op.type = Op_Type::MOVE;
+                        op.index = symbols[index].index + 4;
                     }
                     else if (symbols[index].type == Symbol_Type::VARIABLE)
                     {
@@ -1456,7 +1424,6 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                     }
 
                     ops[ops_count++] = op;
-                    stack_count += 1;
 
                 } break;
                 case Node_Kind::PARAM:
@@ -1499,7 +1466,6 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                     Op op = {};
                     op.type = Op_Type::RETURN;
                     ops[ops_count++] = op;
-                    stack_count = 0;
                 } break;
                 case Node_Kind::EXPR:
                 {
@@ -1513,7 +1479,6 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                     Op op = {};
                     op.type = Op_Type::RETURN;
                     ops[ops_count++] = op;
-                    stack_count = 0;
                 } break;
                 case Node_Kind::NUMBER:
                 {
@@ -1521,7 +1486,6 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
                     op.type = Op_Type::PUSHI;
                     op.val = node->num;
                     ops[ops_count++] = op;
-                    stack_count += 1;
                 } break;
             }
             parse_stack_count -= 1;
@@ -1529,8 +1493,12 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
     }
 
 
-    u32 entry = ops_count;
+    const char *str = "print_val";
+    s64 index_ = get_symbol_index_by_name(str, (u32)strlen(str), symbols, symbol_count, 0);
+    assert(index_ != -1);
+    u32 index = (u32)index_;
 
+    u32 entry = ops_count;
     for (u32 i = 0;  i < symbol_count; ++i)
     {
         if (symbols[i].type != Symbol_Type::EXPR)
@@ -1543,24 +1511,81 @@ static Ops bytecode_from_tree(Node *tree, const Lexer *lex)
         op.index = symbols[i].index;
         op.arg_count = 0;
         ops[ops_count++] = op;
+
+        op = {};
+        op.type = Op_Type::BUILTIN_FUNC;
+        op.index = index;
+        op.arg_count = 1;
+        ops[ops_count++] = op;
     }
     
+    Op op = {};
+    op.type = Op_Type::RETURN;
+    ops[ops_count++] = op;
 
-    return {ops, ops_count, entry};
+
+    Ops op_data = {ops, ops_count, entry};
+    *out_ops = op_data;
+    return 0;
 }
 
 
-static f64 execute_ops(Ops ops)
+static void push_f64(u8 *stack, u32 *stack_top, f64 val)
+{
+    u32 index = *stack_top;
+    *stack_top += sizeof(val);
+
+    f64 *stac = (f64 *)(stack + index);
+    *stac = val;
+}
+
+static void push_u32(u8 *stack, u32 *stack_top, u32 val)
+{
+    u32 index = *stack_top;
+    *stack_top += sizeof(val);
+
+    u32 *stac = (u32 *)(stack + index);
+    *stac = val;
+}
+
+
+static f64 pop_f64(u8 *stack, u32 *stack_top)
+{
+    assert(*stack_top >= sizeof(f64));
+    u32 index = *stack_top - sizeof(f64);    
+    f64 *stac = (f64 *)(stack + index);
+
+    f64 val = *stac;
+
+    *stack_top -= sizeof(f64);
+    return val;
+}
+
+static u32 pop_u32(u8 *stack, u32 *stack_top)
+{
+    assert(*stack_top >= sizeof(u32));
+    u32 index = *stack_top - sizeof(u32);    
+    u32 *stac = (u32 *)(stack + index);
+
+    u32 val = *stac;
+
+    *stack_top -= sizeof(u32);
+    return val;
+}
+
+static void execute_ops(Ops ops)
 {
 
-    f64 *val_stack = alloc(f64, 1024);
+    u8 *val_stack = alloc(u8, 8192);
     u32 val_count = 0;
 
-    u32 *call_stack = alloc(u32, 1024);
+    u8 *call_stack = alloc(u8, 8192);
     u32 call_count = 0;
 
+    u32 frame_index = 0;
+
     bool running = true;
-    for (u32 i = 0; running; ++i)
+    for (u32 i = ops.entry; running;)
     {
         Op *op = ops.data + i;
 
@@ -1570,41 +1595,45 @@ static f64 execute_ops(Ops ops)
             case Op_Type::INVALID: assert(false);
             case Op_Type::ADD:
             {
-                f64 n1 = val_stack[--val_count];
-                f64 n2 = val_stack[--val_count];
-                val_stack[val_count++] = n1 + n2;
+                f64 n1 = pop_f64(val_stack, &val_count);
+                f64 n2 = pop_f64(val_stack, &val_count);
+                push_f64(val_stack, &val_count, n1 + n2);
+                i += 1;
             } break;
             case Op_Type::SUB:
             {
-                f64 n1 = val_stack[--val_count];
-                f64 n2 = val_stack[--val_count];
-                val_stack[val_count++] = n1 - n2;
+                f64 n1 = pop_f64(val_stack, &val_count);
+                f64 n2 = pop_f64(val_stack, &val_count);
+                push_f64(val_stack, &val_count, n1 - n2);
+                i += 1;
             } break;
             case Op_Type::NEGATE:
             {
-                f64 n1 = val_stack[--val_count];
-                val_stack[val_count++] = -n1;
+                f64 n1 = pop_f64(val_stack, &val_count);
+                push_f64(val_stack, &val_count, -n1);
+                i += 1;
             } break;
             case Op_Type::DIV:
             {
-                f64 n1 = val_stack[--val_count];
-                f64 n2 = val_stack[--val_count];
-                val_stack[val_count++] = n1 / n2;
+                f64 n1 = pop_f64(val_stack, &val_count);
+                f64 n2 = pop_f64(val_stack, &val_count);
+                push_f64(val_stack, &val_count, n1 / n2);
+                i += 1;
             } break;
             case Op_Type::MUL:
             {
-                f64 n1 = val_stack[--val_count];
-                f64 n2 = val_stack[--val_count];
-                val_stack[val_count++] = n1 * n2;
+                f64 n1 = pop_f64(val_stack, &val_count);
+                f64 n2 = pop_f64(val_stack, &val_count);
+                push_f64(val_stack, &val_count, n1 * n2);
+                i += 1;
             } break;
             case Op_Type::POW:
             {
-                f64 n1 = val_stack[--val_count];
-                f64 n2 = val_stack[--val_count];
-
-                val_stack[val_count++] = pow(n1, n2);
+                f64 n1 = pop_f64(val_stack, &val_count);
+                f64 n2 = pop_f64(val_stack, &val_count);
+                push_f64(val_stack, &val_count, pow(n1, n2));
+                i += 1;
             } break;
-
             case Op_Type::BUILTIN_FUNC:
             {
                 Function *f = g_funcs + op->index;
@@ -1613,44 +1642,63 @@ static f64 execute_ops(Ops ops)
                 {
                     case 1:
                     {
-                        f64 n1 = val_stack[--val_count];
-                        val_stack[val_count++] = f->func(n1);
+                        f64 n1 = pop_f64(val_stack, &val_count);
+                        push_f64(val_stack, &val_count, f->func(n1));
                     } break;
                     default: todo();
                 }
                 
+                i += 1;
             } break;
             case Op_Type::BUILTIN_VAR: todo();
             {
-                val_stack[val_count++] = g_predefined_vars[op->index].num;
+                push_f64(val_stack, &val_count, g_predefined_vars[op->index].num);
+                i += 1;
             } break;
-            case Op_Type::CALL: todo();
+            case Op_Type::CALL:
             {
-                call_stack[call_count++] = i;
+                push_u32(call_stack, &call_count, i + 1);
+                u32 old_frame_index = frame_index;
+                frame_index = call_count;
+                push_u32(call_stack, &call_count, old_frame_index);
+
+                for (u32 j = 0; j < op->arg_count; ++j)
+                {
+                    f64 arg = pop_f64(val_stack, &val_count);
+                    push_f64(call_stack, &call_count, arg);
+                }
+
+
                 i = op->index;
-            } break;
-            case Op_Type::PUSH: assert(false);
-            {
             } break;
             case Op_Type::PUSHI:
             {
-                val_stack[val_count++] = op->val;
+                push_f64(val_stack, &val_count, op->val);
+                i += 1;
             } break;
             // case Op_Type::PUSH_RET: assert(false);   
             // {
             // } break;
-            case Op_Type::POP: assert(false);
+            case Op_Type::MOVE:
+            {
+                f64 n1 = *(f64 *)(call_stack + frame_index + op->index);
+
+                push_f64(val_stack, &val_count, n1);
+                i += 1;
+            } break;
             case Op_Type::RETURN:
             {
                 // last return stops program
-                if (call_count == 0)
+                if (frame_index == 0)
                 {
                     running = false;
+                    break;
                 }
-                else
-                {
-                    i = call_stack[--call_count];
-                }
+                call_count = frame_index + 4;
+                frame_index = pop_u32(call_stack, &call_count);
+                u32 ret = pop_u32(call_stack, &call_count);
+
+                i = ret;
             } break;
 
             // default:
@@ -1662,8 +1710,7 @@ static f64 execute_ops(Ops ops)
     }
 
 
-    assert(val_count == 1);
-    return val_stack[0];
+    assert(val_count == 8);
 }
 
 
@@ -1688,8 +1735,7 @@ static void fprint_ops(Ops ops, FILE *f)
             {
                 fprintf(f, "index %llu: %s, 0x%X, args %u\n", i, str_from_op_type(ops.data[i].type), ops.data[i].index, ops.data[i].arg_count);
             } break;
-            case Op_Type::PUSH:
-            case Op_Type::POP:
+            case Op_Type::MOVE:
             case Op_Type::BUILTIN_FUNC:
             case Op_Type::BUILTIN_VAR:
             {
@@ -1705,6 +1751,7 @@ static void fprint_ops(Ops ops, FILE *f)
 
 int main(void)
 {
+
     bool running = true;
     while (running)
     {
@@ -1751,17 +1798,15 @@ int main(void)
         graphviz_from_tree(tree, &lexer);
 
 
-
-        Ops ops = bytecode_from_tree(tree, &lexer);
-        if (ops.len == 0)
+        Ops ops;
+        if (bytecode_from_tree(&ops, tree, &lexer))
         {
             continue;
         }
-
         fprint_ops(ops, stdout);
 
-        f64 val = execute_ops(ops);
-        printf("%.*s = %g\n", (int)lexer.data_length, lexer.data, val);
+        execute_ops(ops);
+        // printf("%.*s = %g\n", (int)lexer.data_length, lexer.data, val);
 
 
 
