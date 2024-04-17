@@ -10,7 +10,7 @@ if not exist build mkdir build
 
 cd ./build
 
-@REM %CLANG% ../src/main.cpp %FLAGS% -l ../lib/raylib.lib %WINLIB%  -I ../lib/include -nostdlib -o para.exe
+%CLANG% ../src/main.cpp %FLAGS% -l ../lib/raylib.lib %WINLIB%  -I ../lib/include -nostdlib -o para.exe
 %CLANG% ../src/parse.cpp %SANITIZE% %FLAGS% -o para.exe
 
 cd ..

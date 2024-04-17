@@ -1,7 +1,7 @@
 #include <raylib.h>
 #include <stdio.h>
 #include <stdint.h>
-#include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef signed char        s8;
@@ -18,6 +18,23 @@ typedef size_t usize;
 
 typedef float f32;
 typedef double f64;
+
+
+
+
+#define assert(condition)                                                                    \
+do                                                                                                  \
+{                                                                                                   \
+    if (!(condition))                                                                               \
+    {                                                                                               \
+        fprintf(stderr, "ERROR: assertion failed [%s] at %s:%d\n", #condition, __FILE__, __LINE__); \
+        exit(1);                                                                                    \
+    }                                                                                               \
+} while (0)
+
+
+#define todo() assert(false && "TODO")
+
 
 static bool is_whitespace(char c)
 {
@@ -75,16 +92,18 @@ struct UI_Result
 };
 
 
-enum UI_Flags : u32
+enum UI_Flags : u64
 {
     UI_Flags_clickable = (1 << 0),
-    UI_Flags_text_input = (1 << 1),
-    UI_Flags_draw_text = (1 << 2),
-    UI_Flags_draw_border = (1 << 3),
-    UI_Flags_draw_background = (1 << 4),
-    UI_Flags_brighten_background_when_hot = (1 << 5),
-    UI_Flags_brighten_background_when_active = (1 << 6),
-    UI_Flags_toggle_on_click = (1 << 7),
+    UI_Flags_clickable_toggle_active = (1 << 1),
+    UI_Flags_clickable_click_active = (1 << 2),  
+    UI_Flags_clickable_click_release_active = (1 << 3), 
+    UI_Flags_text_input = (1 << 4),
+    UI_Flags_draw_text = (1 << 5),
+    UI_Flags_draw_border = (1 << 6),
+    UI_Flags_draw_background = (1 << 7),
+    UI_Flags_brighten_background_when_hot = (1 << 8),
+    UI_Flags_brighten_background_when_active = (1 << 9),
 };
 
 struct UI_Element
@@ -111,6 +130,24 @@ struct UI_Element
     s32 x, y, w, h;
 };
 
+
+enum UI_Flow
+{
+    RIGHT,
+    LEFT,
+    UP,
+    DOWN,
+};
+
+struct UI_Layout
+{
+    s32 x, y, w, h;
+
+
+    UI_Flow flow;
+};
+
+
 static UI_Element hot = {};
 static UI_Element parent = {};
 
@@ -118,15 +155,64 @@ static UI_Element parent = {};
 static UI_Element last_stack[512] = {};
 static s32 last_count = 0;
 
-static UI_Element element_stack[512] = {};
+static UI_Element element_list[512] = {};
 static s32 element_count = 0;
 
 
+static UI_Layout layout_list[512] = {};
+static s32 layout_count = 0;
 
-static void push_element(UI_Element element)
+//TODO fix bug with text when pressing ctrl backspace sometimes
+
+static void push_sub_layout(s32 w, s32 h, UI_Flow flow)
 {
-    assert(element_count < (s32) sizeof(element_stack));
-    element_stack[element_count++] = element;
+    assert(layout_count > 0);
+    UI_Layout *l = layout_list + layout_count - 1;
+    UI_Layout layout = {l->x, l->y, w, h, flow};
+
+
+    switch (l->flow)
+    {
+        case RIGHT:
+        {
+            l->x += w;
+        } break;
+        case LEFT:
+        {
+            todo();
+        } break;
+        case UP:
+        {
+            todo();
+        } break;
+        case DOWN:
+        {
+            l->y += h;
+        } break;
+    }
+
+
+    assert(layout_count < (s32) sizeof(layout_list));
+    layout_list[layout_count++] = layout;
+}
+
+static void push_layout(UI_Layout layout)
+{
+    assert(layout_count < (s32) sizeof(layout_list));
+    layout_list[layout_count++] = layout;
+}
+
+
+static void pop_layout()
+{
+    assert(layout_count > 0);
+    layout_count -= 1;
+}
+
+static void append_element(UI_Element element)
+{
+    assert(element_count < (s32) sizeof(element_list));
+    element_list[element_count++] = element;
 }
 
 
@@ -164,7 +250,7 @@ static bool hover(s32 x, s32 y, s32 w, s32 h)
 static void begin_children()
 {
     assert(element_count > 0);
-    parent = element_stack[element_count - 1];
+    parent = element_list[element_count - 1];
 }
 
 static void end_children()
@@ -218,7 +304,7 @@ static void end_children()
 
 
 
-//     push_element(e);
+//     append_element(e);
 //     return result;
 // }
 
@@ -229,9 +315,7 @@ static UI_Element create_push_element(
     u64 id, 
     char *text,
     s32 text_capacity, 
-    Color background_color, 
-    s32 x, 
-    s32 y, 
+    Color background_color,
     s32 w, 
     s32 h
 )
@@ -258,19 +342,44 @@ static UI_Element create_push_element(
 
     e.result = le->result;
 
-    e.x = x;
-    e.y = y;
+    assert(layout_count > 0);
+    UI_Layout *l = layout_list + layout_count - 1;
+
+    e.x = l->x;
+    e.y = l->y;
     e.w = w;
     e.h = h;
 
-    push_element(e);
+    switch (l->flow)
+    {
+        case RIGHT:
+        {
+            l->x += e.w;
+        } break;
+        case LEFT:
+        {
+            todo();
+        } break;
+        case UP:
+        {
+            todo();
+        } break;
+        case DOWN:
+        {
+            l->y += e.h;
+        } break;
+    }
+
+
+    append_element(e);
     return e;
 }
 
-static UI_Result button(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
+static UI_Result button(char *buf, s32 buf_size, s32 w, s32 h)
 {
     UI_Element e = create_push_element( 
         UI_Flags_clickable|
+        UI_Flags_clickable_click_active|
         UI_Flags_draw_background|
         UI_Flags_brighten_background_when_hot|
         UI_Flags_draw_border|
@@ -278,38 +387,38 @@ static UI_Result button(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
         (u64) buf, 
         buf, buf_size, 
         ColorFromHSV(236.0f, 0.45f, 0.45f), 
-        x, y, w, h
+        w, h
     );
 
     return e.result;
 }
 
-static UI_Result dropdown_menu(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
+static UI_Result dropdown_menu(char *buf, s32 buf_size, s32 w, s32 h)
 {
     UI_Element e = create_push_element(
         UI_Flags_clickable|
+        UI_Flags_clickable_toggle_active|
         UI_Flags_draw_background|
         UI_Flags_brighten_background_when_hot|
         UI_Flags_brighten_background_when_active|
         UI_Flags_draw_border|
-        UI_Flags_draw_text|
-        UI_Flags_toggle_on_click,
+        UI_Flags_draw_text,
         (u64) buf, 
         buf, buf_size, 
         ColorFromHSV(236.0f, 0.45f, 0.45f), 
-        x, y, w, h
+        w, h
     );
 
     return e.result;
 }
 
-static bool slider(f32 *data, f32 min, f32 max, s32 x, s32 y, s32 w, s32 h)
+static bool slider(f32 *data, f32 min, f32 max, s32 w, s32 h)
 {
-     
+    return false; 
 }
 
 
-static UI_Result text_output(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
+static UI_Result text_output(char *buf, s32 buf_size, s32 w, s32 h)
 {
     UI_Element e = create_push_element(
         UI_Flags_draw_text|UI_Flags_draw_background|UI_Flags_draw_border,
@@ -317,8 +426,6 @@ static UI_Result text_output(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h
         buf,
         buf_size,
         ColorFromHSV(236.0f, 0.45f, 0.45f),
-        x,
-        y,
         w,
         h
     );
@@ -327,11 +434,11 @@ static UI_Result text_output(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h
 }
 
 // uses buf pointer as unique id
-static UI_Result text_input(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
+static UI_Result text_input(char *buf, s32 buf_size, s32 w, s32 h)
 {
     UI_Element e = create_push_element(
-        UI_Flags_text_input|
         UI_Flags_clickable|
+        UI_Flags_text_input|
         UI_Flags_draw_text|
         UI_Flags_draw_background|
         UI_Flags_draw_border|
@@ -340,8 +447,6 @@ static UI_Result text_input(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
         buf,
         buf_size,
         ColorFromHSV(236.0f, 0.47f, 0.45f),
-        x,
-        y,
         w,
         h
     );
@@ -351,6 +456,7 @@ static UI_Result text_input(char *buf, s32 buf_size, s32 x, s32 y, s32 w, s32 h)
 
 static void begin_ui()
 {
+    UI_Layout layout = {};
     UI_Element e = {};
 
     e.flags = 0;
@@ -368,7 +474,7 @@ static void begin_ui()
    // }
 
 
-    push_element(e);
+    append_element(e);
 }
 
 s32 font_size = 18;
@@ -439,13 +545,14 @@ static void remove_marked_region_and_set_cursor(UI_Element *e, s32 *text_len)
 
 static void end_ui()
 {
-    for (UI_Element *e = element_stack; e < element_stack + element_count; ++e)
+    // iterating over all elements
+    for (UI_Element *e = element_list; e < element_list + element_count; ++e)
     {
         UI_Result result = {};
 
         if (e->active)
         {
-            printf("e->index = %d\n", e->index);
+            printf("e->index = %d active\n", e->index);
         }
 
         bool is_hover = hover(e->x + 1, e->y + 1, e->w - 1, e->h - 1);
@@ -457,21 +564,33 @@ static void end_ui()
                 result.released = mouse_left_released;
                 result.down = mouse_left;
 
-                if ((e->flags & UI_Flags_toggle_on_click) && mouse_left_pressed)
+                if ((e->flags & UI_Flags_clickable_toggle_active) && mouse_left_pressed)
                 {
                     e->active = !e->active;
                 }
             }
 
-
-
-            if (!is_active(e->id, e->index) && is_hot(e->id))
+            if (is_active(e->id, e->index))
             {
-                if (mouse_left_pressed)
+                if (!is_hover)
                 {
-                    e->active = true;
+                    if (mouse_left_pressed)
+                    {
+                        e->active = false;
+                    }
                 }
             }
+            else
+            {
+                if (is_hot(e->id))
+                {
+                    if (mouse_left_pressed)
+                    {
+                        e->active = true;
+                    }
+                }
+            }
+
             if (is_hover)
             {
                 set_hot(*e);
@@ -764,11 +883,11 @@ static void end_ui()
     }
 
 
-    memcpy(last_stack, element_stack, sizeof(element_stack));
+    memcpy(last_stack, element_list, sizeof(element_list));
     last_count = element_count;
     element_count = 0;
     // TODO(Johan) remove this memset. it is only for debugging.
-    memset(element_stack, 0, sizeof(element_stack));
+    memset(element_list, 0, sizeof(element_list));
 }
 
 
@@ -820,34 +939,37 @@ int main()
 
 
         begin_ui();
-        
 
-        if (dropdown_menu(menu_buf, sizeof(menu_buf), 128, 0, 128, 128).active)
+        push_layout({0, 0, screen_width, screen_height, RIGHT});
+
+        if (dropdown_menu(menu_buf, sizeof(menu_buf), 128, 128).active)
         {
+            push_sub_layout(128, 4*128, DOWN);
             begin_children();
 
             for (s32 i = 0;  i < 4; ++i)
             {
-                if (button(button_bufs[i], sizeof(*button_bufs), 130, (i + 1) * 128, 126, 128).released)
+                if (button(button_bufs[i], sizeof(*button_bufs), 126, 128).released)
                 {
                     printf("%.*s was pressed\n", (int)sizeof(*button_bufs), button_bufs[i]);
                 }
             }
-        
-
 
 
             end_children();
+            pop_layout();
         }
-
+        push_sub_layout(128, 5*48, DOWN);
         for (s32 i = 0; i < 5; ++i)
         {
-            if (text_input(buf[i], sizeof(*buf), 0, i * 48, 128, 48).finished)
+            if (text_input(buf[i], sizeof(*buf), 128, 48).finished)
             {
                 printf("buf%d: %.*s\n", i, (int)sizeof(*buf), buf[i]);
             }
         }
+        pop_layout();
 
+        pop_layout();
         end_ui();
 
 
