@@ -1059,7 +1059,6 @@ enum class Op_Type
     POW,
 
     BUILTIN_FUNC,
-    BUILTIN_VAR,
     CALL,
     PUSHI,
     MOVE,
@@ -1080,7 +1079,6 @@ const char *str_from_op_type(Op_Type t)
         case Op_Type::MUL: return "MUL";
         case Op_Type::POW: return "POW";
         case Op_Type::BUILTIN_FUNC: return "BUILTIN_FUNC";
-        case Op_Type::BUILTIN_VAR: return "BUILTIN_VAR";
         case Op_Type::CALL: return "CALL";
         case Op_Type::PUSHI: return "PUSHI";
         case Op_Type::MOVE: return "MOVE";
@@ -1354,11 +1352,22 @@ static Errcode bytecode_from_tree(Ops *out_ops, Node *tree, const Lexer *lex)
                         todo();
                     }
 
-                    Op op = {};
-                    op.type = Op_Type::CALL;
-                    op.index = symbols[index].index;
-                    op.arg_count = symbols[index].arg_count;
-                    ops[ops_count++] = op;
+                    if (symbols[index].type == Symbol_Type::BUILTIN_FUNC)
+                    {
+                        Op op = {};
+                        op.type = Op_Type::BUILTIN_FUNC;
+                        op.index = symbols[index].index;
+                        op.arg_count = symbols[index].arg_count;
+                        ops[ops_count++] = op;
+                    } /*if Function*/
+                    else
+                    {
+                        Op op = {};
+                        op.type = Op_Type::CALL;
+                        op.index = symbols[index].index;
+                        op.arg_count = symbols[index].arg_count;
+                        ops[ops_count++] = op;
+                    }
                 } break;
                 case Node_Kind::FUNCTIONDEF:
                 {
@@ -1548,7 +1557,6 @@ static void push_u32(u8 *stack, u32 *stack_top, u32 val)
     *stac = val;
 }
 
-
 static f64 pop_f64(u8 *stack, u32 *stack_top)
 {
     assert(*stack_top >= sizeof(f64));
@@ -1650,11 +1658,6 @@ static void execute_ops(Ops ops)
                 
                 i += 1;
             } break;
-            case Op_Type::BUILTIN_VAR: todo();
-            {
-                push_f64(val_stack, &val_count, g_predefined_vars[op->index].num);
-                i += 1;
-            } break;
             case Op_Type::CALL:
             {
                 push_u32(call_stack, &call_count, i + 1);
@@ -1676,9 +1679,6 @@ static void execute_ops(Ops ops)
                 push_f64(val_stack, &val_count, op->val);
                 i += 1;
             } break;
-            // case Op_Type::PUSH_RET: assert(false);   
-            // {
-            // } break;
             case Op_Type::MOVE:
             {
                 f64 n1 = *(f64 *)(call_stack + frame_index + op->index);
@@ -1701,11 +1701,11 @@ static void execute_ops(Ops ops)
                 i = ret;
             } break;
 
-            // default:
-            // {
-            //     fprintf(stderr, "ERROR: Illegal operator\n");
-            //     exit(1);
-            // } break;
+            default:
+            {
+                fprintf(stderr, "ERROR: Illegal operator\n");
+                exit(1);
+            } break;
         }
     }
 
@@ -1737,7 +1737,6 @@ static void fprint_ops(Ops ops, FILE *f)
             } break;
             case Op_Type::MOVE:
             case Op_Type::BUILTIN_FUNC:
-            case Op_Type::BUILTIN_VAR:
             {
                 fprintf(f, "index %llu: %s, 0x%X\n", i, str_from_op_type(ops.data[i].type), ops.data[i].index);
             } break;
@@ -1772,7 +1771,7 @@ int main(void)
             "x = 5;\n"
             "y(x) = 5;\n"
             "f(x)=y(5+5)*(x*e);\n"
-            "f(x) + 5;"
+            "f(x) - f(x) + e^x;"
         ;
         // char input[] = "5 * 5";
         // char input[] = "x = 5 * y";
