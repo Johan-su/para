@@ -718,18 +718,20 @@ static void end_ui()
                         if (key_down[KEY_LEFT_CONTROL])
                         {
 
-                            s32 end_index = e->text_index - 1; 
                             s32 start_index = e->text_index - 1;
 
-                            while (start_index >= 0 && is_whitespace(e->text[start_index])) 
+                            // move left while whitespace
+                            while (start_index > 0 && is_whitespace(e->text[start_index])) 
                             {
                                 start_index -= 1;
                             }
-                            while (start_index >= 0 && !is_whitespace(e->text[start_index])) 
+                            // move left until no whitespace
+                            while (start_index > 0 && !is_whitespace(e->text[start_index])) 
                             {
                                 start_index -= 1;
                             }
 
+                            s32 end_index = e->text_index - 1; 
                             remove_text_region_and_set_cursor(e->text, &len, &e->text_index, start_index, end_index);
 
                         }
