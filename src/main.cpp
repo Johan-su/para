@@ -21,6 +21,7 @@ typedef double f64;
 
 
 
+#define ARRAY_SIZE(x) (sizeof(x)/sizeof(*(x)))
 
 #define assert(condition)                                                                    \
 do                                                                                                  \
@@ -162,7 +163,6 @@ static s32 element_count = 0;
 static UI_Layout layout_list[512] = {};
 static s32 layout_count = 0;
 
-//TODO fix bug with text when pressing ctrl backspace sometimes
 
 static void push_sub_layout(s32 w, s32 h, UI_Flow flow)
 {
@@ -550,10 +550,10 @@ static void end_ui()
     {
         UI_Result result = {};
 
-        if (e->active)
-        {
-            printf("e->index = %d active\n", e->index);
-        }
+        // if (e->active)
+        // {
+        //     printf("e->index = %d active\n", e->index);
+        // }
 
         bool is_hover = hover(e->x + 1, e->y + 1, e->w - 1, e->h - 1);
         if (e->flags & UI_Flags_clickable)
@@ -902,7 +902,20 @@ int main()
     InitWindow(1366, 768, "test");
     SetTargetFPS(fps);
 
-    char buf[5][32] = {"test1","test2","test3","test4","test5"};
+
+    //TODO: horizontal scrolling
+    char buf[10][32] = {
+        "test",
+        "test",
+        "test",
+        "test",
+        "test",
+        "test",
+        "test",
+        "test",
+        "test",
+        "test"
+    };
 
     char menu_buf[] = "menu1";
 
@@ -926,6 +939,10 @@ int main()
             key_down[i] = data;
         }
 
+        int key_pressed = GetCharPressed();
+
+        printf("%d\n", key_pressed);
+
         mx = GetMouseX();
         my = GetMouseY();
 
@@ -941,12 +958,29 @@ int main()
 
 
         begin_ui();
-
         push_layout({0, 0, screen_width, screen_height, RIGHT});
 
+
+        s32 text_w = 128;        
+        s32 text_h = 48;
+
+        push_sub_layout(text_w, ARRAY_SIZE(buf)*text_h, DOWN);
+        for (s32 i = 0; i < ARRAY_SIZE(buf); ++i)
+        {
+            if (text_input(buf[i], sizeof(*buf), text_w, text_h).finished)
+            {
+                printf("buf%d: %.*s\n", i, (int)sizeof(*buf), buf[i]);
+            }
+        }
+        pop_layout();
+
+
+        //
+
+
+        push_sub_layout(128, 4*128, DOWN);
         if (dropdown_menu(menu_buf, sizeof(menu_buf), 128, 128).active)
         {
-            push_sub_layout(128, 4*128, DOWN);
             begin_children();
 
             for (s32 i = 0;  i < 4; ++i)
@@ -959,18 +993,8 @@ int main()
 
 
             end_children();
-            pop_layout();
-        }
-        push_sub_layout(128, 5*48, DOWN);
-        for (s32 i = 0; i < 5; ++i)
-        {
-            if (text_input(buf[i], sizeof(*buf), 128, 48).finished)
-            {
-                printf("buf%d: %.*s\n", i, (int)sizeof(*buf), buf[i]);
-            }
         }
         pop_layout();
-
         pop_layout();
         end_ui();
 
