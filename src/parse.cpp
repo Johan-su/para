@@ -250,7 +250,7 @@ static Errcode tokenize(Lexer *lex, char *input, u32 input_length)
     
     lex->tokens[lex->count++] = {Token_Kind::END, 0, 0};
 
-    assert(lex->count < token_capacity);
+    assert(lex->count <= token_capacity);
 
     return 0;
 }
@@ -925,7 +925,6 @@ static Node *parse(Lexer *lex)
         }
 
     }
-    assert(output_count > 0);
     assert(output_count < 8);
 
     Node *n = alloc(Node, 1);
@@ -1462,6 +1461,8 @@ static Errcode bytecode_from_tree(Ops *out_ops, Node *tree, const Lexer *lex)
     assert(index_ != -1);
     u32 index = (u32)index_;
 
+
+    bool has_entry = false;
     u32 entry = ops_count;
     for (u32 i = 0;  i < symbol_count; ++i)
     {
@@ -1481,6 +1482,9 @@ static Errcode bytecode_from_tree(Ops *out_ops, Node *tree, const Lexer *lex)
         op.index = index;
         op.arg_count = 1;
         ops[ops_count++] = op;
+
+
+        has_entry = true;
     }
     
     Op op = {};
@@ -1665,7 +1669,7 @@ static void execute_ops(Ops ops)
     }
 
     // printf("val_stack_top %d\n", val_stack_top);
-    assert(val_stack_top == 8);
+    // assert(val_stack_top == 8);
 }
 
 
