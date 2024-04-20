@@ -84,7 +84,8 @@ static bool key_down[512] = {};
 static bool key_pressed[512] = {};
 static bool key_released[512] = {};
 
-static s32 unicode_char = 0;
+static s32 unicode_chars[16] = {};
+static u32 char_count = 0;
 
 
 struct UI_Result
@@ -797,16 +798,44 @@ static void end_ui()
                 {
                     e->text_cursor_index = len;
                 }
-                else if (key_pressed[KEY_ENTER])
+                else if (key_pressed[KEY_ENTER] || key_pressed[KEY_KP_ENTER])
                 {
                     e->active = false;
                     result.finished = true;
                 }
+                else if (key_pressed['C'] && key_down[KEY_LEFT_CONTROL])
+                {
+                    printf("ctrl\n");
+                    s32 start_index = 0;
+                    s32 end_index = 0;
+                    if (e->text_cursor_index < e->text_mark_start_index)
+                    {
+                        start_index = e->text_cursor_index;
+                        end_index = e->text_mark_start_index;
+                    }
+                    else
+                    {
+                        start_index = e->text_mark_start_index;
+                        end_index = e->text_cursor_index;
+                    }
+
+                    if (e->text_mark)
+                    {
+                        char buf[128] = {};
+                        snprintf(buf, sizeof(buf), "%.*s", (int)(end_index - start_index), e->text + start_index);
+                        SetClipboardText(buf);
+                    }
+                }
+                else if (key_pressed['V'] && key_down[KEY_LEFT_CONTROL])
+                {
+                    GetClipboardText();
+                }
                 else
                 {
-                    s32 key = unicode_char;
-                    if (key != 0)
+
+                    while (char_count > 0)
                     {
+                        s32 key = unicode_chars[--char_count];
                         // TODO(Johan) maybe change so, shift still can mark after typing
                         if (e->text_select)
                         {
@@ -832,6 +861,7 @@ static void end_ui()
                             e->text_cursor_index += 1;
                         }
                     }
+
                 }
 
                 s32 center_y = e->y + e->h / 2;
@@ -978,7 +1008,16 @@ int main()
     while (!WindowShouldClose())
     {
         dt = GetFrameTime();
-        unicode_char = GetCharPressed();
+
+        while (true)
+        {
+            s32 unicode_char = GetCharPressed();
+            if (unicode_char == 0 || char_count == ARRAY_SIZE(unicode_chars))
+                break;
+
+            unicode_chars[char_count++] = unicode_char;
+        }
+
         {
             bool data = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
             mouse_left_pressed = data && !mouse_left;
