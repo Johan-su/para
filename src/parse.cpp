@@ -1562,15 +1562,15 @@ static void execute_ops(Ops ops)
             case Op_Type::INVALID: assert(false);
             case Op_Type::ADD:
             {
-                f64 n1 = pop_f64(val_stack, &val_stack_top);
                 f64 n2 = pop_f64(val_stack, &val_stack_top);
+                f64 n1 = pop_f64(val_stack, &val_stack_top);
                 push_f64(val_stack, &val_stack_top, n1 + n2);
                 i += 1;
             } break;
             case Op_Type::SUB:
             {
-                f64 n1 = pop_f64(val_stack, &val_stack_top);
                 f64 n2 = pop_f64(val_stack, &val_stack_top);
+                f64 n1 = pop_f64(val_stack, &val_stack_top);
                 push_f64(val_stack, &val_stack_top, n1 - n2);
                 i += 1;
             } break;
@@ -1582,22 +1582,22 @@ static void execute_ops(Ops ops)
             } break;
             case Op_Type::DIV:
             {
-                f64 n1 = pop_f64(val_stack, &val_stack_top);
                 f64 n2 = pop_f64(val_stack, &val_stack_top);
+                f64 n1 = pop_f64(val_stack, &val_stack_top);
                 push_f64(val_stack, &val_stack_top, n1 / n2);
                 i += 1;
             } break;
             case Op_Type::MUL:
             {
-                f64 n1 = pop_f64(val_stack, &val_stack_top);
                 f64 n2 = pop_f64(val_stack, &val_stack_top);
+                f64 n1 = pop_f64(val_stack, &val_stack_top);
                 push_f64(val_stack, &val_stack_top, n1 * n2);
                 i += 1;
             } break;
             case Op_Type::POW:
             {
-                f64 n1 = pop_f64(val_stack, &val_stack_top);
                 f64 n2 = pop_f64(val_stack, &val_stack_top);
+                f64 n1 = pop_f64(val_stack, &val_stack_top);
                 push_f64(val_stack, &val_stack_top, pow(n1, n2));
                 i += 1;
             } break;
