@@ -5,38 +5,6 @@
 
 
 
-typedef uint8_t u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
-
-typedef size_t usize;
-
-typedef int8_t s8;
-typedef int16_t s16;
-typedef int32_t s32;
-typedef int64_t s64;
-
-
-typedef float f32;
-typedef double f64;
-
-#define ARRAY_SIZE(x) (sizeof(x)/sizeof(*(x)))
-
-#define alloc(type, amount) (type*)(calloc((amount), sizeof(type)))
-#define assert(condition)                                                                    \
-do                                                                                                  \
-{                                                                                                   \
-    if (!(condition))                                                                               \
-    {                                                                                               \
-        fprintf(stderr, "ERROR: assertion failed [%s] at %s:%d\n", #condition, __FILE__, __LINE__); \
-        exit(1);                                                                                    \
-    }                                                                                               \
-} while (0)
-
-
-#define todo() assert(false && "TODO")
-
 struct [[nodiscard]] Errcode
 {
     int code;
@@ -167,19 +135,6 @@ static void print_error_here_token(const Lexer *lex, u32 token_index)
     print_error_here(lex->data, lex->data_length, lex->tokens[token_index].data_index);
 }
 
-
-
-static bool is_whitespace(char c)
-{
-    switch (c)
-    {
-        case ' ': return true;
-        case '\n': return true;
-        case '\t': return true;
-        case '\r': return true;
-    }
-    return false;
-}
 
 
 static Errcode tokenize(Lexer *lex, char *input, u32 input_length)
@@ -1585,7 +1540,7 @@ static void execute_ops(Ops ops)
 {
 
     u8 *val_stack = alloc(u8, 8192);
-    u32 val_count = 0;
+    u32 val_stack_top = 0;
 
     u8 *call_stack = alloc(u8, 8192);
     u32 call_count = 0;
@@ -1603,43 +1558,43 @@ static void execute_ops(Ops ops)
             case Op_Type::INVALID: assert(false);
             case Op_Type::ADD:
             {
-                f64 n1 = pop_f64(val_stack, &val_count);
-                f64 n2 = pop_f64(val_stack, &val_count);
-                push_f64(val_stack, &val_count, n1 + n2);
+                f64 n1 = pop_f64(val_stack, &val_stack_top);
+                f64 n2 = pop_f64(val_stack, &val_stack_top);
+                push_f64(val_stack, &val_stack_top, n1 + n2);
                 i += 1;
             } break;
             case Op_Type::SUB:
             {
-                f64 n1 = pop_f64(val_stack, &val_count);
-                f64 n2 = pop_f64(val_stack, &val_count);
-                push_f64(val_stack, &val_count, n1 - n2);
+                f64 n1 = pop_f64(val_stack, &val_stack_top);
+                f64 n2 = pop_f64(val_stack, &val_stack_top);
+                push_f64(val_stack, &val_stack_top, n1 - n2);
                 i += 1;
             } break;
             case Op_Type::NEGATE:
             {
-                f64 n1 = pop_f64(val_stack, &val_count);
-                push_f64(val_stack, &val_count, -n1);
+                f64 n1 = pop_f64(val_stack, &val_stack_top);
+                push_f64(val_stack, &val_stack_top, -n1);
                 i += 1;
             } break;
             case Op_Type::DIV:
             {
-                f64 n1 = pop_f64(val_stack, &val_count);
-                f64 n2 = pop_f64(val_stack, &val_count);
-                push_f64(val_stack, &val_count, n1 / n2);
+                f64 n1 = pop_f64(val_stack, &val_stack_top);
+                f64 n2 = pop_f64(val_stack, &val_stack_top);
+                push_f64(val_stack, &val_stack_top, n1 / n2);
                 i += 1;
             } break;
             case Op_Type::MUL:
             {
-                f64 n1 = pop_f64(val_stack, &val_count);
-                f64 n2 = pop_f64(val_stack, &val_count);
-                push_f64(val_stack, &val_count, n1 * n2);
+                f64 n1 = pop_f64(val_stack, &val_stack_top);
+                f64 n2 = pop_f64(val_stack, &val_stack_top);
+                push_f64(val_stack, &val_stack_top, n1 * n2);
                 i += 1;
             } break;
             case Op_Type::POW:
             {
-                f64 n1 = pop_f64(val_stack, &val_count);
-                f64 n2 = pop_f64(val_stack, &val_count);
-                push_f64(val_stack, &val_count, pow(n1, n2));
+                f64 n1 = pop_f64(val_stack, &val_stack_top);
+                f64 n2 = pop_f64(val_stack, &val_stack_top);
+                push_f64(val_stack, &val_stack_top, pow(n1, n2));
                 i += 1;
             } break;
             case Op_Type::BUILTIN_FUNC:
@@ -1650,8 +1605,8 @@ static void execute_ops(Ops ops)
                 {
                     case 1:
                     {
-                        f64 n1 = pop_f64(val_stack, &val_count);
-                        push_f64(val_stack, &val_count, f->func(n1));
+                        f64 n1 = pop_f64(val_stack, &val_stack_top);
+                        push_f64(val_stack, &val_stack_top, f->func(n1));
                     } break;
                     default: todo();
                 }
@@ -1667,7 +1622,7 @@ static void execute_ops(Ops ops)
 
                 for (u32 j = 0; j < op->arg_count; ++j)
                 {
-                    f64 arg = pop_f64(val_stack, &val_count);
+                    f64 arg = pop_f64(val_stack, &val_stack_top);
                     push_f64(call_stack, &call_count, arg);
                 }
 
@@ -1676,14 +1631,14 @@ static void execute_ops(Ops ops)
             } break;
             case Op_Type::PUSHI:
             {
-                push_f64(val_stack, &val_count, op->val);
+                push_f64(val_stack, &val_stack_top, op->val);
                 i += 1;
             } break;
             case Op_Type::MOVE:
             {
                 f64 n1 = *(f64 *)(call_stack + frame_index + op->index);
 
-                push_f64(val_stack, &val_count, n1);
+                push_f64(val_stack, &val_stack_top, n1);
                 i += 1;
             } break;
             case Op_Type::RETURN:
@@ -1709,8 +1664,8 @@ static void execute_ops(Ops ops)
         }
     }
 
-
-    assert(val_count == 8);
+    // printf("val_stack_top %d\n", val_stack_top);
+    assert(val_stack_top == 8);
 }
 
 
@@ -1748,7 +1703,38 @@ static void fprint_ops(Ops ops, FILE *f)
     }
 }
 
-int main(void)
+
+Errcode compile_and_execute(char *input, u32 input_len)
+{
+    int err = 0;
+    Lexer lexer = {};
+    err = tokenize(&lexer, input, input_len);
+    if (err)
+        return err;
+
+
+    Node *tree = parse(&lexer);
+    if (tree == nullptr)
+    {
+        return 1;
+    }
+
+    graphviz_from_tree(tree, &lexer);
+
+
+    Ops ops = {};
+    err = bytecode_from_tree(&ops, tree, &lexer);
+    if (err)
+        return err;
+
+    fprint_ops(ops, stdout);
+
+    execute_ops(ops);
+    return err;
+}
+
+
+int test(void)
 {
 
     bool running = true;

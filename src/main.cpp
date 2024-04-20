@@ -4,25 +4,25 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef signed char        s8;
-typedef short              s16;
-typedef int                s32;
-typedef long long          s64;
-
-typedef unsigned char      u8;
-typedef unsigned short     u16;
-typedef unsigned int       u32;
-typedef unsigned long long u64;
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
 
 typedef size_t usize;
+
+typedef int8_t s8;
+typedef int16_t s16;
+typedef int32_t s32;
+typedef int64_t s64;
+
 
 typedef float f32;
 typedef double f64;
 
-
-
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof(*(x)))
 
+#define alloc(type, amount) (type*)(calloc((amount), sizeof(type)))
 #define assert(condition)                                                                    \
 do                                                                                                  \
 {                                                                                                   \
@@ -36,7 +36,6 @@ do                                                                              
 
 #define todo() assert(false && "TODO")
 
-
 static bool is_whitespace(char c)
 {
     switch (c)
@@ -49,6 +48,14 @@ static bool is_whitespace(char c)
     return false;
 }
 
+#include "parse.cpp"
+
+
+struct String
+{
+    char *data;
+    usize len;
+};
 
 static s32 min(s32 a, s32 b)
 {
@@ -77,7 +84,7 @@ static bool key_down[512] = {};
 static bool key_pressed[512] = {};
 static bool key_released[512] = {};
 
-
+static s32 unicode_char = 0;
 
 
 struct UI_Result
@@ -90,21 +97,23 @@ struct UI_Result
 
 
     bool finished;
+    u32 len;
 };
 
 
 enum UI_Flags : u64
 {
-    UI_Flags_clickable = (1 << 0),
-    UI_Flags_clickable_toggle_active = (1 << 1),
-    UI_Flags_clickable_click_active = (1 << 2),  
-    UI_Flags_clickable_click_release_active = (1 << 3), 
-    UI_Flags_text_input = (1 << 4),
-    UI_Flags_draw_text = (1 << 5),
-    UI_Flags_draw_border = (1 << 6),
-    UI_Flags_draw_background = (1 << 7),
-    UI_Flags_brighten_background_when_hot = (1 << 8),
+    UI_Flags_clickable                       = (1 << 0),
+    UI_Flags_clickable_toggle_active         = (1 << 1),
+    UI_Flags_clickable_click_active          = (1 << 2),
+    UI_Flags_clickable_click_release_active  = (1 << 3),
+    UI_Flags_text_input                      = (1 << 4),
+    UI_Flags_draw_text                       = (1 << 5),
+    UI_Flags_draw_border                     = (1 << 6),
+    UI_Flags_draw_background                 = (1 << 7),
+    UI_Flags_brighten_background_when_hot    = (1 << 8),
     UI_Flags_brighten_background_when_active = (1 << 9),
+    UI_Flags_horizontal_scroll               = (1 << 10),
 };
 
 struct UI_Element
@@ -116,12 +125,14 @@ struct UI_Element
     s32 parent_index;
 
 
-    s32 text_index;
+    s32 text_cursor_index;
+    char *text;
+    s32 text_capacity;
+    
+    // used for selection while holding LSHIFT
     bool text_mark;
     bool text_select;
     s32 text_mark_start_index;
-    char *text;
-    s32 text_capacity;
 
     bool active;
     Color background_color;
@@ -291,7 +302,7 @@ static void end_children()
 //     {
 //         if (mouse_left_pressed && is_hover)
 //         {
-//             e.text_index = 0;
+//             e.text_cursor_index = 0;
 //             e.active = true;
 //         }
 //     }
@@ -329,7 +340,7 @@ static UI_Element create_push_element(
 
     const UI_Element *le = last_stack + element_count;
 
-    e.text_index = le->text_index;
+    e.text_cursor_index = le->text_cursor_index;
     e.text_mark = le->text_mark;
     e.text_select = le->text_select;
     e.text_mark_start_index = le->text_mark_start_index;
@@ -374,6 +385,7 @@ static UI_Element create_push_element(
     append_element(e);
     return e;
 }
+
 
 static UI_Result button(char *buf, s32 buf_size, s32 w, s32 h)
 {
@@ -495,7 +507,7 @@ static void draw_text(const char *text, s32 text_len, int pos_x, int pos_y, Colo
     }
 }
 
-static void remove_text_region_and_set_cursor(char *text, s32 *text_len, s32 *text_index, s32 start, s32 end)
+static void remove_text_region_and_set_cursor(char *text, s32 *text_len, s32 *text_cursor_index, s32 start, s32 end)
 {
     s32 region_len = end - start + 1;
     s32 right_len = *text_len - end - 1;
@@ -505,29 +517,29 @@ static void remove_text_region_and_set_cursor(char *text, s32 *text_len, s32 *te
 
     *text_len -= region_len;
 
-    s32 cursor_change = start - *text_index;
+    s32 cursor_change = start - *text_cursor_index;
     if (cursor_change > 0) cursor_change = 0;
     if (cursor_change < -region_len) cursor_change = -region_len; 
 
-    *text_index += cursor_change;
+    *text_cursor_index += cursor_change;
 }
 
 static void remove_marked_region_and_set_cursor(UI_Element *e, s32 *text_len)
 {
     s32 start_index = 0;
     s32 end_index = 0;
-    if (e->text_index < e->text_mark_start_index)
+    if (e->text_cursor_index < e->text_mark_start_index)
     {
-        start_index = e->text_index;
+        start_index = e->text_cursor_index;
         end_index = e->text_mark_start_index;
     }
     else
     {
         start_index = e->text_mark_start_index;
-        end_index = e->text_index;
+        end_index = e->text_cursor_index;
     }
 
-    remove_text_region_and_set_cursor(e->text, text_len, &e->text_index, start_index, end_index - 1);
+    remove_text_region_and_set_cursor(e->text, text_len, &e->text_cursor_index, start_index, end_index - 1);
 }
 
 
@@ -543,8 +555,21 @@ static void remove_marked_region_and_set_cursor(UI_Element *e, s32 *text_len)
 //     *text_len -= region_len;
 // }
 
+static usize bounded_strlen(char *data, usize max_size)
+{
+    usize len = 0;
+
+    while (len < max_size && data[len] != '\0')
+    {
+        len += 1;
+    }
+
+    return len;
+}
+
 static void end_ui()
 {
+    bool was_set_hot = false;
     // iterating over all elements
     for (UI_Element *e = element_list; e < element_list + element_count; ++e)
     {
@@ -593,6 +618,7 @@ static void end_ui()
 
             if (is_hover)
             {
+                was_set_hot = true;
                 set_hot(*e);
             }
 
@@ -634,13 +660,13 @@ static void end_ui()
                     else
                     {
                         // TODO(Johan) maybe set according to mouse position
-                        e->text_index = 0;
+                        e->text_cursor_index = 0;
                     }
                 }
 
                 s32 len = 0;
                 {
-                    usize len_ = strlen(e->text);
+                    usize len_ = bounded_strlen(e->text, e->text_capacity);
                     assert(len_ < INT32_MAX);
                     len = (s32) len_;
                 }
@@ -650,21 +676,21 @@ static void end_ui()
                 {
                     e->text_mark = true;
                     e->text_select = true;
-                    e->text_mark_start_index = e->text_index;
+                    e->text_mark_start_index = e->text_cursor_index;
                 }
                 else if (key_released[KEY_LEFT_SHIFT] && e->text_select)
                 {
                     e->text_select = false;
                 }
 
-                if (key_pressed[KEY_RIGHT] && e->text_index < len)
+                if (key_pressed[KEY_RIGHT] && e->text_cursor_index < len)
                 {
                     if (!e->text_select)
                         e->text_mark = false;
 
                     if (key_down[KEY_LEFT_CONTROL])
                     {
-                        s32 new_index = e->text_index;
+                        s32 new_index = e->text_cursor_index;
 
                         while (new_index < len && is_whitespace(e->text[new_index])) 
                         {
@@ -674,21 +700,21 @@ static void end_ui()
                         {
                             new_index += 1;
                         }
-                        e->text_index = new_index;
+                        e->text_cursor_index = new_index;
                     }
                     else
                     {
-                        e->text_index += 1;   
+                        e->text_cursor_index += 1;   
                     }
                 }
-                else if (key_pressed[KEY_LEFT] && e->text_index != 0)
+                else if (key_pressed[KEY_LEFT] && e->text_cursor_index != 0)
                 {
                     if (!e->text_select)
                         e->text_mark = false;
 
                     if (key_down[KEY_LEFT_CONTROL])
                     {  
-                        s32 new_index = e->text_index - 1;
+                        s32 new_index = e->text_cursor_index - 1;
 
                         while (new_index >= 0 && is_whitespace(e->text[new_index])) 
                         {
@@ -698,11 +724,11 @@ static void end_ui()
                         {
                             new_index -= 1;
                         }
-                        e->text_index = new_index + 1;
+                        e->text_cursor_index = new_index + 1;
                     }
                     else
                     {
-                        e->text_index -= 1;   
+                        e->text_cursor_index -= 1;   
                     }
                 }
                 else if (key_pressed[KEY_BACKSPACE])
@@ -713,12 +739,12 @@ static void end_ui()
 
                         remove_marked_region_and_set_cursor(e, &len);
                     }
-                    else if (e->text_index != 0)
+                    else if (e->text_cursor_index != 0)
                     {
                         if (key_down[KEY_LEFT_CONTROL])
                         {
 
-                            s32 start_index = e->text_index - 1;
+                            s32 start_index = e->text_cursor_index - 1;
 
                             // move left while whitespace
                             while (start_index > 0 && is_whitespace(e->text[start_index])) 
@@ -731,18 +757,18 @@ static void end_ui()
                                 start_index -= 1;
                             }
 
-                            s32 end_index = e->text_index - 1; 
-                            remove_text_region_and_set_cursor(e->text, &len, &e->text_index, start_index, end_index);
+                            s32 end_index = e->text_cursor_index - 1; 
+                            remove_text_region_and_set_cursor(e->text, &len, &e->text_cursor_index, start_index, end_index);
 
                         }
                         else
                         {
-                            for (s32 i = e->text_index; i < len; ++i)
+                            for (s32 i = e->text_cursor_index; i < len; ++i)
                             {
                                 e->text[i - 1] = e->text[i];
                             }
                             e->text[len - 1] = '\0';
-                            e->text_index -= 1;
+                            e->text_cursor_index -= 1;
                         }
                     }
                 }
@@ -754,9 +780,9 @@ static void end_ui()
 
                         remove_marked_region_and_set_cursor(e, &len);
                     }
-                    else if (e->text_index != len)
+                    else if (e->text_cursor_index != len)
                     {
-                        for (s32 i = e->text_index + 1; i < len; ++i)
+                        for (s32 i = e->text_cursor_index + 1; i < len; ++i)
                         {
                             e->text[i - 1] = e->text[i];
                         }
@@ -765,11 +791,11 @@ static void end_ui()
                 }
                 else if (key_pressed[KEY_HOME])
                 {
-                    e->text_index = 0;
+                    e->text_cursor_index = 0;
                 }
                 else if (key_pressed[KEY_END])
                 {
-                    e->text_index = len;
+                    e->text_cursor_index = len;
                 }
                 else if (key_pressed[KEY_ENTER])
                 {
@@ -778,26 +804,7 @@ static void end_ui()
                 }
                 else
                 {
-                    u32 key = 0;
-                    for (u32 j = 44; j <= 93; ++j)
-                    {
-                        if (key_pressed[j])
-                        {
-                            key = j;
-                            break;
-                        }
-                    }
-
-                    if (key_pressed[32]) 
-                        key = 32;
-
-
-                    if (!key_down[KEY_LEFT_SHIFT] && (key >= 'A' && key <= 'Z'))
-                    {
-                        key += 32;
-                    }
-
-
+                    s32 key = unicode_char;
                     if (key != 0)
                     {
                         // TODO(Johan) maybe change so, shift still can mark after typing
@@ -815,13 +822,14 @@ static void end_ui()
 
                         if (len + 1 < e->text_capacity)
                         {
-                            for (s32 i = len; i-- > e->text_index; )
+                            for (s32 i = len; i-- > e->text_cursor_index; )
                             {
                                 e->text[i + 1] = e->text[i];
                             }
-                            e->text[e->text_index] = (char) key;
+                            //TODO(Johan) handle unicode characters correctly
+                            e->text[e->text_cursor_index] = (char) key;
                             len += 1;
-                            e->text_index += 1;
+                            e->text_cursor_index += 1;
                         }
                     }
                 }
@@ -832,7 +840,7 @@ static void end_ui()
                 s32 text_start_y = center_y - font_size / 2;
 
 
-                DrawRectangle(e->x + 7 + glyph_width * e->text_index, text_start_y, 1, font_size, RED);
+                DrawRectangle(e->x + 7 + glyph_width * e->text_cursor_index, text_start_y, 1, font_size, RED);
 
                 // draw selected area
 
@@ -841,20 +849,21 @@ static void end_ui()
                 {
                     s32 start_index = 0;
                     s32 end_index = 0;
-                    if (e->text_index < e->text_mark_start_index)
+                    if (e->text_cursor_index < e->text_mark_start_index)
                     {
-                        start_index = e->text_index;
+                        start_index = e->text_cursor_index;
                         end_index = e->text_mark_start_index;
                     }
                     else
                     {
                         start_index = e->text_mark_start_index;
-                        end_index = e->text_index;
+                        end_index = e->text_cursor_index;
                     }
                     s32 mark_len = end_index - start_index;
 
                     DrawRectangle(e->x + 7 + glyph_width * start_index, text_start_y, glyph_width * mark_len, font_size, BLUE);
                 }
+                result.len = (u32)len;
             }
         }
 
@@ -865,7 +874,7 @@ static void end_ui()
 
             s32 len = 0;
             {
-                usize len_ = strlen(e->text);
+                usize len_ = bounded_strlen(e->text, e->text_capacity);
                 assert(len_ < INT32_MAX);
                 len = (s32) len_;
             }
@@ -884,14 +893,52 @@ static void end_ui()
         e->result = result;
     }
 
+    if (!was_set_hot)
+    {
+        set_hot({});
+    }
 
     memcpy(last_stack, element_list, sizeof(element_list));
     last_count = element_count;
     element_count = 0;
     // TODO(Johan) remove this memset. it is only for debugging.
     memset(element_list, 0, sizeof(element_list));
+
 }
 
+
+
+
+static String concat_and_add_semicolon_at_the_end_of_every_substr(char **strs, u32 *lens, u32 string_count)
+{
+    String str = {};
+
+    for (u32 i = 0; i < string_count; ++i)
+    {
+        if (lens[i] > 0)
+        {
+            // + 1 memory for semicolon
+            str.len += lens[i] + 1;
+        }
+    } 
+    str.data = alloc(char, str.len);
+
+
+    u32 offset = 0;
+    for (u32 i = 0; i < string_count; ++i)
+    {
+        memcpy(str.data + offset, strs[i], lens[i]);
+        if (lens[i] > 0)
+        {
+            str.data[lens[i] + offset] = ';';
+            offset += 1;
+        }
+        offset += lens[i];
+    } 
+
+
+    return str;
+}
 
 
 
@@ -904,27 +951,34 @@ int main()
 
 
     //TODO: horizontal scrolling
-    char buf[10][32] = {
-        "test",
-        "test",
-        "test",
-        "test",
-        "test",
-        "test",
-        "test",
-        "test",
-        "test",
-        "test"
-    };
+    char *input_buf[10] = {};
+    char *output_buf[10] = {};
+
+    for (u32 i = 0; i < 10; ++i)
+    {
+        input_buf[i] = alloc(char, 32);
+        output_buf[i] = alloc(char, 32);
+    }
+
+
+    u32 lens[ARRAY_SIZE(input_buf)] = {};
+
+    char *test = "a=5+5;a";
+    usize len = strlen(test);
+    compile_and_execute(test, len);
+
 
     char menu_buf[] = "menu1";
 
     char button_bufs[4][16] = {"button1", "button2", "button3", "button4"};
 
+
+
+
     while (!WindowShouldClose())
     {
         dt = GetFrameTime();
-        PollInputEvents();
+        unicode_char = GetCharPressed();
         {
             bool data = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
             mouse_left_pressed = data && !mouse_left;
@@ -938,10 +992,6 @@ int main()
             key_released[i] = !data && key_down[i];
             key_down[i] = data;
         }
-
-        int key_pressed = GetCharPressed();
-
-        printf("%d\n", key_pressed);
 
         mx = GetMouseX();
         my = GetMouseY();
@@ -964,13 +1014,22 @@ int main()
         s32 text_w = 128;        
         s32 text_h = 48;
 
-        push_sub_layout(text_w, ARRAY_SIZE(buf)*text_h, DOWN);
-        for (s32 i = 0; i < ARRAY_SIZE(buf); ++i)
+        push_sub_layout(2 * text_w, screen_height, DOWN);
+        for (s32 i = 0; i < ARRAY_SIZE(input_buf); ++i)
         {
-            if (text_input(buf[i], sizeof(*buf), text_w, text_h).finished)
+            push_sub_layout(text_w + 20, text_h, RIGHT);
+            UI_Result result = text_input(input_buf[i], sizeof(*input_buf), text_w, text_h);
+            if (result.finished)
             {
-                printf("buf%d: %.*s\n", i, (int)sizeof(*buf), buf[i]);
+                lens[i] = result.len;
+                String s = concat_and_add_semicolon_at_the_end_of_every_substr((char **)input_buf, lens, 10);
+                int err = compile_and_execute(s.data, s.len);
+                if (err)
+                    return err;
+                printf("input_buf%d: %.*s\n", i, (int)sizeof(*input_buf), input_buf[i]);
             }
+            text_output(output_buf[i], sizeof(*output_buf), text_w, 20);
+            pop_layout();
         }
         pop_layout();
 
