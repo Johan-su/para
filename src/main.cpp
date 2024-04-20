@@ -23,12 +23,20 @@ typedef double f64;
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof(*(x)))
 
 #define alloc(type, amount) (type*)(calloc((amount), sizeof(type)))
+
+
+#if __has_builtin(__builtin_debugtrap)
+#else
+#define __builtin_debugtrap(x)
+#endif
+
 #define assert(condition)                                                                    \
 do                                                                                                  \
 {                                                                                                   \
     if (!(condition))                                                                               \
     {                                                                                               \
         fprintf(stderr, "ERROR: assertion failed [%s] at %s:%d\n", #condition, __FILE__, __LINE__); \
+        __builtin_debugtrap();                                                                        \
         exit(1);                                                                                    \
     }                                                                                               \
 } while (0)
@@ -805,7 +813,6 @@ static void end_ui()
                 }
                 else if (key_pressed['C'] && key_down[KEY_LEFT_CONTROL])
                 {
-                    printf("ctrl\n");
                     s32 start_index = 0;
                     s32 end_index = 0;
                     if (e->text_cursor_index < e->text_mark_start_index)
@@ -828,14 +835,15 @@ static void end_ui()
                 }
                 else if (key_pressed['V'] && key_down[KEY_LEFT_CONTROL])
                 {
+                    todo();
                     GetClipboardText();
                 }
                 else
                 {
 
-                    while (char_count > 0)
+                    for (s32 i = 0; i < char_count; ++i)
                     {
-                        s32 key = unicode_chars[--char_count];
+                        s32 key = unicode_chars[i];
                         // TODO(Johan) maybe change so, shift still can mark after typing
                         if (e->text_select)
                         {
@@ -861,7 +869,6 @@ static void end_ui()
                             e->text_cursor_index += 1;
                         }
                     }
-
                 }
 
                 s32 center_y = e->y + e->h / 2;
@@ -984,16 +991,18 @@ int main()
     char *input_buf[10] = {};
     char *output_buf[10] = {};
 
+    s32 text_input_size = 32;
+
     for (u32 i = 0; i < 10; ++i)
     {
-        input_buf[i] = alloc(char, 32);
-        output_buf[i] = alloc(char, 32);
+        input_buf[i] = alloc(char, text_input_size);
+        output_buf[i] = alloc(char, text_input_size);
     }
 
 
     u32 lens[ARRAY_SIZE(input_buf)] = {};
 
-    char *test = "a=5+5;a";
+    char *test = "a=5+5;";
     usize len = strlen(test);
     compile_and_execute(test, len);
 
@@ -1009,6 +1018,7 @@ int main()
     {
         dt = GetFrameTime();
 
+        char_count = 0;
         while (true)
         {
             s32 unicode_char = GetCharPressed();
@@ -1050,14 +1060,14 @@ int main()
         push_layout({0, 0, screen_width, screen_height, RIGHT});
 
 
-        s32 text_w = 128;        
+        s32 text_w = 128*3;        
         s32 text_h = 48;
 
         push_sub_layout(2 * text_w, screen_height, DOWN);
         for (s32 i = 0; i < ARRAY_SIZE(input_buf); ++i)
         {
             push_sub_layout(text_w + 20, text_h, RIGHT);
-            UI_Result result = text_input(input_buf[i], sizeof(*input_buf), text_w, text_h);
+            UI_Result result = text_input(input_buf[i], text_input_size, text_w, text_h);
             if (result.finished)
             {
                 lens[i] = result.len;
@@ -1065,9 +1075,9 @@ int main()
                 int err = compile_and_execute(s.data, s.len);
                 if (err)
                     return err;
-                printf("input_buf%d: %.*s\n", i, (int)sizeof(*input_buf), input_buf[i]);
+                printf("input_buf%d: %.*s\n", i, (int)text_input_size, input_buf[i]);
             }
-            text_output(output_buf[i], sizeof(*output_buf), text_w, 20);
+            text_output(output_buf[i], text_input_size, text_w, 20);
             pop_layout();
         }
         pop_layout();
