@@ -1002,11 +1002,6 @@ int main()
 
     u32 lens[ARRAY_SIZE(input_buf)] = {};
 
-    char *test = "a=5+5;";
-    usize len = strlen(test);
-    compile_and_execute(test, len);
-
-
     char menu_buf[] = "menu1";
 
     char button_bufs[4][16] = {"button1", "button2", "button3", "button4"};
