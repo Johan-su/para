@@ -1456,32 +1456,51 @@ static Errcode bytecode_from_tree(Ops *out_ops, Node *tree, const Lexer *lex)
     }
 
 
-    const char *str = "print_val";
-    s64 index_ = get_symbol_index_by_name(str, (u32)strlen(str), symbols, symbol_count, 0);
-    assert(index_ != -1);
-    u32 index = (u32)index_;
+    // const char *str = "print_val";
+    // s64 index_ = get_symbol_index_by_name(str, (u32)strlen(str), symbols, symbol_count, 0);
+    // assert(index_ != -1);
+    // u32 index = (u32)index_;
 
 
     bool has_entry = false;
     u32 entry = ops_count;
     for (u32 i = 0;  i < symbol_count; ++i)
     {
-        if (symbols[i].type != Symbol_Type::EXPR)
-            continue;
         if (symbols[i].scope != 0)
             continue;
-        
-        Op op = {};
-        op.type = Op_Type::CALL;
-        op.index = symbols[i].index;
-        op.arg_count = 0;
-        ops[ops_count++] = op;
 
-        op = {};
-        op.type = Op_Type::BUILTIN_FUNC;
-        op.index = index;
-        op.arg_count = 1;
-        ops[ops_count++] = op;
+        switch (symbols[i].type)
+        {
+
+            case Symbol_Type::INVALID:
+            case Symbol_Type::BUILTIN_FUNC:
+            case Symbol_Type::BUILTIN_VAR:
+            {
+                // do nothing
+            } break;
+            case Symbol_Type::FUNCTION:
+            {
+                Op op = {};
+                op.type = Op_Type::PUSHI;
+                op.val = NAN;
+                ops[ops_count++] = op;
+            } break;
+            case Symbol_Type::VARIABLE:
+            case Symbol_Type::EXPR:
+            {
+                Op op = {};
+                op.type = Op_Type::CALL;
+                op.index = symbols[i].index;
+                op.arg_count = 0;
+                ops[ops_count++] = op;
+            } break;
+        }
+
+        // op = {};
+        // op.type = Op_Type::BUILTIN_FUNC;
+        // op.index = index;
+        // op.arg_count = 1;
+        // ops[ops_count++] = op;
 
 
         has_entry = true;
@@ -1668,8 +1687,14 @@ static void execute_ops(Ops ops)
         }
     }
 
+    for (u32 i = 0; i < val_stack_top; i += sizeof(f64))
+    {
+        
+        printf("%g\n", *(f64 *)(val_stack + i));
+    }
+
     // printf("val_stack_top %d\n", val_stack_top);
-    // assert(val_stack_top == 8);
+    // assert(val_stack_top == sizeof(f64));
 }
 
 
