@@ -22,7 +22,6 @@ typedef double f64;
 
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof(*(x)))
 
-#define alloc(type, amount) (type*)(calloc((amount), sizeof(type)))
 
 
 #if __has_builtin(__builtin_debugtrap)
@@ -41,8 +40,12 @@ do                                                                              
     }                                                                                               \
 } while (0)
 
-
 #define todo() assert(false && "TODO")
+
+
+#include "arena.cpp"
+
+#define alloc(arena, type, amount) (type*)(alloc_arena(arena, sizeof(type)*(amount)))
 
 static bool is_whitespace(char c)
 {
@@ -65,11 +68,11 @@ struct String
     usize len;
 };
 
-static s32 min(s32 a, s32 b)
-{
-    if (a < b) return a;
-    return b;
-}
+// static s32 min(s32 a, s32 b)
+// {
+//     if (a < b) return a;
+//     return b;
+// }
 
 #define BLINKING_TIME_SEC 3
 
@@ -93,7 +96,7 @@ static bool key_pressed[512] = {};
 static bool key_released[512] = {};
 
 static s32 unicode_chars[16] = {};
-static u32 char_count = 0;
+static s32 char_count = 0;
 
 
 struct UI_Result
@@ -236,7 +239,7 @@ static void append_element(UI_Element element)
 }
 
 
-static bool is_active(u64 id, u64 index)
+static bool is_active(u64 id, s32 index)
 {
     UI_Element *last_e = last_stack + index;
 
@@ -433,10 +436,10 @@ static UI_Result dropdown_menu(char *buf, s32 buf_size, s32 w, s32 h)
     return e.result;
 }
 
-static bool slider(f32 *data, f32 min, f32 max, s32 w, s32 h)
-{
-    return false; 
-}
+// static bool slider(f32 *data, f32 min, f32 max, s32 w, s32 h)
+// {
+//     return false; 
+// }
 
 
 static UI_Result text_output(char *buf, s32 buf_size, s32 w, s32 h)
@@ -477,7 +480,6 @@ static UI_Result text_input(char *buf, s32 buf_size, s32 w, s32 h)
 
 static void begin_ui()
 {
-    UI_Layout layout = {};
     UI_Element e = {};
 
     e.flags = 0;
@@ -521,8 +523,8 @@ static void remove_text_region_and_set_cursor(char *text, s32 *text_len, s32 *te
     s32 region_len = end - start + 1;
     s32 right_len = *text_len - end - 1;
 
-    memmove(text + start, text + end + 1, right_len);
-    memset(text + start + right_len, 0, region_len);
+    memmove(text + start, text + end + 1, (usize)right_len);
+    memset(text + start + right_len, 0, (usize)region_len);
 
     *text_len -= region_len;
 
@@ -675,7 +677,8 @@ static void end_ui()
 
                 s32 len = 0;
                 {
-                    usize len_ = bounded_strlen(e->text, e->text_capacity);
+                    assert(e->text_capacity >= 0);
+                    usize len_ = bounded_strlen(e->text, (usize)e->text_capacity);
                     assert(len_ < INT32_MAX);
                     len = (s32) len_;
                 }
@@ -811,7 +814,7 @@ static void end_ui()
                     e->active = false;
                     result.finished = true;
                 }
-                else if (key_pressed['C'] && key_down[KEY_LEFT_CONTROL])
+                else if (key_pressed[KEY_C] && key_down[KEY_LEFT_CONTROL])
                 {
                     s32 start_index = 0;
                     s32 end_index = 0;
@@ -833,7 +836,7 @@ static void end_ui()
                         SetClipboardText(buf);
                     }
                 }
-                else if (key_pressed['V'] && key_down[KEY_LEFT_CONTROL])
+                else if (key_pressed[KEY_V] && key_down[KEY_LEFT_CONTROL])
                 {
                     todo();
                     GetClipboardText();
@@ -859,9 +862,9 @@ static void end_ui()
 
                         if (len + 1 < e->text_capacity)
                         {
-                            for (s32 i = len; i-- > e->text_cursor_index; )
+                            for (s32 j = len; j-- > e->text_cursor_index; )
                             {
-                                e->text[i + 1] = e->text[i];
+                                e->text[j + 1] = e->text[j];
                             }
                             //TODO(Johan) handle unicode characters correctly
                             e->text[e->text_cursor_index] = (char) key;
@@ -872,7 +875,7 @@ static void end_ui()
                 }
 
                 s32 center_y = e->y + e->h / 2;
-                s32 text_width = glyph_width * len;
+                // s32 text_width = glyph_width * len;
 
                 s32 text_start_y = center_y - font_size / 2;
 
@@ -911,7 +914,7 @@ static void end_ui()
 
             s32 len = 0;
             {
-                usize len_ = bounded_strlen(e->text, e->text_capacity);
+                usize len_ = bounded_strlen(e->text, (usize)e->text_capacity);
                 assert(len_ < INT32_MAX);
                 len = (s32) len_;
             }
@@ -946,7 +949,7 @@ static void end_ui()
 
 
 
-static String concat_and_add_semicolon_at_the_end_of_every_substr(char **strs, u32 *lens, u32 string_count)
+static String concat_and_add_semicolon_at_the_end_of_every_substr(Arena *arena, char **strs, u32 *lens, u32 string_count)
 {
     String str = {};
 
@@ -958,7 +961,7 @@ static String concat_and_add_semicolon_at_the_end_of_every_substr(char **strs, u
             str.len += lens[i] + 1;
         }
     } 
-    str.data = alloc(char, str.len);
+    str.data = alloc(arena, char, str.len);
 
 
     u32 offset = 0;
@@ -979,12 +982,19 @@ static String concat_and_add_semicolon_at_the_end_of_every_substr(char **strs, u
 
 
 
+
+
 int main()
 {
-    int fps = 30;
+    int fps = 60;
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(1366, 768, "test");
     SetTargetFPS(fps);
+
+
+    Arena temp_arena; init_arena(&temp_arena, 1000000);
+    Arena compile_arena; init_arena(&compile_arena, 1000000);
+
 
 
     //TODO: horizontal scrolling
@@ -995,8 +1005,9 @@ int main()
 
     for (u32 i = 0; i < 10; ++i)
     {
-        input_buf[i] = alloc(char, text_input_size);
-        output_buf[i] = alloc(char, text_input_size);
+        usize a = (usize)text_input_size;
+        input_buf[i] = alloc(&temp_arena, char, a);
+        output_buf[i] = alloc(&temp_arena, char, a);
     }
 
 
@@ -1059,18 +1070,23 @@ int main()
         s32 text_h = 48;
 
         push_sub_layout(2 * text_w, screen_height, DOWN);
-        for (s32 i = 0; i < ARRAY_SIZE(input_buf); ++i)
+        for (usize i = 0; i < ARRAY_SIZE(input_buf); ++i)
         {
             push_sub_layout(text_w + 20, text_h, RIGHT);
             UI_Result result = text_input(input_buf[i], text_input_size, text_w, text_h);
             if (result.finished)
             {
                 lens[i] = result.len;
-                String s = concat_and_add_semicolon_at_the_end_of_every_substr((char **)input_buf, lens, 10);
-                int err = compile_and_execute(s.data, s.len);
-                if (err)
-                    return err;
-                printf("input_buf%d: %.*s\n", i, (int)text_input_size, input_buf[i]);
+                clear_arena(&compile_arena);
+                String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 10);
+                Ops ops;
+                Err err = compile(&compile_arena, s.data, (u32)s.len, &ops);
+                if (err.err)
+                {
+
+                }
+                execute_ops(&compile_arena, ops);
+                printf("input_buf%zu: %.*s\n", i, (int)text_input_size, input_buf[i]);
             }
             text_output(output_buf[i], text_input_size, text_w, 20);
             pop_layout();
@@ -1118,5 +1134,7 @@ int main()
         EndDrawing();
     }
 
+    clean_arena(&temp_arena);
+    clean_arena(&compile_arena);
     CloseWindow();
 }

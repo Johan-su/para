@@ -5,6 +5,16 @@
 
 
 
+struct [[nodiscard]] Err
+{
+    bool err;
+    u32 error_indicies_count;
+    u32 *error_indicies;
+    u32 error_msges_count;
+    char *err_msges
+};
+
+
 struct [[nodiscard]] Errcode
 {
     int code;
@@ -137,12 +147,12 @@ static void print_error_here_token(const Lexer *lex, u32 token_index)
 
 
 
-static Errcode tokenize(Lexer *lex, char *input, u32 input_length)
+static Errcode tokenize(Arena *arena, Lexer *lex, char *input, u32 input_length)
 {
     memset(lex, 0, sizeof(*lex));
 
     u64 token_capacity = 1 + 2 * input_length;
-    lex->tokens = alloc(Token, token_capacity);
+    lex->tokens = alloc(arena, Token, token_capacity);
 
     lex->data = input;
     lex->data_length = input_length;
@@ -361,14 +371,14 @@ static const char *str_from_node_kind(Node_Kind kind)
 }
 
 
-static void graphviz_from_tree(Node *tree, Lexer *lex)
+static void graphviz_from_tree(Arena *arena, Node *tree, Lexer *lex)
 {
     FILE *f = fopen("./input.dot", "wb");
 
 
     fprintf(f, "graph G {\n");
     
-    Node **stack = alloc(Node *, 2000);
+    Node **stack = alloc(arena, Node *, 2000);
     u32 stack_count = 0;
 
 
@@ -622,9 +632,9 @@ static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_
 
 
 // https://www.youtube.com/watch?v=fIPO4G42wYE
-static Errcode parse_arithmetic(Lexer *lex, Node **output_stack, u32 *output_count, Control_Flag *flag_stack, u32 *flag_count)
+static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u32 *output_count, Control_Flag *flag_stack, u32 *flag_count)
 {
-    Node **operator_stack = alloc(Node *, 32);
+    Node **operator_stack = alloc(arena, Node *, 32);
     u32 operator_count = 0;
 
 
@@ -672,7 +682,7 @@ static Errcode parse_arithmetic(Lexer *lex, Node **output_stack, u32 *output_cou
                     }
 
                 }
-                Node *node = alloc(Node, 1);
+                Node *node = alloc(arena, Node, 1);
                 node->kind = node_kind_from_token(next, curr, last);
                 node->token_index = lex->index - 1;
                 operator_stack[operator_count++] = node; 
@@ -687,7 +697,7 @@ static Errcode parse_arithmetic(Lexer *lex, Node **output_stack, u32 *output_cou
                     print_error_here(lex->data, lex->data_length, curr.data_index);
                     return 1;
                 }
-                Node *node = alloc(Node, 1);
+                Node *node = alloc(arena, Node, 1);
                 node->kind = node_kind_from_token(next, curr, last);
                 node->token_index = lex->index - 1;
                 operator_stack[operator_count++] = node; 
@@ -731,7 +741,7 @@ static Errcode parse_arithmetic(Lexer *lex, Node **output_stack, u32 *output_cou
             } break;
             case Token_Kind::NUMBER:
             {
-                Node *node = alloc(Node, 1);
+                Node *node = alloc(arena, Node, 1);
                 node->kind = Node_Kind::NUMBER;
                 node->num = atof(lex->data + curr.data_index);
                 node->token_index = lex->index - 1;
@@ -740,7 +750,7 @@ static Errcode parse_arithmetic(Lexer *lex, Node **output_stack, u32 *output_cou
             } break;
             case Token_Kind::IDENTIFIER:
             {
-                Node *node = alloc(Node, 1);
+                Node *node = alloc(arena, Node, 1);
                 node->kind = node_kind_from_token(next, curr, last);
                 node->token_index = lex->index - 1;
                 if (node->kind == Node_Kind::FUNCTION)
@@ -784,7 +794,7 @@ static Errcode parse_arithmetic(Lexer *lex, Node **output_stack, u32 *output_cou
 }
 
 
-static Node *parse(Lexer *lex)
+static Node *parse(Arena *arena, Lexer *lex)
 {
     Node *output_stack[32] = {};
     u32 output_count = 0;
@@ -824,11 +834,11 @@ static Node *parse(Lexer *lex)
             if (equal_or_open.kind == Token_Kind::EQUAL)
             {
                 lex->index += 1;
-                int err = parse_arithmetic(lex, output_stack, &output_count, flag_stack, &flag_count);
+                int err = parse_arithmetic(arena, lex, output_stack, &output_count, flag_stack, &flag_count);
                 if (err)
                     return nullptr;
 
-                Node *def = alloc(Node, 1);
+                Node *def = alloc(arena, Node, 1);
 
 
                 def->kind = Node_Kind::VARIABLEDEF;
@@ -850,7 +860,7 @@ static Node *parse(Lexer *lex)
                         todo();
 
 
-                    Node *n = alloc(Node, 1);
+                    Node *n = alloc(arena, Node, 1);
                     n->kind = Node_Kind::PARAM;
                     n->token_index = lex->index;
 
@@ -875,7 +885,7 @@ static Node *parse(Lexer *lex)
                     }
                 }
 
-                Node *def = alloc(Node, 1);
+                Node *def = alloc(arena, Node, 1);
                 def->kind = Node_Kind::FUNCTIONDEF;
                 def->token_index = token_index;
                 for (u32 i = MAX_PARAMETER_COUNT; i-- > 0 && output_count > 0;)
@@ -897,7 +907,7 @@ static Node *parse(Lexer *lex)
                 }
                 lex->index += 1;
 
-                int err = parse_arithmetic(lex, output_stack, &output_count, flag_stack, &flag_count);
+                int err = parse_arithmetic(arena, lex, output_stack, &output_count, flag_stack, &flag_count);
                 if (err)
                     return nullptr;
 
@@ -912,9 +922,9 @@ static Node *parse(Lexer *lex)
         }
         else
         {
-            Node *expr = alloc(Node, 1);
+            Node *expr = alloc(arena, Node, 1);
             expr->kind = Node_Kind::EXPR;
-            int err = parse_arithmetic(lex, output_stack, &output_count, flag_stack, &flag_count);
+            int err = parse_arithmetic(arena, lex, output_stack, &output_count, flag_stack, &flag_count);
             if (err)
                 return nullptr;
             
@@ -927,7 +937,7 @@ static Node *parse(Lexer *lex)
     }
     assert(output_count < 8);
 
-    Node *n = alloc(Node, 1);
+    Node *n = alloc(arena, Node, 1);
     n->kind = Node_Kind::PROGRAM;
 
     for (u32 i = ARRAY_SIZE((*output_stack)->nodes) - 1; i-- > 0;)
@@ -1145,17 +1155,17 @@ struct Ops
     u32 entry;
 };
 
-static Errcode bytecode_from_tree(Ops *out_ops, Node *tree, const Lexer *lex)
+static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const Lexer *lex)
 {
     if (out_ops == nullptr)
         return 1;
      
     usize op_size = 8192;
-    Op *ops = alloc(Op, op_size);
+    Op *ops = alloc(arena, Op, op_size);
     u32 ops_count = 0;
 
 
-    Symbol *symbols = alloc(Symbol, 2048);
+    Symbol *symbols = alloc(arena, Symbol, 2048);
     u32 symbol_count = 0;
     init_symbols_with_predefined(symbols, &symbol_count);
     
@@ -1169,13 +1179,13 @@ static Errcode bytecode_from_tree(Ops *out_ops, Node *tree, const Lexer *lex)
     u32 param_count = 0;
 
     {
-        Node **post_list = alloc(Node *, 1024);
+        Node **post_list = alloc(arena, Node *, 1024);
         usize post_list_count = 0;
 
-        Node **pre_list = alloc(Node *, 1024);
+        Node **pre_list = alloc(arena, Node *, 1024);
         usize pre_list_count = 0;
 
-        Node **parse_stack = alloc(Node *, 1024);
+        Node **parse_stack = alloc(arena, Node *, 1024);
         usize parse_stack_count = 0;
 
         parse_stack[parse_stack_count++] = tree;
@@ -1462,7 +1472,6 @@ static Errcode bytecode_from_tree(Ops *out_ops, Node *tree, const Lexer *lex)
     // u32 index = (u32)index_;
 
 
-    bool has_entry = false;
     u32 entry = ops_count;
     for (u32 i = 0;  i < symbol_count; ++i)
     {
@@ -1502,8 +1511,6 @@ static Errcode bytecode_from_tree(Ops *out_ops, Node *tree, const Lexer *lex)
         // op.arg_count = 1;
         // ops[ops_count++] = op;
 
-
-        has_entry = true;
     }
     
     Op op = {};
@@ -1559,13 +1566,13 @@ static u32 pop_u32(u8 *stack, u32 *stack_top)
     return val;
 }
 
-static void execute_ops(Ops ops)
+static void execute_ops(Arena *arena, Ops ops)
 {
 
-    u8 *val_stack = alloc(u8, 8192);
+    u8 *val_stack = alloc(arena, u8, 8192);
     u32 val_stack_top = 0;
 
-    u8 *call_stack = alloc(u8, 8192);
+    u8 *call_stack = alloc(arena, u8, 8192);
     u32 call_count = 0;
 
     u32 frame_index = 0;
@@ -1732,33 +1739,30 @@ static void fprint_ops(Ops ops, FILE *f)
     }
 }
 
-
-Errcode compile_and_execute(char *input, u32 input_len)
+Err compile(Arena *arena, char *input, u32 input_len, Ops *out_ops)
 {
-    int err = 0;
+    Err err = {};
     Lexer lexer = {};
-    err = tokenize(&lexer, input, input_len);
-    if (err)
+    err = tokenize(arena, &lexer, input, input_len);
+    if (err.err)
         return err;
 
 
-    Node *tree = parse(&lexer);
+    Node *tree = parse(arena, &lexer);
     if (tree == nullptr)
     {
         return 1;
     }
 
-    graphviz_from_tree(tree, &lexer);
+    graphviz_from_tree(arena, tree, &lexer);
 
 
-    Ops ops = {};
-    err = bytecode_from_tree(&ops, tree, &lexer);
+    err = bytecode_from_tree(arena, out_ops, tree, &lexer);
     if (err)
         return err;
+2
+    fprint_ops(*out_ops, stdout);
 
-    fprint_ops(ops, stdout);
-
-    execute_ops(ops);
     return err;
 }
 
@@ -1766,6 +1770,7 @@ Errcode compile_and_execute(char *input, u32 input_len)
 int test(void)
 {
 
+    Arena temp_arena; init_arena(&temp_arena, 1000000);
     bool running = true;
     while (running)
     {
@@ -1798,28 +1803,28 @@ int test(void)
 
         Lexer lexer;
 
-        if (tokenize(&lexer, input, (u32) input_len))
+        if (tokenize(&temp_arena, &lexer, input, (u32) input_len))
         {
             continue;
         }
 
-        Node *tree = parse(&lexer);
+        Node *tree = parse(&temp_arena, &lexer);
         if (tree == nullptr)
         {
             continue;
         }
 
-        graphviz_from_tree(tree, &lexer);
+        graphviz_from_tree(&temp_arena, tree, &lexer);
 
 
         Ops ops;
-        if (bytecode_from_tree(&ops, tree, &lexer))
+        if (bytecode_from_tree(&temp_arena, &ops, tree, &lexer))
         {
             continue;
         }
         fprint_ops(ops, stdout);
 
-        execute_ops(ops);
+        execute_ops(&temp_arena, ops);
         // printf("%.*s = %g\n", (int)lexer.data_length, lexer.data, val);
 
 
