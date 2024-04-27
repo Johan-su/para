@@ -5,15 +5,25 @@
 
 
 
-struct [[nodiscard]] Err
+struct Err
 {
-    bool err;
-    u32 error_indicies_count;
-    u32 *error_indicies;
-    u32 error_msges_count;
-    char *err_msges
+    u32 error_index;
+    String msg;
 };
 
+static u32 g_err_count = 0;
+static Err g_err[512] = {};
+
+struct Error
+{
+    u32 err_count;
+    Err *errs;   
+};
+
+static Error get_error()
+{
+    return {g_err_count, g_err};
+}
 
 struct [[nodiscard]] Errcode
 {
@@ -40,9 +50,6 @@ enum class Token_Kind
     IDENTIFIER,
     END,
 };
-
-
-
 
 
 static const char *str_from_token_kind(Token_Kind kind)
@@ -77,10 +84,10 @@ struct Token
 
 struct Lexer
 {
-    u32 count;
-    char *data;
-    u32 data_length;
     u32 index;
+    u32 data_length;
+    char *data;
+    u32 token_count;
     Token *tokens;
 };
 
@@ -99,52 +106,10 @@ static bool is_alphanumeric(char c)
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
-static void print_error_here(const char *data, u32 data_length, u32 index)
+static void report_error_here(String err_msg, u32 error_index)
 {
-    assert(index < data_length);
-
-    s64 start_index = (s64) index - 100 < 0 ? 0 : index - 100;
-    for (u32 i = index; i != 0; --i)
-    {
-        if (data[i] == '\n')
-        {
-            start_index = i;
-            break;
-        }
-    }
-    s64 end_index = index + 100 > data_length ? data_length - 1 : index + 100;
-
-    for (u32 i = index; i < data_length; ++i)
-    {
-        if (data[i] == '\n')
-        {
-            end_index = i;
-            break;
-        }
-    }
-
-    fprintf(stderr, "ERROR: here\n");
-
-    s64 print_len = end_index - start_index + 1; 
-    fprintf(stderr, "%.*s\n", (int) print_len, data + start_index);
-    
-    for (s64 i = 0; i < print_len; ++i)
-    {
-        if (i == index)
-        {
-            fputc('^', stderr);
-        }
-        fputc(' ', stderr);
-    }
-    fputc('\n', stderr);
-
+    g_err[g_err_count++] = {error_index, err_msg};
 }
-
-static void print_error_here_token(const Lexer *lex, u32 token_index)
-{
-    print_error_here(lex->data, lex->data_length, lex->tokens[token_index].data_index);
-}
-
 
 
 static Errcode tokenize(Arena *arena, Lexer *lex, char *input, u32 input_length)
@@ -163,52 +128,52 @@ static Errcode tokenize(Arena *arena, Lexer *lex, char *input, u32 input_length)
         {
             case '+':
             {
-                lex->tokens[lex->count++] = {Token_Kind::PLUS, i, 1};
+                lex->tokens[lex->token_count++] = {Token_Kind::PLUS, i, 1};
                 i += 1;
             } break;
             case '-':
             {
-                lex->tokens[lex->count++] = {Token_Kind::MINUS, i, 1};
+                lex->tokens[lex->token_count++] = {Token_Kind::MINUS, i, 1};
                 i += 1;
             } break;
             case '*':
             {
-                lex->tokens[lex->count++] = {Token_Kind::STAR, i, 1};
+                lex->tokens[lex->token_count++] = {Token_Kind::STAR, i, 1};
                 i += 1;
             } break;
             case '/':
             {
-                lex->tokens[lex->count++] = {Token_Kind::SLASH, i, 1};
+                lex->tokens[lex->token_count++] = {Token_Kind::SLASH, i, 1};
                 i += 1;
             } break;
             case '^':
             {
-                lex->tokens[lex->count++] = {Token_Kind::CARET, i, 1};
+                lex->tokens[lex->token_count++] = {Token_Kind::CARET, i, 1};
                 i += 1;
             } break;
             case '=':
             {
-                lex->tokens[lex->count++] = {Token_Kind::EQUAL, i, 1};
+                lex->tokens[lex->token_count++] = {Token_Kind::EQUAL, i, 1};
                 i += 1;
             } break;
             case '(':
             {
-                lex->tokens[lex->count++] = {Token_Kind::OPEN_PAREN, i, 1};
+                lex->tokens[lex->token_count++] = {Token_Kind::OPEN_PAREN, i, 1};
                 i += 1;
             } break;
             case ')':
             {
-                lex->tokens[lex->count++] = {Token_Kind::CLOSE_PAREN, i, 1};
+                lex->tokens[lex->token_count++] = {Token_Kind::CLOSE_PAREN, i, 1};
                 i += 1;
             } break;
             case ',':
             {
-                lex->tokens[lex->count++] = {Token_Kind::COMMA, i, 1};
+                lex->tokens[lex->token_count++] = {Token_Kind::COMMA, i, 1};
                 i += 1;
             } break;
             case ';':
             {
-                lex->tokens[lex->count++] = {Token_Kind::SEMICOLON, i, 1};
+                lex->tokens[lex->token_count++] = {Token_Kind::SEMICOLON, i, 1};
                 i += 1;
             } break;
             default:
@@ -229,11 +194,11 @@ static Errcode tokenize(Arena *arena, Lexer *lex, char *input, u32 input_length)
                 }
                 if (is_alpha(input[i]))
                 {
-                    fprintf(stderr, "ERROR: invalid numeric literal\n");
-                    print_error_here(lex->data, lex->data_length, i);
+                    String err_msg = string_from_cstr(arena, "invalid numeric literal");
+                    report_error_here(err_msg, i);
                     return 1;
                 }
-                lex->tokens[lex->count++] = token;
+                lex->tokens[lex->token_count++] = token;
             }
             else if (is_alpha(input[i]))
             {
@@ -245,22 +210,20 @@ static Errcode tokenize(Arena *arena, Lexer *lex, char *input, u32 input_length)
                     token.count += 1;
                     i += 1;
                 }
-                lex->tokens[lex->count++] = token;
+                lex->tokens[lex->token_count++] = token;
             }
             else
             {
-                fprintf(stderr, "ERROR: unrecognized input %c\n", input[i]);
-                print_error_here(lex->data, lex->data_length, i);
+                String err_msg = tprintf_string(arena, "unrecognized input %c", input[i]);
+                report_error_here(err_msg, i);
                 return 1;
             }
         }
-
-
     }
     
-    lex->tokens[lex->count++] = {Token_Kind::END, 0, 0};
+    lex->tokens[lex->token_count++] = {Token_Kind::END, 0, 0};
 
-    assert(lex->count <= token_capacity);
+    assert(lex->token_count <= token_capacity);
 
     return 0;
 }
@@ -392,7 +355,7 @@ static void graphviz_from_tree(Arena *arena, Node *tree, Lexer *lex)
         fprintf(f, "n%llu [label=\"%s", (usize)top, str_from_node_kind(top->kind));
         switch (top->kind)
         {
-            case Node_Kind::OPEN_PAREN: todo();
+            case Node_Kind::OPEN_PAREN: assert(false);
             case Node_Kind::INVALID:
             case Node_Kind::POSITIVE:
             case Node_Kind::NEGATE:
@@ -596,7 +559,7 @@ static Node_Kind node_kind_from_token(Token next, Token curr, Token last)
     return kind;
 }
 
-static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_count, const Lexer *lex)
+static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_count, Arena *arena, const Lexer *lex)
 {
     if (op->kind == Node_Kind::POSITIVE || op->kind == Node_Kind::NEGATE)
     {
@@ -607,8 +570,9 @@ static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_
     {
         if (*output_count < 2)
         {
-            fprintf(stderr, "ERROR: expected 2 args but got %u\n", *output_count);
-            print_error_here_token(lex, op->token_index);
+
+            String err_msg = tprintf_string(arena, "expected 2 args but got %u", *output_count);
+            report_error_here(err_msg, lex->tokens[op->token_index].data_index);
             return 1;
         }
         init_bin_node(op, output_stack, output_count);
@@ -622,8 +586,9 @@ static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_
     }
     else
     {
-        fprintf(stderr, "ERROR: unhandled operator %s\n", str_from_node_kind(op->kind));
-        print_error_here_token(lex, op->token_index);
+
+        String err_msg = tprintf_string(arena, "unhandled operator %s", str_from_node_kind(op->kind));
+        report_error_here(err_msg, lex->tokens[op->token_index].data_index);
         return 1;
     }
     return 0;
@@ -670,7 +635,7 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
                         (p_next->precendence == p_op->precendence && !p_next->right_associative)
                     )
                     {
-                        if (make_node_from_output(op, output_stack, output_count, lex))
+                        if (make_node_from_output(op, output_stack, output_count, arena, lex))
                         {
                             return 1;
                         }
@@ -693,8 +658,8 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
             {
                 if (next.kind == Token_Kind::CLOSE_PAREN)
                 {
-                    fprintf(stderr, "ERROR: cannot have empty parenthesis pair\n");
-                    print_error_here(lex->data, lex->data_length, curr.data_index);
+                    String err_msg = string_from_cstr(arena, "cannot have empty parenthesis pair");
+                    report_error_here(err_msg, curr.data_index);
                     return 1;
                 }
                 Node *node = alloc(arena, Node, 1);
@@ -706,8 +671,8 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
             {
                 if (operator_count == 0)
                 {
-                    fprintf(stderr, "ERROR: unmatched parenthesis\n");
-                    print_error_here(lex->data, lex->data_length, curr.data_index);
+                    String err_msg = string_from_cstr(arena, "unmatched parenthesis");
+                    report_error_here(err_msg, curr.data_index);
                     return 1;
                 }
                 while (operator_count != 0)
@@ -721,12 +686,12 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
                     }
                     else if (operator_count == 0)
                     {
-                        fprintf(stderr, "ERROR: unmatched parenthesis\n");
-                        print_error_here(lex->data, lex->data_length, curr.data_index);
+                        String err_msg = string_from_cstr(arena, "unmatched parenthesis");
+                        report_error_here(err_msg, curr.data_index);
                         return 1;
                     }
 
-                    if (make_node_from_output(op, output_stack, output_count, lex))
+                    if (make_node_from_output(op, output_stack, output_count, arena, lex))
                     {
                         return 1;
                     }
@@ -735,8 +700,8 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
             } break;
             case Token_Kind::EQUAL:
             {
-                fprintf(stderr, "ERROR: equals cannot be in arithmetic expressions\n");
-                print_error_here(lex->data, lex->data_length, curr.data_index);
+                String err_msg = string_from_cstr(arena, "equals cannot be in arithmetic expressions");
+                report_error_here(err_msg, curr.data_index);
                 return 1;
             } break;
             case Token_Kind::NUMBER:
@@ -779,13 +744,13 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
 
         if (op->kind == Node_Kind::OPEN_PAREN)
         {
-            fprintf(stderr, "ERROR: Missing closing paren for this opening\n");
-            print_error_here_token(lex, op->token_index);
+            String err_msg = string_from_cstr(arena, "Missing closing paren for this opening");
+            report_error_here(err_msg, lex->tokens[op->token_index].data_index);
             return 1;
         }
 
 
-        if (make_node_from_output(op, output_stack, output_count, lex))
+        if (make_node_from_output(op, output_stack, output_count, arena, lex))
         {
             return 1;
         }
@@ -805,7 +770,7 @@ static Node *parse(Arena *arena, Lexer *lex)
     while (lex->tokens[lex->index].kind != Token_Kind::END)
     {
         s64 equal_index = -1;
-        for (s64 i = lex->index; i < lex->count && lex->tokens[i].kind != Token_Kind::SEMICOLON; ++i) 
+        for (s64 i = lex->index; i < lex->token_count && lex->tokens[i].kind != Token_Kind::SEMICOLON; ++i) 
         {
             Token *t = lex->tokens + i;
             if (t->kind == Token_Kind::EQUAL)
@@ -824,7 +789,9 @@ static Node *parse(Arena *arena, Lexer *lex)
 
             if (id.kind != Token_Kind::IDENTIFIER)
             {
-                todo();
+                String s = string_from_cstr(arena, "Cannot assign to non identifiers");
+                report_error_here(s, id.data_index);
+                return nullptr;
             }
             u32 token_index = lex->index;
             lex->index += 1;
@@ -855,9 +822,17 @@ static Node *parse(Arena *arena, Lexer *lex)
                     Token var = peek_token(lex);
 
                     if (var.kind != Token_Kind::IDENTIFIER)
-                        todo();
+                    {
+                        String s = string_from_cstr(arena, "Expected identifiers in function declaration parameters");
+                        report_error_here(s, var.data_index);
+                        return nullptr;
+                    }
                     if (func_params > MAX_PARAMETER_COUNT)
-                        todo();
+                    {
+                        String s = tprintf_string(arena, "Cannot have more than %llu parameters", MAX_PARAMETER_COUNT);
+                        report_error_here(s, var.data_index);
+                        return nullptr;
+                    }
 
 
                     Node *n = alloc(arena, Node, 1);
@@ -879,8 +854,8 @@ static Node *parse(Arena *arena, Lexer *lex)
                     }
                     else
                     {
-                        fprintf(stderr, "ERROR: expected , or )\n");
-                        print_error_here_token(lex, lex->index);
+                        String err_msg = string_from_cstr(arena, "expected , or )");
+                        report_error_here(err_msg, lex->tokens[lex->index].data_index);
                         return nullptr;
                     }
                 }
@@ -900,8 +875,10 @@ static Node *parse(Arena *arena, Lexer *lex)
                 lex->index += 1;
                 if (peek_token(lex).kind != Token_Kind::EQUAL)
                 {
-                    fprintf(stderr, "ERROR: expected =\n");
-                    print_error_here_token(lex, lex->index);
+                    u32 error_index = lex->tokens[lex->index].data_index;
+                    String err_msg = string_from_cstr(arena, "expected =");
+                    report_error_here(err_msg, error_index);
+
                     return nullptr;
 
                 }
@@ -917,7 +894,11 @@ static Node *parse(Arena *arena, Lexer *lex)
             }
             else
             {
-                todo();
+                u32 error_index = lex->tokens[lex->index].data_index;
+                String err_msg = string_from_cstr(arena, "Operators cannot preced = in declaration");
+                report_error_here(err_msg, error_index);
+
+                return nullptr;
             }
         }
         else
@@ -1312,8 +1293,9 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
                     s64 index = get_symbol_index_by_name(lex->data + token->data_index, token->count, symbols, symbol_count, active_scope);
                     if (index == -1)
                     {
-                        // function not found
-                        todo();
+                        String s = tprintf_string(arena, "Undeclared function %.*s", token->count, lex->data + token->data_index);
+                        report_error_here(s, token->data_index);
+                        return 1;
                     }
 
                     if (symbols[index].type == Symbol_Type::BUILTIN_FUNC)
@@ -1340,7 +1322,9 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
                     if (index != -1)
                     {
                         // function already defined
-                        todo();
+                        String s = tprintf_string(arena, "Function %.*s already defined", token->count, lex->data + token->data_index);
+                        report_error_here(s, token->data_index);
+                        return 1;
                     }
 
                     Symbol s = {};
@@ -1374,7 +1358,9 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
                     if (index == -1)
                     {
                         // could not find variable
-                        todo();
+                        String s = tprintf_string(arena, "Undeclared variable %.*s", (int)token->count, lex->data + token->data_index);
+                        report_error_here(s, token->data_index);
+                        return 1;
                     }
 
                     Op op = {};
@@ -1419,8 +1405,10 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
 
                     if (index != -1)
                     {
-                        // trying to use already defined variable in global scope
-                        todo();
+                        // trying to define already defined variable in global scope
+                        String s = tprintf_string(arena, "%.*s is already defined", (int)symbols[index].name_len, symbols[index].name);
+                        report_error_here(s, token->data_index);
+                        return 1;
                     }
                     
 
@@ -1566,7 +1554,13 @@ static u32 pop_u32(u8 *stack, u32 *stack_top)
     return val;
 }
 
-static void execute_ops(Arena *arena, Ops ops)
+struct Result
+{
+    u32 value_count;
+    f64 *values;
+};
+
+static Result execute_ops(Arena *arena, Ops ops)
 {
 
     u8 *val_stack = alloc(arena, u8, 8192);
@@ -1581,7 +1575,6 @@ static void execute_ops(Arena *arena, Ops ops)
     for (u32 i = ops.entry; running;)
     {
         Op *op = ops.data + i;
-
 
         switch (op->type)
         {
@@ -1638,7 +1631,7 @@ static void execute_ops(Arena *arena, Ops ops)
                         f64 n1 = pop_f64(val_stack, &val_stack_top);
                         push_f64(val_stack, &val_stack_top, f->func(n1));
                     } break;
-                    default: todo();
+                    default: assert(false && "add extra params for builtins");
                 }
                 
                 i += 1;
@@ -1689,7 +1682,7 @@ static void execute_ops(Arena *arena, Ops ops)
             default:
             {
                 fprintf(stderr, "ERROR: Illegal operator\n");
-                exit(1);
+                assert(false);
             } break;
         }
     }
@@ -1700,8 +1693,7 @@ static void execute_ops(Arena *arena, Ops ops)
         printf("%g\n", *(f64 *)(val_stack + i));
     }
 
-    // printf("val_stack_top %d\n", val_stack_top);
-    // assert(val_stack_top == sizeof(f64));
+    return {val_stack_top / (u32)sizeof(f64), (f64 *)val_stack};
 }
 
 
@@ -1739,12 +1731,12 @@ static void fprint_ops(Ops ops, FILE *f)
     }
 }
 
-Err compile(Arena *arena, char *input, u32 input_len, Ops *out_ops)
+Errcode compile(Arena *arena, char *input, u32 input_len, Ops *out_ops)
 {
-    Err err = {};
+    int err = 0;
     Lexer lexer = {};
     err = tokenize(arena, &lexer, input, input_len);
-    if (err.err)
+    if (err)
         return err;
 
 
@@ -1760,7 +1752,7 @@ Err compile(Arena *arena, char *input, u32 input_len, Ops *out_ops)
     err = bytecode_from_tree(arena, out_ops, tree, &lexer);
     if (err)
         return err;
-2
+
     fprint_ops(*out_ops, stdout);
 
     return err;

@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <stdarg.h>
+
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
@@ -22,7 +24,10 @@ typedef double f64;
 
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof(*(x)))
 
-
+#ifndef __GNUG__
+#define __attribute__(x)
+#define __format__(x)
+#endif
 
 #if __has_builtin(__builtin_debugtrap)
 #else
@@ -58,15 +63,64 @@ static bool is_whitespace(char c)
     }
     return false;
 }
-
-#include "parse.cpp"
-
-
 struct String
 {
     char *data;
     usize len;
 };
+
+static String string_from_cstr(Arena *arena, const char *cstr)
+{
+    String s = {};
+
+    s.len = strlen(cstr);
+    s.data = alloc(arena, char, s.len);
+
+    memcpy(s.data, cstr, s.len);
+
+    return s;
+}
+
+__attribute__((__format__ (__printf__, 2, 3)))
+static char *tprintf(Arena *arena, const char *format, ...) 
+{
+    va_list args;
+    va_start(args, format);
+    int len_ = vsnprintf(nullptr, 0, format, args);   
+    assert(len_ > 0);
+    usize len = (usize) len_;
+    
+
+    char *d = alloc(arena, char, len + 1);
+    vsnprintf(d, len + 1, format, args);   
+    va_end(args);
+    return d;
+}
+
+__attribute__((__format__ (__printf__, 2, 3)))
+static String tprintf_string(Arena *arena, const char *format, ...) 
+{
+    va_list args;
+    va_start(args, format);
+    int len_ = vsnprintf(nullptr, 0, format, args);   
+    assert(len_ > 0);
+    usize len = (usize) len_;
+    
+
+    char *d = alloc(arena, char, len + 1);
+    vsnprintf(d, len + 1, format, args);   
+    va_end(args);
+
+
+    String s = {};
+    s.data = d;
+    s.len = len;
+    return s;
+}
+
+#include "parse.cpp"
+
+
 
 // static s32 min(s32 a, s32 b)
 // {
@@ -1080,12 +1134,39 @@ int main()
                 clear_arena(&compile_arena);
                 String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 10);
                 Ops ops;
-                Err err = compile(&compile_arena, s.data, (u32)s.len, &ops);
-                if (err.err)
+                int err = compile(&compile_arena, s.data, (u32)s.len, &ops);
+                if (err)
                 {
+                    Error e = get_error();
 
+                    u32 expr_index = 0;
+                    for (u32 j = 0; j < s.len && j < e.errs[0].error_index; ++j)
+                    {
+                        if (s.data[j] == ';')   
+                        {
+                            expr_index += 1;
+                        }
+                    }
+                    String err_str = e.errs[0].msg;
+
+                    assert(expr_index < 10);
+                    memset(output_buf[expr_index], 0, 32);
+                    memcpy(output_buf[expr_index], err_str.data, err_str.len < 31 ? err_str.len : 31);
                 }
-                execute_ops(&compile_arena, ops);
+                else
+                {
+                    Result r = execute_ops(&compile_arena, ops);
+
+                    
+                    for (u32 j = 0; j < r.value_count; ++j)
+                    {
+                        if (isnan(r.values[j]))
+                            continue;
+                        String val_str = tprintf_string(&compile_arena, "%g", r.values[j]);
+                        memset(output_buf[j], 0, 32);
+                        memcpy(output_buf[j], val_str.data, val_str.len);
+                    }
+                }
                 printf("input_buf%zu: %.*s\n", i, (int)text_input_size, input_buf[i]);
             }
             text_output(output_buf[i], text_input_size, text_w, 20);
