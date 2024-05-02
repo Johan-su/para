@@ -3,13 +3,13 @@
 
 struct Arena
 {
-    u32 pos;
-    u32 max_capacity;
+    usize pos;
+    usize max_capacity;
     u8 *data;
 };
 
 
-static void init_arena(Arena *arena, u32 max_capacity)
+static void init_arena(Arena *arena, usize max_capacity)
 {
     arena->pos = 0;
     arena->data = (u8 *)calloc(max_capacity, 1);
@@ -42,7 +42,7 @@ static void *alloc_arena(Arena *arena, usize byte_amount)
     memset(p, 0, byte_amount);
 
     arena->pos += byte_amount;
-    arena->pos = (u32)align_to_8_boundry((u32)arena->pos);
+    arena->pos = align_to_8_boundry(arena->pos);
 
     return (void *)p;
 }
