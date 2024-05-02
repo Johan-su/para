@@ -251,28 +251,14 @@ enum Node_Kind
 };
 
 
-#define MAX_SUBNODES 8
-#define MAX_PARAMETER_COUNT (MAX_SUBNODES - 1)
-
 struct Node
 {
     Node_Kind kind;
 
-    union
-    {
-        struct
-        {
-            union
-            {
-                Node *left;
-                Node *next;
-            };
-            Node *right;
 
-        };
-        Node *nodes[MAX_SUBNODES];
-    };
 
+    u32 node_count;
+    Node **nodes;
 
 
     u32 token_index;
@@ -385,7 +371,7 @@ static void graphviz_from_tree(Arena *arena, Node *tree, Lexer *lex)
         }
         fprintf(f, "\"];\n");
 
-        for (u32 i = 0; i < ARRAY_SIZE(top->nodes); ++i)
+        for (u32 i = 0; i < top->node_count; ++i)
         {
             Node *n = top->nodes[i];
             if (n != nullptr)
@@ -459,22 +445,37 @@ static Node *pop_sub_node(Node **s, u32 *size)
 
 
 
-static void init_bin_node(Node *bin, Node **stack, u32 *stack_len)
+static void init_bin_node(Node *bin, Node **stack, u32 *stack_len, Arena *arena)
 {
-    bin->right = pop_sub_node(stack, stack_len);
-    bin->left = pop_sub_node(stack, stack_len);
+    u32 node_count = 2;
+    bin->nodes = alloc(arena, Node *, node_count);
+    bin->node_count = node_count;
+
+
+    bin->nodes[1] = pop_sub_node(stack, stack_len);
+    bin->nodes[0] = pop_sub_node(stack, stack_len);
 }
 
 
-static void init_unary_node(Node *bin, Node **stack, u32 *stack_len)
+static void init_unary_node(Node *bin, Node **stack, u32 *stack_len, Arena *arena)
 {
-    bin->next = pop_sub_node(stack, stack_len);
+    u32 node_count = 1;
+    bin->nodes = alloc(arena, Node *, node_count);
+    bin->node_count = node_count;
+
+
+    bin->nodes[0] = pop_sub_node(stack, stack_len);
 }
 
 
-static void init_function_node(Node *bin, Node **stack, u32 *stack_len)
+static void init_function_node(Node *bin, Node **stack, u32 *stack_len, Arena *arena)
 {
-    bin->next = pop_sub_node(stack, stack_len);
+    u32 node_count = 1;
+    bin->nodes = alloc(arena, Node *, node_count);
+    bin->node_count = node_count;
+
+
+    bin->nodes[0] = pop_sub_node(stack, stack_len);
 }
 
 
@@ -563,7 +564,7 @@ static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_
 {
     if (op->kind == Node_Kind::POSITIVE || op->kind == Node_Kind::NEGATE)
     {
-        init_unary_node(op, output_stack, output_count);
+        init_unary_node(op, output_stack, output_count, arena);
         output_stack[(*output_count)++] = op;
     }
     else if (is_binary(op->kind))
@@ -575,12 +576,12 @@ static Errcode make_node_from_output(Node *op, Node **output_stack, u32 *output_
             report_error_here(err_msg, lex->tokens[op->token_index].data_index);
             return 1;
         }
-        init_bin_node(op, output_stack, output_count);
+        init_bin_node(op, output_stack, output_count, arena);
         output_stack[(*output_count)++] = op;
     }
     else if (op->kind == Node_Kind::FUNCTION)
     {
-        init_function_node(op, output_stack, output_count);
+        init_function_node(op, output_stack, output_count, arena);
         output_stack[(*output_count)++] = op;
         // pop is_function
     }
@@ -810,7 +811,9 @@ static Node *parse(Arena *arena, Lexer *lex)
 
                 def->kind = Node_Kind::VARIABLEDEF;
                 def->token_index = token_index;
-                def->next = output_stack[--output_count];
+                def->node_count = 1;
+                def->nodes = alloc(arena, Node *, 1);
+                def->nodes[0] = output_stack[--output_count];
                 output_stack[output_count++] = def;
             }
             else if (equal_or_open.kind == Token_Kind::OPEN_PAREN)
@@ -827,21 +830,14 @@ static Node *parse(Arena *arena, Lexer *lex)
                         report_error_here(s, var.data_index);
                         return nullptr;
                     }
-                    if (func_params > MAX_PARAMETER_COUNT)
-                    {
-                        String s = tprintf_string(arena, "Cannot have more than %llu parameters", MAX_PARAMETER_COUNT);
-                        report_error_here(s, var.data_index);
-                        return nullptr;
-                    }
-
 
                     Node *n = alloc(arena, Node, 1);
                     n->kind = Node_Kind::PARAM;
                     n->token_index = lex->index;
 
                     output_stack[output_count++] = n;
-
                     func_params += 1;
+
                     lex->index += 1;
                     Token comma_or_close = peek_token(lex);
                     if (comma_or_close.kind == Token_Kind::COMMA)
@@ -859,11 +855,13 @@ static Node *parse(Arena *arena, Lexer *lex)
                         return nullptr;
                     }
                 }
-
+                // make func def
                 Node *def = alloc(arena, Node, 1);
                 def->kind = Node_Kind::FUNCTIONDEF;
+                def->node_count = func_params + 1;
+                def->nodes = alloc(arena, Node *, def->node_count);
                 def->token_index = token_index;
-                for (u32 i = MAX_PARAMETER_COUNT; i-- > 0 && output_count > 0;)
+                for (u32 i = func_params; i-- > 0;)
                 {   
                     Node *n = output_stack[output_count - 1];
                     if (n->kind != Node_Kind::PARAM)
@@ -888,14 +886,14 @@ static Node *parse(Arena *arena, Lexer *lex)
                 if (err)
                     return nullptr;
 
-                def->nodes[MAX_PARAMETER_COUNT] = output_stack[--output_count];
+                def->nodes[def->node_count - 1] = output_stack[--output_count];
                 output_stack[output_count++] = def;
 
             }
             else
             {
                 u32 error_index = lex->tokens[lex->index].data_index;
-                String err_msg = string_from_cstr(arena, "Operators cannot preced = in declaration");
+                String err_msg = string_from_cstr(arena, "Operators cannot preceed '=' in declaration");
                 report_error_here(err_msg, error_index);
 
                 return nullptr;
@@ -903,6 +901,16 @@ static Node *parse(Arena *arena, Lexer *lex)
         }
         else
         {
+            Token t = peek_token(lex);
+            if (t.kind == Token_Kind::SEMICOLON)
+            {
+                lex->index += 1;
+                Node *expr = alloc(arena, Node, 1);
+                expr->kind = Node_Kind::EXPR;
+                output_stack[output_count++] = expr;
+                continue;
+            }
+
             Node *expr = alloc(arena, Node, 1);
             expr->kind = Node_Kind::EXPR;
             int err = parse_arithmetic(arena, lex, output_stack, &output_count, flag_stack, &flag_count);
@@ -910,22 +918,22 @@ static Node *parse(Arena *arena, Lexer *lex)
                 return nullptr;
             
             Node *arith = output_stack[--output_count];
-            expr->next = arith;
+            expr->node_count = 1;
+            expr->nodes = alloc(arena, Node *, 1);
+            expr->nodes[0] = arith;
             output_stack[output_count++] = expr;
 
         }
 
     }
-    assert(output_count < 8);
 
     Node *n = alloc(arena, Node, 1);
     n->kind = Node_Kind::PROGRAM;
+    n->nodes = alloc(arena, Node *, output_count);
+    n->node_count = output_count;
 
-    for (u32 i = ARRAY_SIZE((*output_stack)->nodes) - 1; i-- > 0;)
+    for (u32 i = n->node_count; i-- > 0;)
     {
-        if (output_count == 0)
-            break;
-
         n->nodes[i] = output_stack[--output_count];
     }
 
@@ -1004,6 +1012,7 @@ enum class Op_Type
     POW,
 
     BUILTIN_FUNC,
+    APPEND_TO_RESULT,
     CALL,
     PUSHI,
     MOVE,
@@ -1015,7 +1024,6 @@ const char *str_from_op_type(Op_Type t)
 {
     switch (t)
     {
-
         case Op_Type::INVALID: return "INVALID";
         case Op_Type::ADD: return "ADD";
         case Op_Type::SUB: return "SUB";
@@ -1024,6 +1032,7 @@ const char *str_from_op_type(Op_Type t)
         case Op_Type::MUL: return "MUL";
         case Op_Type::POW: return "POW";
         case Op_Type::BUILTIN_FUNC: return "BUILTIN_FUNC";
+        case Op_Type::APPEND_TO_RESULT: return "APPEND_TO_RESULT";
         case Op_Type::CALL: return "CALL";
         case Op_Type::PUSHI: return "PUSHI";
         case Op_Type::MOVE: return "MOVE";
@@ -1219,7 +1228,7 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
                 }
 
 
-                for (u32 i = 0; i < ARRAY_SIZE(active->nodes); ++i)
+                for (u32 i = 0; i < active->node_count; ++i)
                 {
 
                     if (active->nodes[i] != nullptr && !is_visited(post_list, post_list_count, active->nodes[i]))
@@ -1336,7 +1345,7 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
                     s.index = active_index;
 
                     u32 count = 0;
-                    for (u32 i = ARRAY_SIZE(active->nodes) - 1; i-- > 0;)
+                    for (u32 i = active->node_count - 1; i-- > 0;)
                     {
                         if (active->nodes[i] != nullptr)
                             count += 1;
@@ -1459,7 +1468,7 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
     // assert(index_ != -1);
     // u32 index = (u32)index_;
 
-
+    u32 index = 0;
     u32 entry = ops_count;
     for (u32 i = 0;  i < symbol_count; ++i)
     {
@@ -1469,30 +1478,35 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
         switch (symbols[i].type)
         {
 
-            case Symbol_Type::INVALID:
             case Symbol_Type::BUILTIN_FUNC:
             case Symbol_Type::BUILTIN_VAR:
+            case Symbol_Type::INVALID:
             {
-                // do nothing
+                // do nothing    
             } break;
             case Symbol_Type::FUNCTION:
             {
-                Op op = {};
-                op.type = Op_Type::PUSHI;
-                op.val = NAN;
-                ops[ops_count++] = op;
+                index += 1;
             } break;
             case Symbol_Type::VARIABLE:
             case Symbol_Type::EXPR:
             {
+
+
                 Op op = {};
                 op.type = Op_Type::CALL;
                 op.index = symbols[i].index;
                 op.arg_count = 0;
                 ops[ops_count++] = op;
+                
+                op = {};
+
+                op.type = Op_Type::APPEND_TO_RESULT;
+                op.index = index;
+                ops[ops_count++] = op;
+                index += 1;
             } break;
         }
-
         // op = {};
         // op.type = Op_Type::BUILTIN_FUNC;
         // op.index = index;
@@ -1556,8 +1570,9 @@ static u32 pop_u32(u8 *stack, u32 *stack_top)
 
 struct Result
 {
-    u32 value_count;
-    f64 *values;
+    u32 result_count;
+    u32 *result_indicies;
+    f64 *result;
 };
 
 static Result execute_ops(Arena *arena, Ops ops)
@@ -1568,6 +1583,14 @@ static Result execute_ops(Arena *arena, Ops ops)
 
     u8 *call_stack = alloc(arena, u8, 8192);
     u32 call_count = 0;
+
+
+    f64 *result = alloc(arena, f64, 128);
+    u32 *result_indicies = alloc(arena, u32, 128);
+
+    u32 result_count = 0;
+
+
 
     u32 frame_index = 0;
 
@@ -1636,6 +1659,19 @@ static Result execute_ops(Arena *arena, Ops ops)
                 
                 i += 1;
             } break;
+
+            case Op_Type::APPEND_TO_RESULT:
+            {
+                if (val_stack_top != 0)
+                {
+                    result[result_count] = pop_f64(val_stack, &val_stack_top);
+                    result_indicies[result_count] = op->index;
+                    result_count += 1;
+                }
+
+                i += 1;
+            } break;
+
             case Op_Type::CALL:
             {
                 push_u32(call_stack, &call_count, i + 1);
@@ -1679,12 +1715,15 @@ static Result execute_ops(Arena *arena, Ops ops)
                 i = ret;
             } break;
 
+
+            #ifndef _DEBUG
             default:
             {
                 fprintf(stderr, "ERROR: Illegal operator\n");
                 assert(false);
             } break;
-        }
+            #endif
+        }   
     }
 
     for (u32 i = 0; i < val_stack_top; i += sizeof(f64))
@@ -1693,7 +1732,11 @@ static Result execute_ops(Arena *arena, Ops ops)
         printf("%g\n", *(f64 *)(val_stack + i));
     }
 
-    return {val_stack_top / (u32)sizeof(f64), (f64 *)val_stack};
+    Result r = {};
+    r.result = result;
+    r.result_indicies = result_indicies;
+    r.result_count = result_count;
+    return r;
 }
 
 
@@ -1719,6 +1762,7 @@ static void fprint_ops(Ops ops, FILE *f)
                 fprintf(f, "index %llu: %s, 0x%X, args %u\n", i, str_from_op_type(ops.data[i].type), ops.data[i].index, ops.data[i].arg_count);
             } break;
             case Op_Type::MOVE:
+            case Op_Type::APPEND_TO_RESULT:
             case Op_Type::BUILTIN_FUNC:
             {
                 fprintf(f, "index %llu: %s, 0x%X\n", i, str_from_op_type(ops.data[i].type), ops.data[i].index);
@@ -1759,9 +1803,21 @@ Errcode compile(Arena *arena, char *input, u32 input_len, Ops *out_ops)
 }
 
 
+static void print_lexer(const Lexer *lex)
+{
+    printf("index: %u\n", lex->index);
+    printf("data: %.*s\n", (int)lex->data_length, lex->data);
+
+    for (u32 i = 0;  i < lex->token_count; ++i)
+    {
+        Token t = lex->tokens[i];
+        printf("token: %s from %.*s\n", str_from_token_kind(t.kind), (int)t.count, lex->data + t.data_index);
+    }
+}
+
+
 int test(void)
 {
-
     Arena temp_arena; init_arena(&temp_arena, 1000000);
     bool running = true;
     while (running)
@@ -1780,10 +1836,8 @@ int test(void)
         // char input[] = "1+(2)--3";
 
         char input[] = 
-            "x = 5;\n"
-            "y(x) = 5;\n"
-            "f(x)=y(5+5)*(x*e);\n"
-            "f(x) - f(x) + e^x;"
+            "x = 5;"
+            "f(x, y) = x*y;"
         ;
         // char input[] = "5 * 5";
         // char input[] = "x = 5 * y";
@@ -1799,6 +1853,8 @@ int test(void)
         {
             continue;
         }
+
+        print_lexer(&lexer);
 
         Node *tree = parse(&temp_arena, &lexer);
         if (tree == nullptr)

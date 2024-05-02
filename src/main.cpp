@@ -6,6 +6,10 @@
 
 #include <stdarg.h>
 
+
+
+// TODO: fix bug with error text output
+
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
@@ -63,6 +67,7 @@ static bool is_whitespace(char c)
     }
     return false;
 }
+
 struct String
 {
     char *data;
@@ -1003,13 +1008,44 @@ static void end_ui()
 
 
 
+// static String concat_and_add_semicolon_at_the_end_of_every_substr(Arena *arena, char **strs, u32 *lens, u32 string_count)
+// {
+//     String str = {};
+
+//     for (u32 i = 0; i < string_count; ++i)
+//     {
+//         if (lens[i] > 0)
+//         {
+//             // + 1 memory for semicolon
+//             str.len += lens[i] + 1;
+//         }
+//     } 
+//     str.data = alloc(arena, char, str.len);
+
+
+//     u32 offset = 0;
+//     for (u32 i = 0; i < string_count; ++i)
+//     {
+//         memcpy(str.data + offset, strs[i], lens[i]);
+//         if (lens[i] > 0)
+//         {
+//             str.data[lens[i] + offset] = ';';
+//             offset += 1;
+//         }
+//         offset += lens[i];
+//     } 
+
+
+//     return str;
+// }
+
+
 static String concat_and_add_semicolon_at_the_end_of_every_substr(Arena *arena, char **strs, u32 *lens, u32 string_count)
 {
     String str = {};
 
     for (u32 i = 0; i < string_count; ++i)
     {
-        if (lens[i] > 0)
         {
             // + 1 memory for semicolon
             str.len += lens[i] + 1;
@@ -1022,7 +1058,6 @@ static String concat_and_add_semicolon_at_the_end_of_every_substr(Arena *arena, 
     for (u32 i = 0; i < string_count; ++i)
     {
         memcpy(str.data + offset, strs[i], lens[i]);
-        if (lens[i] > 0)
         {
             str.data[lens[i] + offset] = ';';
             offset += 1;
@@ -1034,12 +1069,10 @@ static String concat_and_add_semicolon_at_the_end_of_every_substr(Arena *arena, 
     return str;
 }
 
-
-
-
-
 int main()
 {
+    // test();
+    // return 0;
     int fps = 60;
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(1366, 768, "test");
@@ -1052,12 +1085,12 @@ int main()
 
 
     //TODO: horizontal scrolling
-    char *input_buf[10] = {};
-    char *output_buf[10] = {};
+    char *input_buf[8] = {};
+    char *output_buf[8] = {};
 
     s32 text_input_size = 32;
 
-    for (u32 i = 0; i < 10; ++i)
+    for (u32 i = 0; i < 8; ++i)
     {
         usize a = (usize)text_input_size;
         input_buf[i] = alloc(&temp_arena, char, a);
@@ -1132,7 +1165,7 @@ int main()
             {
                 lens[i] = result.len;
                 clear_arena(&compile_arena);
-                String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 10);
+                String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 8);
                 Ops ops;
                 int err = compile(&compile_arena, s.data, (u32)s.len, &ops);
                 if (err)
@@ -1149,7 +1182,7 @@ int main()
                     }
                     String err_str = e.errs[0].msg;
 
-                    assert(expr_index < 10);
+                    assert(expr_index < 8);
                     memset(output_buf[expr_index], 0, 32);
                     memcpy(output_buf[expr_index], err_str.data, err_str.len < 31 ? err_str.len : 31);
                 }
@@ -1158,13 +1191,12 @@ int main()
                     Result r = execute_ops(&compile_arena, ops);
 
                     
-                    for (u32 j = 0; j < r.value_count; ++j)
+                    for (u32 j = 0; j < r.result_count; ++j)
                     {
-                        if (isnan(r.values[j]))
-                            continue;
-                        String val_str = tprintf_string(&compile_arena, "%g", r.values[j]);
-                        memset(output_buf[j], 0, 32);
-                        memcpy(output_buf[j], val_str.data, val_str.len);
+                        String val_str = tprintf_string(&compile_arena, "%g", r.result[j]);
+
+                        memset(output_buf[r.result_indicies[j]], 0, 32);
+                        memcpy(output_buf[r.result_indicies[j]], val_str.data, val_str.len);
                     }
                 }
                 printf("input_buf%zu: %.*s\n", i, (int)text_input_size, input_buf[i]);
