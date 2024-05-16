@@ -115,6 +115,8 @@ static void report_error_here(String err_msg, u32 error_index)
 static Errcode tokenize(Arena *arena, Lexer *lex, char *input, u32 input_length)
 {
     memset(lex, 0, sizeof(*lex));
+    memset(g_err, 0 , sizeof(g_err));
+    g_err_count = 0;
 
     u64 token_capacity = 1 + 2 * input_length;
     lex->tokens = alloc(arena, Token, token_capacity);
