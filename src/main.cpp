@@ -185,6 +185,7 @@ enum UI_Flags : u64
     UI_Flags_brighten_background_when_hot    = (1 << 8),
     UI_Flags_brighten_background_when_active = (1 << 9),
     UI_Flags_horizontal_scroll               = (1 << 10),
+    UI_Flags_draw_samples                    = (1 << 11),
 };
 
 struct UI_Element
@@ -195,6 +196,9 @@ struct UI_Element
     s32 index;
     s32 parent_index;
 
+
+    f32 *data;
+    s32 data_cap;
 
     s32 text_cursor_index;
     char *text;
@@ -394,7 +398,9 @@ static void end_children()
 
 static UI_Element create_push_element(
     u32 flags, 
-    u64 id, 
+    u64 id,
+    f32 *data,
+    s32 data_cap,
     char *text,
     s32 text_capacity, 
     Color background_color,
@@ -408,6 +414,9 @@ static UI_Element create_push_element(
     e.id = id;
     e.index = element_count;
     e.parent_index = parent.index;
+
+    e.data = data;
+    e.data_cap = data_cap;
 
     const UI_Element *le = last_stack + element_count;
 
@@ -468,6 +477,7 @@ static UI_Result button(char *buf, s32 buf_size, s32 w, s32 h)
         UI_Flags_draw_border|
         UI_Flags_draw_text,
         (u64) buf, 
+        nullptr, 0,
         buf, buf_size, 
         ColorFromHSV(236.0f, 0.45f, 0.45f), 
         w, h
@@ -487,6 +497,7 @@ static UI_Result dropdown_menu(char *buf, s32 buf_size, s32 w, s32 h)
         UI_Flags_draw_border|
         UI_Flags_draw_text,
         (u64) buf, 
+        nullptr, 0,
         buf, buf_size, 
         ColorFromHSV(236.0f, 0.45f, 0.45f), 
         w, h
@@ -506,6 +517,7 @@ static UI_Result text_output(char *buf, s32 buf_size, s32 w, s32 h)
     UI_Element e = create_push_element(
         UI_Flags_draw_text|UI_Flags_draw_background|UI_Flags_draw_border,
         (u64) buf,
+        nullptr, 0,
         buf,
         buf_size,
         ColorFromHSV(236.0f, 0.45f, 0.45f),
@@ -527,8 +539,28 @@ static UI_Result text_input(char *buf, s32 buf_size, s32 w, s32 h)
         UI_Flags_draw_border|
         UI_Flags_brighten_background_when_hot,
         (u64) buf,
+        nullptr, 0,
         buf,
         buf_size,
+        ColorFromHSV(236.0f, 0.47f, 0.45f),
+        w,
+        h
+    );
+
+    return e.result;
+}
+// uses buf pointer as unique id
+static UI_Result plot_lines(f32 *buf, s32 buf_size, s32 w, s32 h)
+{
+    UI_Element e = create_push_element(
+        UI_Flags_draw_background|
+        UI_Flags_draw_border|
+        UI_Flags_draw_samples|
+        UI_Flags_brighten_background_when_hot,
+        (u64) buf,
+        buf, buf_size,
+        nullptr,
+        0,
         ColorFromHSV(236.0f, 0.47f, 0.45f),
         w,
         h
@@ -637,6 +669,21 @@ static usize bounded_strlen(char *data, usize max_size)
     return len;
 }
 
+
+static bool has_active_children(s32 index)
+{
+    for (u32 i = 0; i < element_count; ++i)
+    {
+        UI_Element *e = element_list + i;
+
+        if (e->parent_index == index && (e->active || hover(e->x + 1, e->y + 1, e->w - 1, e->h - 1)))
+        {
+            return true;   
+        }
+    }
+    return false;
+}
+
 static void end_ui()
 {
     bool was_set_hot = false;
@@ -667,7 +714,7 @@ static void end_ui()
 
             if (is_active(e->id, e->index))
             {
-                if (!is_hover)
+                if (!is_hover && !has_active_children(e->index))
                 {
                     if (mouse_left_pressed)
                     {
@@ -694,6 +741,9 @@ static void end_ui()
 
 
         }
+
+
+        
 
 
         if (e->flags & UI_Flags_draw_background)
@@ -966,6 +1016,43 @@ static void end_ui()
             }
         }
 
+        if (e->flags & UI_Flags_draw_samples)
+        {
+            f32 max_y = -INFINITY;
+            f32 min_y = INFINITY;
+
+
+            for (u32 i = 0; i < e->data_cap; ++i)
+            {
+                f32 sample = e->data[i];
+
+                if (sample > max_y)
+                    max_y = sample;
+                if (sample < min_y)
+                    min_y = sample;
+            }
+
+
+
+
+            f32 coord_to_screen_x = e->w / e->data_cap;
+            f32 coord_to_screen_y = (e->h - 2) / (max_y - min_y);
+
+
+
+
+            for (s32 i = 0; i < e->data_cap - 1; ++i)
+            {
+                f32 sample = e->data[i];
+                f32 sample_2 = e->data[i + 1];
+
+                Vector2 start = {(e->x + 1) + i * coord_to_screen_x, (e->y + e->h / 2) - sample * coord_to_screen_y};
+
+                Vector2 end = {(e->x + 1) + (i + 1) * coord_to_screen_x, (e->y + e->h / 2) - sample_2 * coord_to_screen_y};
+
+                DrawLineEx(start, end, 1.0f, BLACK);
+            }
+        }
 
         if (e->flags & UI_Flags_draw_text)
         {
@@ -1098,15 +1185,29 @@ int main()
     }
 
 
+    f32 *samples[8] = {};
+    s32 sample_size = 128;
+
+    for (u32 i = 0; i < 8; ++i)
+    {
+        usize a = (usize)sample_size;
+        samples[i] = alloc(&temp_arena, f32, a);
+    }
+
+
+
+
+
+
     u32 lens[ARRAY_SIZE(input_buf)] = {};
 
     char menu_buf[] = "menu1";
-
     char button_bufs[4][16] = {"button1", "button2", "button3", "button4"};
 
 
-
-
+    u64 t = 0;
+    char freq_text[32] = {'1'};
+    f32 freq = 1.0f;
     while (!WindowShouldClose())
     {
         dt = GetFrameTime();
@@ -1153,80 +1254,79 @@ int main()
         push_layout({0, 0, screen_width, screen_height, RIGHT});
 
 
+
         s32 text_w = 128*3;        
         s32 text_h = 48;
 
-        push_sub_layout(2 * text_w, screen_height, DOWN);
-        for (usize i = 0; i < ARRAY_SIZE(input_buf); ++i)
+
+        for (u32 i = 0; i < sample_size; ++i)
         {
-            push_sub_layout(text_w + 20, text_h, RIGHT);
-            UI_Result result = text_input(input_buf[i], text_input_size, text_w, text_h);
-            if (result.finished)
-            {
-                lens[i] = result.len;
-                clear_arena(&compile_arena);
-                String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 8);
-                Ops ops;
-                int err = compile(&compile_arena, s.data, (u32)s.len, &ops);
-                if (err)
-                {
-                    Error e = get_error();
-
-                    u32 expr_index = 0;
-                    for (u32 j = 0; j < s.len && j < e.errs[0].error_index; ++j)
-                    {
-                        if (s.data[j] == ';')   
-                        {
-                            expr_index += 1;
-                        }
-                    }
-                    String err_str = e.errs[0].msg;
-
-                    assert(expr_index < 8);
-                    memset(output_buf[expr_index], 0, 32);
-                    memcpy(output_buf[expr_index], err_str.data, err_str.len < 31 ? err_str.len : 31);
-                }
-                else
-                {
-                    Result r = execute_ops(&compile_arena, ops);
-
-                    
-                    for (u32 j = 0; j < r.result_count; ++j)
-                    {
-                        String val_str = tprintf_string(&compile_arena, "%g", r.result[j]);
-
-                        memset(output_buf[r.result_indicies[j]], 0, 32);
-                        memcpy(output_buf[r.result_indicies[j]], val_str.data, val_str.len);
-                    }
-                }
-                printf("input_buf%zu: %.*s\n", i, (int)text_input_size, input_buf[i]);
-            }
-            text_output(output_buf[i], text_input_size, text_w, 20);
-            pop_layout();
+            f32 *s = samples[0];
+            s[i] = sinf(((2.0f * PI) * freq / 128.0f) * (i + t));
         }
-        pop_layout();
 
+        t += 1;
 
-        //
-
-
-        push_sub_layout(128, 4*128, DOWN);
-        if (dropdown_menu(menu_buf, sizeof(menu_buf), 128, 128).active)
+        push_sub_layout(2 * text_w, screen_height, DOWN);
+        if (dropdown_menu(menu_buf, sizeof(menu_buf), 128, 32).active)
         {
             begin_children();
-
-            for (s32 i = 0;  i < 4; ++i)
+            if (text_input(freq_text, sizeof(freq_text), 128, 24).active)
             {
-                if (button(button_bufs[i], sizeof(*button_bufs), 126, 128).released)
-                {
-                    printf("%.*s was pressed\n", (int)sizeof(*button_bufs), button_bufs[i]);
-                }
+                freq = (f32)atof(freq_text);
             }
+            plot_lines(samples[0], sample_size, 128, 128);
+            for (usize i = 0; i < ARRAY_SIZE(input_buf); ++i)
+            {
+                push_sub_layout(text_w + 20, text_h, RIGHT);
+                UI_Result result = text_input(input_buf[i], text_input_size, text_w, text_h);
+                if (result.finished)
+                {
+                    lens[i] = result.len;
+                    clear_arena(&compile_arena);
+                    String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 8);
+                    Ops ops;
+                    int err = compile(&compile_arena, s.data, (u32)s.len, &ops);
+                    if (err)
+                    {
+                        Error e = get_error();
 
+                        u32 expr_index = 0;
+                        for (u32 j = 0; j < s.len && j < e.errs[0].error_index; ++j)
+                        {
+                            if (s.data[j] == ';')   
+                            {
+                                expr_index += 1;
+                            }
+                        }
+                        String err_str = e.errs[0].msg;
 
+                        assert(expr_index < 8);
+                        memset(output_buf[expr_index], 0, 32);
+                        memcpy(output_buf[expr_index], err_str.data, err_str.len < 31 ? err_str.len : 31);
+                    }
+                    else
+                    {
+                        Result r = execute_ops(&compile_arena, ops);
+
+                        
+                        for (u32 j = 0; j < r.result_count; ++j)
+                        {
+                            String val_str = tprintf_string(&compile_arena, "%g", r.result[j]);
+
+                            memset(output_buf[r.result_indicies[j]], 0, 32);
+                            memcpy(output_buf[r.result_indicies[j]], val_str.data, val_str.len);
+                        }
+                    }
+                    printf("input_buf%zu: %.*s\n", i, (int)text_input_size, input_buf[i]);
+                }
+                text_output(output_buf[i], text_input_size, text_w, 20);
+                pop_layout();
+            }
             end_children();
         }
         pop_layout();
+
         pop_layout();
         end_ui();
 
