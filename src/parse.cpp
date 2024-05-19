@@ -613,8 +613,7 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
     Token next = lex->tokens[lex->index];
 
 
-    bool running = true;
-    while (running)
+    while (true)
     {
         switch (curr.kind)
         {
@@ -622,7 +621,7 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
             case Token_Kind::SEMICOLON:
             case Token_Kind::END:
             {
-                running = false;
+                goto end;
             } break;
             case Token_Kind::PLUS:
             case Token_Kind::MINUS:
@@ -689,15 +688,13 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
                 }
                 while (operator_count != 0)
                 {
-                    Node *op = operator_stack[operator_count - 1];
+                    Node *op = operator_stack[--operator_count];
 
 
                     if (op->kind == Node_Kind::OPEN_PAREN)
                     {
                         break;
                     }
-
-                    operator_count -= 1;
 
                     if (make_node_from_output(op, output_stack, output_count, arena, lex))
                     {
@@ -779,6 +776,7 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
         curr = next_token(lex);
         next = lex->tokens[lex->index];
     }
+    end:;
     while (operator_count > 0)
     {
         Node *op = operator_stack[--operator_count];
