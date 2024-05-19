@@ -494,8 +494,9 @@ static void init_function_node(Node *bin, Node **stack, u32 *stack_len, Arena *a
             goto end;
             case Node_Kind::PARAM: todo();
             case Node_Kind::EXPR: todo();
-            case Node_Kind::NUMBER: todo();
-            case Node_Kind::VARIABLE: {}
+            case Node_Kind::NUMBER:
+            case Node_Kind::VARIABLE:
+            {}
         }
         node_count += 1;
     }

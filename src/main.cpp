@@ -1280,8 +1280,8 @@ int main()
 
                     lens[i] = result.len;
                     clear_arena(&compile_arena);
-                    // String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 8);
-                    String s = string_from_cstr(&compile_arena, "h(x)=x;g(x)=h(x);f(x)=g(x);");
+                    String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 8);
+                    // String s = string_from_cstr(&compile_arena, "h(x)=x;g(x)=h(x);f(x)=g(x);");
                     printf("%.*s\n", (int)s.len, s.data);
                     Program program;
                     int err = compile(&compile_arena, s.data, (u32)s.len, &program);
