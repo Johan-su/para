@@ -610,12 +610,18 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
     Token curr = next_token(lex);
     Token next = lex->tokens[lex->index];
 
-    while (curr.kind != Token_Kind::SEMICOLON && curr.kind != Token_Kind::END)
-    {
-        assert(curr.kind != Token_Kind::INVALID);
 
+    bool running = true;
+    while (running)
+    {
         switch (curr.kind)
         {
+            case Token_Kind::INVALID: assert(false);
+            case Token_Kind::SEMICOLON:
+            case Token_Kind::END:
+            {
+                running = false;
+            } break;
             case Token_Kind::PLUS:
             case Token_Kind::MINUS:
             case Token_Kind::STAR:
@@ -669,6 +675,38 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
                 node->kind = node_kind_from_token(next, curr, last);
                 node->token_index = lex->index - 1;
                 operator_stack[operator_count++] = node; 
+            } break;
+            case Token_Kind::COMMA:
+            {
+                //TODO(Johan) fix f(x,y)=x;f(1,1) not parsing arithmetic expressions in functions correctly
+                if (operator_count == 0)
+                {
+                    String err_msg = string_from_cstr(arena, "Empty expr infront of comma");
+                    report_error_here(err_msg, curr.data_index);
+                    return 1;
+                }
+                while (operator_count != 0)
+                {
+                    Node *op = operator_stack[--operator_count];
+
+
+                    // if (op->kind == Node_Kind::OPEN_PAREN)
+                    // {
+                    //     break;
+                    // }
+                    // else if (operator_count == 0)
+                    // {
+                    //     String err_msg = string_from_cstr(arena, "unmatched parenthesis");
+                    //     report_error_here(err_msg, curr.data_index);
+                    //     return 1;
+                    // }
+
+                    if (make_node_from_output(op, output_stack, output_count, arena, lex))
+                    {
+                        return 1;
+                    }
+                }
+
             } break;
             case Token_Kind::CLOSE_PAREN:
             {
@@ -734,8 +772,10 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
                 }
             } break;
 
+            #ifndef _DEBUG
             default: 
                 assert(false);
+            #endif
         }
         last = curr;
         curr = next_token(lex);
@@ -968,12 +1008,6 @@ struct Function
     u32 args;
 };
 
-
-static void print_val(f64 a)
-{
-    printf("%g\n", a);
-}
-
 Function g_funcs[] = {
     {(f64 (*)(...))sin, "sin", 1},
     {(f64 (*)(...))cos, "cos", 1},
@@ -987,7 +1021,6 @@ Function g_funcs[] = {
     {(f64 (*)(...))cbrt, "cbrt", 1},
     //
     {(f64 (*)(...))exp, "exp", 1},
-    {(f64 (*)(...))print_val, "print_val", 1},
 };
 
 
@@ -1014,7 +1047,6 @@ enum class Op_Type
     POW,
 
     BUILTIN_FUNC,
-    APPEND_TO_RESULT,
     CALL,
     PUSHI,
     MOVE,
@@ -1034,7 +1066,6 @@ const char *str_from_op_type(Op_Type t)
         case Op_Type::MUL: return "MUL";
         case Op_Type::POW: return "POW";
         case Op_Type::BUILTIN_FUNC: return "BUILTIN_FUNC";
-        case Op_Type::APPEND_TO_RESULT: return "APPEND_TO_RESULT";
         case Op_Type::CALL: return "CALL";
         case Op_Type::PUSHI: return "PUSHI";
         case Op_Type::MOVE: return "MOVE";
@@ -1087,21 +1118,19 @@ enum class Symbol_Type
 struct Symbol
 {
     Symbol_Type type;
-    const char *name;
-    u32 name_len;
+    String name;
     u32 scope;
     u32 index;
     u32 arg_count;
 };
 
-static void init_symbols_with_predefined(Symbol *syms, u32 *sym_count)
+static void init_symbols_with_predefined(Arena *arena, Symbol *syms, u32 *sym_count)
 {
     for (u32 i = 0; i < ARRAY_SIZE(g_funcs); ++i)
     {
         Symbol sym = {};
         sym.type = Symbol_Type::BUILTIN_FUNC;
-        sym.name = g_funcs[i].func_str;
-        sym.name_len = (u32)strlen(g_funcs[i].func_str);
+        sym.name = string_from_cstr(arena, g_funcs[i].func_str);
         sym.scope = 0;
         sym.index = i;
         sym.arg_count = g_funcs[i].args;
@@ -1112,8 +1141,7 @@ static void init_symbols_with_predefined(Symbol *syms, u32 *sym_count)
     {
         Symbol sym = {};
         sym.type = Symbol_Type::BUILTIN_VAR;
-        sym.name = g_predefined_vars[i].var_str;
-        sym.name_len = (u32)strlen(g_predefined_vars[i].var_str);
+        sym.name = string_from_cstr(arena, g_predefined_vars[i].var_str);
         sym.scope = 0;
         sym.index = i;
         syms[*sym_count] = sym;
@@ -1122,7 +1150,7 @@ static void init_symbols_with_predefined(Symbol *syms, u32 *sym_count)
 }
 
 
-static s64 get_symbol_index_by_name(const char *name, u32 name_len, Symbol *symbols, u32 symbol_count, u32 active_scope)
+static s64 get_symbol_index_by_name(char *name, u32 name_len, Symbol *symbols, u32 symbol_count, u32 active_scope)
 {
     s64 index = -1;
     for (s64 j = 0; j < symbol_count; ++j)
@@ -1130,7 +1158,7 @@ static s64 get_symbol_index_by_name(const char *name, u32 name_len, Symbol *symb
         if (symbols[j].scope != active_scope && symbols[j].scope != 0)
             continue;
 
-        if (strequal(name, name_len, symbols[j].name, symbols[j].name_len))
+        if (strequal(name, name_len, symbols[j].name.data, (u32)symbols[j].name.len))
         {
             index = j;
             if (symbols[j].scope == active_scope)
@@ -1140,16 +1168,18 @@ static s64 get_symbol_index_by_name(const char *name, u32 name_len, Symbol *symb
     return index;
 }
 
-struct Ops
+struct Program
 {
     Op *data;
-    u32 len;
-    u32 entry;
+    u32 data_len;
+    Symbol *syms;
+    u32 sym_len;
+    u32 predefined_end;
 };
 
-static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const Lexer *lex)
+static Errcode bytecode_from_tree(Arena *arena, Program *out_program, Node *tree, const Lexer *lex)
 {
-    if (out_ops == nullptr)
+    if (out_program == nullptr)
         return 1;
      
     usize op_size = 8192;
@@ -1159,9 +1189,9 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
 
     Symbol *symbols = alloc(arena, Symbol, 2048);
     u32 symbol_count = 0;
-    init_symbols_with_predefined(symbols, &symbol_count);
+    init_symbols_with_predefined(arena, symbols, &symbol_count);
     
-
+    u32 predefined_end = symbol_count;
 
     u32 active_scope = 0;
     u32 scope_count = 1;
@@ -1341,8 +1371,8 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
                     Symbol s = {};
 
                     s.type = Symbol_Type::FUNCTION;
-                    s.name = lex->data + token->data_index;
-                    s.name_len = token->count;
+                    s.name.data = lex->data + token->data_index;
+                    s.name.len = token->count;
                     s.scope = 0;
                     s.index = active_index;
 
@@ -1379,7 +1409,7 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
                     if (symbols[index].scope == active_scope && symbols[index].scope != 0)
                     {
                         op.type = Op_Type::MOVE;
-                        op.index = symbols[index].index + 4;
+                        op.index = symbols[index].index;
                     }
                     else if (symbols[index].type == Symbol_Type::VARIABLE)
                     {
@@ -1402,8 +1432,8 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
 
                     s.type = Symbol_Type::VARIABLE;
                     Token *t = lex->tokens + node->token_index;
-                    s.name = lex->data + t->data_index;
-                    s.name_len = t->count;
+                    s.name.data = lex->data + t->data_index;
+                    s.name.len = t->count;
                     s.scope = active_scope;
                     s.index = param_count++;
 
@@ -1417,7 +1447,7 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
                     if (index != -1)
                     {
                         // trying to define already defined variable in global scope
-                        String s = tprintf_string(arena, "%.*s is already defined", (int)symbols[index].name_len, symbols[index].name);
+                        String s = tprintf_string(arena, "%.*s is already defined", (int)token->count, lex->data + token->data_index);
                         report_error_here(s, token->data_index);
                         return 1;
                     }
@@ -1426,8 +1456,8 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
                     Symbol s = {};
 
                     s.type = Symbol_Type::VARIABLE;
-                    s.name = lex->data + token->data_index;
-                    s.name_len = token->count;
+                    s.name.data = lex->data + token->data_index;
+                    s.name.len = token->count;
                     s.scope = 0;
                     s.index = active_index;
 
@@ -1470,60 +1500,65 @@ static Errcode bytecode_from_tree(Arena *arena, Ops *out_ops, Node *tree, const 
     // assert(index_ != -1);
     // u32 index = (u32)index_;
 
-    u32 index = 0;
-    u32 entry = ops_count;
-    for (u32 i = 0;  i < symbol_count; ++i)
-    {
-        if (symbols[i].scope != 0)
-            continue;
+    // u32 index = 0;
+    // u32 entry = ops_count;
+    // for (u32 i = 0;  i < symbol_count; ++i)
+    // {
+    //     if (symbols[i].scope != 0)
+    //         continue;
 
-        switch (symbols[i].type)
-        {
+    //     switch (symbols[i].type)
+    //     {
 
-            case Symbol_Type::BUILTIN_FUNC:
-            case Symbol_Type::BUILTIN_VAR:
-            case Symbol_Type::INVALID:
-            {
-                // do nothing    
-            } break;
-            case Symbol_Type::FUNCTION:
-            {
-                index += 1;
-            } break;
-            case Symbol_Type::VARIABLE:
-            case Symbol_Type::EXPR:
-            {
+    //         case Symbol_Type::BUILTIN_FUNC:
+    //         case Symbol_Type::BUILTIN_VAR:
+    //         case Symbol_Type::INVALID:
+    //         {
+    //             // do nothing    
+    //         } break;
+    //         case Symbol_Type::FUNCTION:
+    //         {
+    //             index += 1;
+    //         } break;
+    //         case Symbol_Type::VARIABLE:
+    //         case Symbol_Type::EXPR:
+    //         {
 
 
-                Op op = {};
-                op.type = Op_Type::CALL;
-                op.index = symbols[i].index;
-                op.arg_count = 0;
-                ops[ops_count++] = op;
+    //             Op op = {};
+    //             op.type = Op_Type::CALL;
+    //             op.index = symbols[i].index;
+    //             op.arg_count = 0;
+    //             ops[ops_count++] = op;
                 
-                op = {};
+    //             op = {};
 
-                op.type = Op_Type::APPEND_TO_RESULT;
-                op.index = index;
-                ops[ops_count++] = op;
-                index += 1;
-            } break;
-        }
-        // op = {};
-        // op.type = Op_Type::BUILTIN_FUNC;
-        // op.index = index;
-        // op.arg_count = 1;
-        // ops[ops_count++] = op;
+    //             op.type = Op_Type::APPEND_TO_RESULT;
+    //             op.index = index;
+    //             ops[ops_count++] = op;
+    //             index += 1;
+    //         } break;
+    //     }
+    //     // op = {};
+    //     // op.type = Op_Type::BUILTIN_FUNC;
+    //     // op.index = index;
+    //     // op.arg_count = 1;
+    //     // ops[ops_count++] = op;
 
-    }
+    // }
     
-    Op op = {};
-    op.type = Op_Type::RETURN;
-    ops[ops_count++] = op;
+    // Op op = {};
+    // op.type = Op_Type::RETURN;
+    // ops[ops_count++] = op;
 
+    Program program = {};
+    program.data = ops;
+    program.data_len = ops_count;
+    program.syms = symbols;
+    program.sym_len = symbol_count;
+    program.predefined_end = predefined_end;
 
-    Ops op_data = {ops, ops_count, entry};
-    *out_ops = op_data;
+    *out_program = program;
     return 0;
 }
 
@@ -1572,12 +1607,12 @@ static u32 pop_u32(u8 *stack, u32 *stack_top)
 
 struct Result
 {
-    u32 result_count;
-    u32 *result_indicies;
     f64 *result;
+    u32 result_count;
 };
 
-static Result execute_ops(Arena *arena, Ops ops)
+
+static Result execute_ops(Arena *arena, Program program, u32 entry, f64 *inputs, u32 input_count)
 {
 
     u8 *val_stack = alloc(arena, u8, 8192);
@@ -1587,19 +1622,18 @@ static Result execute_ops(Arena *arena, Ops ops)
     u32 call_count = 0;
 
 
-    f64 *result = alloc(arena, f64, 128);
-    u32 *result_indicies = alloc(arena, u32, 128);
-
-    u32 result_count = 0;
-
-
-
     u32 frame_index = 0;
 
-    bool running = true;
-    for (u32 i = ops.entry; running;)
+
+    for (u32 i = 0; i < input_count; ++i)
     {
-        Op *op = ops.data + i;
+        push_f64(call_stack, &call_count, inputs[i]);
+    }
+
+    bool running = true;
+    for (u32 i = entry; running;)
+    {
+        Op *op = program.data + i;
 
         switch (op->type)
         {
@@ -1662,23 +1696,11 @@ static Result execute_ops(Arena *arena, Ops ops)
                 i += 1;
             } break;
 
-            case Op_Type::APPEND_TO_RESULT:
-            {
-                if (val_stack_top != 0)
-                {
-                    result[result_count] = pop_f64(val_stack, &val_stack_top);
-                    result_indicies[result_count] = op->index;
-                    result_count += 1;
-                }
-
-                i += 1;
-            } break;
-
             case Op_Type::CALL:
             {
-                push_u32(call_stack, &call_count, i + 1);
                 u32 old_frame_index = frame_index;
-                frame_index = call_count;
+                push_u32(call_stack, &call_count, i + 1);
+                frame_index = call_count + 4;
                 push_u32(call_stack, &call_count, old_frame_index);
 
                 for (u32 j = 0; j < op->arg_count; ++j)
@@ -1697,7 +1719,8 @@ static Result execute_ops(Arena *arena, Ops ops)
             } break;
             case Op_Type::MOVE:
             {
-                f64 n1 = *(f64 *)(call_stack + frame_index + op->index);
+                f64 n1 = *(f64 *)(call_stack + frame_index + op->index * sizeof(f64));
+                // printf("move\n");
 
                 push_f64(val_stack, &val_stack_top, n1);
                 i += 1;
@@ -1710,7 +1733,7 @@ static Result execute_ops(Arena *arena, Ops ops)
                     running = false;
                     break;
                 }
-                call_count = frame_index + 4;
+                call_count = frame_index;
                 frame_index = pop_u32(call_stack, &call_count);
                 u32 ret = pop_u32(call_stack, &call_count);
 
@@ -1728,23 +1751,21 @@ static Result execute_ops(Arena *arena, Ops ops)
         }   
     }
 
-    for (u32 i = 0; i < val_stack_top; i += sizeof(f64))
-    {
-        
-        printf("%g\n", *(f64 *)(val_stack + i));
-    }
+    // for (u32 i = 0; i < val_stack_top; i += sizeof(f64))
+    // {
+    //     printf("%g\n", *(f64 *)(val_stack + i));
+    // }
 
     Result r = {};
-    r.result = result;
-    r.result_indicies = result_indicies;
-    r.result_count = result_count;
+    r.result = (f64 *)val_stack;
+    r.result_count = val_stack_top / sizeof(f64);
     return r;
 }
 
 
-static void fprint_ops(Ops ops, FILE *f)
+static void fprint_ops(Program ops, FILE *f)
 {
-    for (usize i = 0; i < ops.len; ++i)
+    for (usize i = 0; i < ops.data_len; ++i)
     {
         switch (ops.data[i].type)
         {
@@ -1764,7 +1785,6 @@ static void fprint_ops(Ops ops, FILE *f)
                 fprintf(f, "index %llu: %s, 0x%X, args %u\n", i, str_from_op_type(ops.data[i].type), ops.data[i].index, ops.data[i].arg_count);
             } break;
             case Op_Type::MOVE:
-            case Op_Type::APPEND_TO_RESULT:
             case Op_Type::BUILTIN_FUNC:
             {
                 fprintf(f, "index %llu: %s, 0x%X\n", i, str_from_op_type(ops.data[i].type), ops.data[i].index);
@@ -1777,7 +1797,27 @@ static void fprint_ops(Ops ops, FILE *f)
     }
 }
 
-Errcode compile(Arena *arena, char *input, u32 input_len, Ops *out_ops)
+static Result execute_function(Arena *arena, Program program, String sym_name, f64 *inputs, u32 input_count)
+{
+    Result r = {};
+    for (u32 i = 0; i < program.sym_len; ++i)
+    {
+        Symbol *s = program.syms + i; 
+        if (s->scope != 0)
+            continue;
+        if (!String_equal(sym_name, s->name))
+            continue;
+
+        if (s->arg_count == input_count)
+        {
+            r = execute_ops(arena, program, s->index, inputs, input_count);
+        }
+        break;
+    }
+    return r;
+}
+
+Errcode compile(Arena *arena, char *input, u32 input_len, Program *out_ops)
 {
     int err = 0;
     Lexer lexer = {};
@@ -1867,14 +1907,14 @@ int test(void)
         graphviz_from_tree(&temp_arena, tree, &lexer);
 
 
-        Ops ops;
+        Program ops;
         if (bytecode_from_tree(&temp_arena, &ops, tree, &lexer))
         {
             continue;
         }
         fprint_ops(ops, stdout);
 
-        execute_ops(&temp_arena, ops);
+        // execute_ops(&temp_arena, ops);
         // printf("%.*s = %g\n", (int)lexer.data_length, lexer.data, val);
 
 
