@@ -472,12 +472,14 @@ static void init_unary_node(Node *bin, Node **stack, u32 *stack_len, Arena *aren
 
 static void init_function_node(Node *bin, Node **stack, u32 *stack_len, Arena *arena)
 {
-    u32 node_count = 1;
+    u32 node_count = *stack_len;
     bin->nodes = alloc(arena, Node *, node_count);
     bin->node_count = node_count;
 
-
-    bin->nodes[0] = pop_sub_node(stack, stack_len);
+    for (u32 i = 0; i < node_count; ++i)
+    {
+        bin->nodes[node_count - 1 - i] = pop_sub_node(stack, stack_len);
+    }
 }
 
 
@@ -687,19 +689,15 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
                 }
                 while (operator_count != 0)
                 {
-                    Node *op = operator_stack[--operator_count];
+                    Node *op = operator_stack[operator_count - 1];
 
 
-                    // if (op->kind == Node_Kind::OPEN_PAREN)
-                    // {
-                    //     break;
-                    // }
-                    // else if (operator_count == 0)
-                    // {
-                    //     String err_msg = string_from_cstr(arena, "unmatched parenthesis");
-                    //     report_error_here(err_msg, curr.data_index);
-                    //     return 1;
-                    // }
+                    if (op->kind == Node_Kind::OPEN_PAREN)
+                    {
+                        break;
+                    }
+
+                    operator_count -= 1;
 
                     if (make_node_from_output(op, output_stack, output_count, arena, lex))
                     {
