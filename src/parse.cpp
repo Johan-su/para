@@ -472,7 +472,35 @@ static void init_unary_node(Node *bin, Node **stack, u32 *stack_len, Arena *aren
 
 static void init_function_node(Node *bin, Node **stack, u32 *stack_len, Arena *arena)
 {
-    u32 node_count = *stack_len;
+    u32 node_count = 0;
+
+    for (u32 i = *stack_len; i-- > 0;)
+    {
+        switch (stack[i]->kind)
+        {
+            case Node_Kind::INVALID: todo();
+            case Node_Kind::OPEN_PAREN: todo();
+            case Node_Kind::POSITIVE: todo();
+            case Node_Kind::NEGATE: todo();
+            case Node_Kind::ADD: todo();
+            case Node_Kind::SUB: todo();
+            case Node_Kind::MUL: todo();
+            case Node_Kind::DIV: todo();
+            case Node_Kind::POW: todo();
+            case Node_Kind::FUNCTION: todo();
+            case Node_Kind::PROGRAM: todo();
+            case Node_Kind::FUNCTIONDEF:
+            case Node_Kind::VARIABLEDEF:
+            goto end;
+            case Node_Kind::PARAM: todo();
+            case Node_Kind::EXPR: todo();
+            case Node_Kind::NUMBER: todo();
+            case Node_Kind::VARIABLE: {}
+        }
+        node_count += 1;
+    }
+    end:;
+
     bin->nodes = alloc(arena, Node *, node_count);
     bin->node_count = node_count;
 

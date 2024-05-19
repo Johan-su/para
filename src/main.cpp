@@ -1276,11 +1276,13 @@ int main()
                 if (result.finished)
                 {
                     memset(draw_text, 0, sizeof(draw_text));
-                    memset(draw_text, 0, sizeof(draw_samples));
+                    memset(draw_samples, 0, sizeof(draw_samples));
 
                     lens[i] = result.len;
                     clear_arena(&compile_arena);
-                    String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 8);
+                    // String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 8);
+                    String s = string_from_cstr(&compile_arena, "h(x)=x;g(x)=h(x);f(x)=g(x);");
+                    printf("%.*s\n", (int)s.len, s.data);
                     Program program;
                     int err = compile(&compile_arena, s.data, (u32)s.len, &program);
                     if (err)
@@ -1374,12 +1376,12 @@ int main()
                 }
                 if (draw_samples[i])
                 {
-                    plot_lines(samples[i], sample_size, 128, 128);
+                    plot_lines(samples[i], sample_size, 48, 48);
                 }
                 if (draw_text[i])
                 {
                     usize size = bounded_strlen(output_buf[i], text_input_size);
-                    text_output(output_buf[i], text_input_size, 10 + glyph_width * size, 20);
+                    text_output(output_buf[i], text_input_size, 10 + glyph_width * (s32)size, 20);
                 }
                 pop_layout();
             }
