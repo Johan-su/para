@@ -722,6 +722,7 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
 
                     if (op->kind == Node_Kind::OPEN_PAREN)
                     {
+                        operator_count +=1;
                         break;
                     }
 
@@ -851,7 +852,6 @@ static Node *parse(Arena *arena, Lexer *lex)
 
         if (equal_index != -1)
         {
-            
             // parse func/var definition
             Token id = peek_token(lex);
 
@@ -1364,6 +1364,14 @@ static Errcode bytecode_from_tree(Arena *arena, Program *out_program, Node *tree
                         return 1;
                     }
 
+                    if (node->node_count != symbols[index].arg_count)
+                    {
+                        // called function with more arguments than allowed
+                        String s = tprintf_string(arena, "Function %.*s takes in %u args not %u", token->count, lex->data + token->data_index, symbols[index].arg_count, node->node_count);
+                        report_error_here(s, token->data_index);
+                        return 1;
+                    }
+
                     if (symbols[index].type == Symbol_Type::BUILTIN_FUNC)
                     {
                         Op op = {};
@@ -1730,9 +1738,13 @@ static Result execute_ops(Arena *arena, Program program, u32 entry, f64 *inputs,
 
                 for (u32 j = 0; j < op->arg_count; ++j)
                 {
-                    f64 arg = pop_f64(val_stack, &val_stack_top);
-                    push_f64(call_stack, &call_count, arg);
+                    u8 *u_args = val_stack + val_stack_top;
+                    f64 *args = (f64 *)u_args - op->arg_count;
+
+                    push_f64(call_stack, &call_count, args[j]);
                 }
+                val_stack_top -= op->arg_count * sizeof(f64);
+
 
 
                 i = op->index;

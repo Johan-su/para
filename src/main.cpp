@@ -1170,7 +1170,55 @@ static String concat_and_add_semicolon_at_the_end_of_every_substr(Arena *arena, 
     return str;
 }
 
-int main()
+int test_last_expr(Arena *arena, const char *str, f64 val, int t_err)
+{
+    clear_arena(arena);
+    Program program;
+    String s = string_from_cstr(arena, str);
+    printf("%.*s\n", (int)s.len, s.data);
+    int err = compile(arena, s.data, (u32)s.len, &program);
+    if (err)
+    {
+        Error e = get_error();
+        for (u32 i = 0; i < e.err_count; ++i)
+        {
+            printf("%.*s\n", (int)e.errs[i].msg.len, e.errs[i].msg.data);
+        }
+    }
+    if (err != t_err)
+    {
+        printf("expected err %d got %d\n", t_err, err);
+    }
+    if (err)
+    {
+        return 1;
+    }
+
+    Symbol *sym = program.syms + program.sym_len - 1;
+    assert(sym->type == Symbol_Type::EXPR);
+    Result r = execute_ops(arena, program, sym->index, nullptr, 0);
+    for (u32 i = 0; i < r.result_count; ++i)
+    {
+        printf("result %g\n", r.result[i]);
+    }
+    if (r.result[0] != val)
+    {
+        printf("test ^ failed expected %g got %g\n", val, r.result[0]);
+    }
+    return 0;
+}
+
+int main(void)
+{
+    Arena a; init_arena(&a, 1000000);
+    // test_last_expr("f(x,y,z)=x;f(1,2,3)", 1);
+    // test_last_expr(&a, "f(x)=x;f(1)", 1, 0);
+    test_last_expr(&a, "f(x)=x;f(1,2)", 1, 1);
+    return 0;
+}
+
+
+int main2()
 {
     // test();
     // return 0;
@@ -1413,4 +1461,6 @@ int main()
     clean_arena(&compile_arena);
     clean_arena(&execute_arena);
     CloseWindow();
+    return 0;
 }
+

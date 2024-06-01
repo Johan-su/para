@@ -24,12 +24,13 @@ static void clean_arena(Arena *arena)
 
 static usize align_to_8_boundry(usize a)
 {
-    usize offset = (8 - (a & 3)) & 3;
+    usize offset = (8 - (a % 8)) % 8;
     return a + offset;
 }
 
 static void *alloc_arena(Arena *arena, usize byte_amount)
 {
+    assert(arena->pos % 8 == 0);
     if (arena->pos + byte_amount > arena->max_capacity)
     {
         fprintf(stderr, "ERROR: arena out of memory\n");
