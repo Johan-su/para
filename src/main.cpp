@@ -1208,7 +1208,7 @@ int test_last_expr(Arena *arena, const char *str, f64 val, int t_err)
     return 0;
 }
 
-int main(void)
+int main2(void)
 {
     Arena a; init_arena(&a, 1000000);
     // test_last_expr("f(x,y,z)=x;f(1,2,3)", 1);
@@ -1218,7 +1218,7 @@ int main(void)
 }
 
 
-int main2()
+int main()
 {
     // test();
     // return 0;

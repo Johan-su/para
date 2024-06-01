@@ -487,13 +487,13 @@ static void init_function_node(Node *bin, Node **stack, u32 *stack_len, Arena *a
             case Node_Kind::MUL: todo();
             case Node_Kind::DIV: todo();
             case Node_Kind::POW: todo();
-            case Node_Kind::FUNCTION: todo();
             case Node_Kind::PROGRAM: todo();
             case Node_Kind::FUNCTIONDEF:
             case Node_Kind::VARIABLEDEF:
             goto end;
             case Node_Kind::PARAM: todo();
             case Node_Kind::EXPR: todo();
+            case Node_Kind::FUNCTION:
             case Node_Kind::NUMBER:
             case Node_Kind::VARIABLE:
             {}
@@ -708,7 +708,6 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
             } break;
             case Token_Kind::COMMA:
             {
-                //TODO(Johan) fix f(x,y)=x;f(1,1) not parsing arithmetic expressions in functions correctly
                 if (operator_count == 0)
                 {
                     String err_msg = string_from_cstr(arena, "Empty expr infront of comma");
@@ -1044,6 +1043,7 @@ Function g_funcs[] = {
     //
     {(f64 (*)(...))sqrt, "sqrt", 1},
     {(f64 (*)(...))cbrt, "cbrt", 1},
+    {(f64 (*)(...))log, "log", 1},
     //
     {(f64 (*)(...))exp, "exp", 1},
 };
