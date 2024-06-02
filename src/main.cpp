@@ -1213,7 +1213,8 @@ int main2(void)
     Arena a; init_arena(&a, 1000000);
     // test_last_expr("f(x,y,z)=x;f(1,2,3)", 1);
     // test_last_expr(&a, "f(x)=x;f(1)", 1, 0);
-    test_last_expr(&a, "f(x)=x;f(1,2)", 1, 1);
+    // test_last_expr(&a, "f(x)=x;f(1,2)", 1, 1);
+    test_last_expr(&a, "x=5;f(x)=x(5);f(1)", 0, 0);
     return 0;
 }
 
