@@ -568,6 +568,8 @@ static UI_Result plot_lines(f32 *buf, s32 buf_size, s32 w, s32 h)
         UI_Flags_draw_background|
         UI_Flags_draw_border|
         UI_Flags_draw_samples|
+        UI_Flags_clickable|
+        UI_Flags_clickable_click_active|
         UI_Flags_brighten_background_when_hot,
         (u64) buf,
         buf, buf_size,
@@ -750,8 +752,6 @@ static void end_ui()
                 was_set_hot = true;
                 set_hot(*e);
             }
-
-
         }
 
 
@@ -1046,10 +1046,8 @@ static void end_ui()
 
 
 
-
             f32 coord_to_screen_x = (f32) e->w / (f32) e->data_cap;
             f32 coord_to_screen_y = ((f32) e->h) / (max_y - min_y);
-
 
 
 
@@ -1264,6 +1262,7 @@ int main()
     char button_bufs[4][16] = {"button1", "button2", "button3", "button4"};
 
 
+
     while (!WindowShouldClose())
     {
         dt = GetFrameTime();
@@ -1314,128 +1313,130 @@ int main()
         s32 text_h = 48;
 
 
+
+
         push_sub_layout(2 * text_w, screen_height, DOWN);
-        if (dropdown_menu(menu_buf, sizeof(menu_buf), 128, 32).active)
+        begin_children();
+        for (usize i = 0; i < ARRAY_SIZE(input_buf); ++i)
         {
-            begin_children();
-            for (usize i = 0; i < ARRAY_SIZE(input_buf); ++i)
+            push_sub_layout(text_w + 20, text_h, RIGHT);
+            UI_Result result = text_input(input_buf[i], text_input_size, text_w, text_h);
+            if (result.finished)
             {
-                push_sub_layout(text_w + 20, text_h, RIGHT);
-                UI_Result result = text_input(input_buf[i], text_input_size, text_w, text_h);
-                if (result.finished)
+                memset(draw_text, 0, sizeof(draw_text));
+                memset(draw_samples, 0, sizeof(draw_samples));
+
+                lens[i] = result.len;
+                clear_arena(&compile_arena);
+                String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 8);
+                // String s = string_from_cstr(&compile_arena, "h(x)=x;g(x)=h(x);f(x)=g(x);");
+                printf("%.*s\n", (int)s.len, s.data);
+                Program program;
+                int err = compile(&compile_arena, s.data, (u32)s.len, &program);
+                if (err)
                 {
-                    memset(draw_text, 0, sizeof(draw_text));
-                    memset(draw_samples, 0, sizeof(draw_samples));
+                    Error e = get_error();
 
-                    lens[i] = result.len;
-                    clear_arena(&compile_arena);
-                    String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 8);
-                    // String s = string_from_cstr(&compile_arena, "h(x)=x;g(x)=h(x);f(x)=g(x);");
-                    printf("%.*s\n", (int)s.len, s.data);
-                    Program program;
-                    int err = compile(&compile_arena, s.data, (u32)s.len, &program);
-                    if (err)
+                    u32 expr_index = 0;
+                    for (u32 j = 0; j < s.len && j < e.errs[0].error_index; ++j)
                     {
-                        Error e = get_error();
-
-                        u32 expr_index = 0;
-                        for (u32 j = 0; j < s.len && j < e.errs[0].error_index; ++j)
+                        if (s.data[j] == ';')   
                         {
-                            if (s.data[j] == ';')   
-                            {
-                                expr_index += 1;
-                            }
+                            expr_index += 1;
                         }
-                        String err_str = e.errs[0].msg;
-
-                        assert(expr_index < 8);
-                        draw_text[expr_index] = true;
-                        memset(output_buf[expr_index], 0, 32);
-                        memcpy(output_buf[expr_index], err_str.data, err_str.len < 31 ? err_str.len : 31);
                     }
-                    else
+                    String err_str = e.errs[0].msg;
+
+                    assert(expr_index < 8);
+                    draw_text[expr_index] = true;
+                    memset(output_buf[expr_index], 0, 32);
+                    memcpy(output_buf[expr_index], err_str.data, err_str.len < 31 ? err_str.len : 31);
+                }
+                else
+                {
+                    u32 sym_count = 0;
+                    for (usize j = 0; j < ARRAY_SIZE(input_buf); ++j)
                     {
-                        u32 sym_count = 0;
-                        for (usize j = 0; j < ARRAY_SIZE(input_buf); ++j)
+                        if (lens[j] == 0)
+                            continue;
+                        Result r = {};
+                        clear_arena(&execute_arena);
+                        Symbol *sym = program.syms + sym_count + program.predefined_end;
+                        sym_count += 1;
+
+                        switch (sym->type)
                         {
-                            if (lens[j] == 0)
-                                continue;
-                            Result r = {};
-                            clear_arena(&execute_arena);
-                            Symbol *sym = program.syms + sym_count + program.predefined_end;
-                            sym_count += 1;
-
-                            switch (sym->type)
+                            case Symbol_Type::INVALID: assert(false);
+                            case Symbol_Type::FUNCTION:
                             {
-                                case Symbol_Type::INVALID: assert(false);
-                                case Symbol_Type::FUNCTION:
+                                if (sym->arg_count == 1)
                                 {
-                                    if (sym->arg_count == 1)
-                                    {
-                                        draw_samples[j] = true;
+                                    draw_samples[j] = true;
 
-                                        f32 *sample_list = samples[j];
-                                        for (u32 k = 0; k < sample_size; ++k)
-                                        {
-                                            clear_arena(&execute_arena);
-                                            f64 inputs[1] = {k * (10.0 / (f64) sample_size)};
-                                            Result res = execute_ops(&execute_arena, program, sym->index, inputs, 1);
-                                            assert(res.result_count == 1);
-                                            sample_list[k] = (f32) res.result[0];
-                                        }
-                                    }
-                                } break;
-                                case Symbol_Type::VARIABLE:
-                                {
-                                    if (sym->scope == 0)
+                                    f32 *sample_list = samples[j];
+                                    for (u32 k = 0; k < sample_size; ++k)
                                     {
-                                        draw_text[j] = true;
-                                        r = execute_ops(&execute_arena, program, sym->index, nullptr, 0);
+                                        clear_arena(&execute_arena);
+                                        f64 inputs[1] = {k * (10.0 / (f64) sample_size)};
+                                        Result res = execute_ops(&execute_arena, program, sym->index, inputs, 1);
+                                        assert(res.result_count == 1);
+                                        sample_list[k] = (f32) res.result[0];
                                     }
-                                    else
-                                    {
-                                        j -= 1;
-                                    }
-                                } break;
-                                case Symbol_Type::EXPR:
+                                }
+                            } break;
+                            case Symbol_Type::VARIABLE:
+                            {
+                                if (sym->scope == 0)
                                 {
                                     draw_text[j] = true;
                                     r = execute_ops(&execute_arena, program, sym->index, nullptr, 0);
-                                } break;
-                                case Symbol_Type::BUILTIN_FUNC:
-                                case Symbol_Type::BUILTIN_VAR:
+                                }
+                                else
                                 {
-                                    // do nothing
-                                } break;
-                            }
-                            if (r.result_count > 1)
+                                    j -= 1;
+                                }
+                            } break;
+                            case Symbol_Type::EXPR:
                             {
-                                todo();
-                            }
-                            if (r.result_count == 1)
+                                draw_text[j] = true;
+                                r = execute_ops(&execute_arena, program, sym->index, nullptr, 0);
+                            } break;
+                            case Symbol_Type::BUILTIN_FUNC:
+                            case Symbol_Type::BUILTIN_VAR:
                             {
-                                String val_str = tprintf_string(&compile_arena, "%g", r.result[0]);
+                                // do nothing
+                            } break;
+                        }
+                        if (r.result_count > 1)
+                        {
+                            todo();
+                        }
+                        if (r.result_count == 1)
+                        {
+                            String val_str = tprintf_string(&compile_arena, "%g", r.result[0]);
 
-                                memset(output_buf[j], 0, 32);
-                                memcpy(output_buf[j], val_str.data, val_str.len);
-                            }
+                            memset(output_buf[j], 0, 32);
+                            memcpy(output_buf[j], val_str.data, val_str.len);
                         }
                     }
-                    // printf("input_buf%zu: %.*s\n", i, (int)text_input_size, input_buf[i]);
                 }
-                if (draw_samples[i])
-                {
-                    plot_lines(samples[i], sample_size, 48, 48);
-                }
-                if (draw_text[i])
-                {
-                    usize size = bounded_strlen(output_buf[i], text_input_size);
-                    text_output(output_buf[i], text_input_size, 10 + glyph_width * (s32)size, 20);
-                }
-                pop_layout();
+                // printf("input_buf%zu: %.*s\n", i, (int)text_input_size, input_buf[i]);
             }
-            end_children();
+            if (draw_samples[i])
+            {
+                if (plot_lines(samples[i], sample_size, 48, 48).pressed)
+                {
+                    printf("plot %zu pressed\n", i);
+                }
+            }
+            if (draw_text[i])
+            {
+                usize size = bounded_strlen(output_buf[i], text_input_size);
+                text_output(output_buf[i], text_input_size, 10 + glyph_width * (s32)size, 20);
+            }
+            pop_layout();
         }
+        end_children();
         pop_layout();
 
         pop_layout();
