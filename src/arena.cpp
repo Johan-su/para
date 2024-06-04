@@ -1,12 +1,11 @@
 
-
-
 struct Arena
 {
     usize pos;
     usize max_capacity;
     u8 *data;
 };
+
 
 
 static void init_arena(Arena *arena, usize max_capacity)
@@ -51,5 +50,17 @@ static void *alloc_arena(Arena *arena, usize byte_amount)
 static void clear_arena(Arena *arena)
 {
     arena->pos = 0;
+}
+
+static usize get_arena_pos(Arena *arena)
+{
+    assert(arena->pos % 8 == 0);
+    return arena->pos;
+}
+
+static void set_arena(Arena *arena, usize pos)
+{
+    assert(pos % 8 == 0);
+    arena->pos = pos;
 }
 
