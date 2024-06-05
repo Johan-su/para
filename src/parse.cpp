@@ -230,10 +230,11 @@ static Errcode tokenize(Arena *arena, Lexer *lex, char *input, u32 input_length)
     return 0;
 }
 
-
+// changes here will also require changes in g_data
 enum Node_Kind
 {
     INVALID,
+    SENTINEL,
     OPEN_PAREN,
     POSITIVE,
     NEGATE,
@@ -277,6 +278,7 @@ struct Operator_Data
 
 const Operator_Data g_data[] = {
     /* INVALID */  {0, false},
+    /* SENTINEL */{0, false},
     /* OPEN_PAREN */ {0, false},
     /* POSITIVE */ {100, true},
     /* NEGATE */   {100, true},
@@ -300,6 +302,7 @@ static const char *str_from_node_kind(Node_Kind kind)
     switch (kind)
     {
         case Node_Kind::INVALID: return "INVALID";
+        case Node_Kind::SENTINEL: return "SENTINEL";
         case Node_Kind::OPEN_PAREN: return "OPEN_PAREN";
         case Node_Kind::POSITIVE: return "POSITIVE";
         case Node_Kind::NEGATE: return "NEGATE";
@@ -344,6 +347,7 @@ static void graphviz_from_tree(Arena *arena, Node *tree, Lexer *lex)
         switch (top->kind)
         {
             case Node_Kind::OPEN_PAREN: assert(false);
+            case Node_Kind::SENTINEL: assert(false);
             case Node_Kind::INVALID:
             case Node_Kind::POSITIVE:
             case Node_Kind::NEGATE:
@@ -476,31 +480,12 @@ static void init_function_node(Node *bin, Node **stack, u32 *stack_len, Arena *a
 
     for (u32 i = *stack_len; i-- > 0;)
     {
-        switch (stack[i]->kind)
+        if (stack[i]->kind == Node_Kind::SENTINEL)
         {
-            case Node_Kind::INVALID: todo();
-            case Node_Kind::OPEN_PAREN: todo();
-            case Node_Kind::POSITIVE: todo();
-            case Node_Kind::NEGATE: todo();
-            case Node_Kind::ADD: todo();
-            case Node_Kind::SUB: todo();
-            case Node_Kind::MUL: todo();
-            case Node_Kind::DIV: todo();
-            case Node_Kind::POW: todo();
-            case Node_Kind::PROGRAM: todo();
-            case Node_Kind::FUNCTIONDEF:
-            case Node_Kind::VARIABLEDEF:
-            goto end;
-            case Node_Kind::PARAM: todo();
-            case Node_Kind::EXPR: todo();
-            case Node_Kind::FUNCTION:
-            case Node_Kind::NUMBER:
-            case Node_Kind::VARIABLE:
-            {}
+            break;
         }
         node_count += 1;
     }
-    end:;
 
     bin->nodes = alloc(arena, Node *, node_count);
     bin->node_count = node_count;
@@ -509,6 +494,9 @@ static void init_function_node(Node *bin, Node **stack, u32 *stack_len, Arena *a
     {
         bin->nodes[node_count - 1 - i] = pop_sub_node(stack, stack_len);
     }
+    // pop sentinel
+    Node *n = pop_sub_node(stack, stack_len);
+    assert(n->kind == Node_Kind::SENTINEL);
 }
 
 
@@ -788,6 +776,13 @@ static Errcode parse_arithmetic(Arena *arena, Lexer *lex, Node **output_stack, u
                     operator_stack[operator_count++] = node;
                     flag_stack[*flag_count] = Control_Flag::in_function;
                     *flag_count += 1;
+
+                    
+                    Node *sentinel = alloc(arena, Node, 1);
+                    sentinel->kind = Node_Kind::SENTINEL;
+                    output_stack[*output_count] = sentinel; 
+                    *output_count += 1; 
+
                 }
                 else /* if VARIABLE */
                 {
@@ -1265,6 +1260,7 @@ static Errcode bytecode_from_tree(Arena *arena, Program *out_program, Node *tree
                             active_index = ops_count;
                         } break;
                         case Node_Kind::INVALID:
+                        case Node_Kind::SENTINEL:
                         case Node_Kind::OPEN_PAREN:
                         case Node_Kind::POSITIVE:
                         case Node_Kind::NEGATE:
@@ -1311,6 +1307,7 @@ static Errcode bytecode_from_tree(Arena *arena, Program *out_program, Node *tree
             switch (node->kind)
             {
                 case Node_Kind::INVALID: assert(false);
+                case Node_Kind::SENTINEL: assert(false);
                 case Node_Kind::OPEN_PAREN: assert(false);
                 case Node_Kind::POSITIVE:
                 case Node_Kind::PROGRAM:

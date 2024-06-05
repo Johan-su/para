@@ -170,6 +170,13 @@ static s32 unicode_chars[16] = {};
 static s32 char_count = 0;
 
 
+static s32 clamp(s32 a, s32 min, s32 max)
+{
+    if (a < min) return min;
+    if (a > max) return max;
+    return a;
+}
+
 struct UI_Result
 {
     bool pressed;
@@ -212,14 +219,9 @@ struct UI_Element
     f32 *data;
     s32 data_cap;
 
-    s32 text_cursor_index;
     char *text;
     s32 text_capacity;
     
-    // used for selection while holding LSHIFT
-    // bool text_mark;
-    // bool text_select;
-    // s32 text_mark_start_index;
 
     Color background_color;
 
@@ -252,7 +254,11 @@ static u64 keyboard_focus_id = 0;
 
 //TODO add text mark
 
-
+static s32 text_cursor_index = 0;
+// used for selection while holding LSHIFT
+// bool text_mark;
+// bool text_select;
+// s32 text_mark_start_index;
 
 
 static UI_Element last_stack[512] = {};
@@ -361,56 +367,11 @@ static void end_children()
     parent = {};
 }
 
-// static bool bounding_box(u64 id, s32 x, s32 y, s32 w, s32 h)
-// {
-//     UI_Element e = {};
-
-//     e.flags = UI_Flags_mouse_clickable|UI_Flags_draw_background|UI_Flags_draw_border|UI_Flags_resizeable|UI_Flags_change_cursor_at_border;
-//     e.id = id;
-//     e.index = element_count;
-//     e.parent_index = parent.index;
-
-//     e.active = last_stack[e.index].active;
-//     e.background_color = ColorFromHSV(236.0f, 0.45f, 0.45f);
-
-//     e.x = x;
-//     e.y = y;
-//     e.w = w;
-//     e.h = h;
-
-//     bool is_hover = hover(x + 1, y + 1, w - 1, h - 1);
-
-
-//     bool result = false;
-
-//     if (is_active(id, e.index))
-//     {
-//         if (mouse_left_pressed && !is_hover)
-//         {
-//             e.active = false;
-//         }
-//     }
-//     else if (is_hot(id))
-//     {
-//         if (mouse_left_pressed && is_hover)
-//         {
-//             e.text_cursor_index = 0;
-//             e.active = true;
-//         }
-//     }
-//     else if (is_hover)
-//     {
-//         set_hot(e);
-//     }
-
 
 static s32 font_size = 18;
 static s32 glyph_width = (s32)((f32)font_size*0.65f);
 
 
-//     append_element(e);
-//     return result;
-// }
 static usize bounded_strlen(char *data, usize max_size)
 {
     usize len = 0;
@@ -423,6 +384,22 @@ static usize bounded_strlen(char *data, usize max_size)
     return len;
 }
 
+static void remove_text_region_and_set_cursor(char *text, s32 *text_len, s32 *cursor_index, s32 start, s32 end)
+{
+    s32 region_len = end - start + 1;
+    s32 right_len = *text_len - end - 1;
+
+    memmove(text + start, text + end + 1, (usize)right_len);
+    memset(text + start + right_len, 0, (usize)region_len);
+
+    *text_len -= region_len;
+
+    s32 cursor_change = start - *cursor_index;
+    if (cursor_change > 0) cursor_change = 0;
+    if (cursor_change < -region_len) cursor_change = -region_len; 
+
+    *cursor_index += cursor_change;
+}
 
 static UI_Result get_result_from_element(UI_Element *e)
 {
@@ -459,10 +436,13 @@ static UI_Result get_result_from_element(UI_Element *e)
         }
     }
     if (e->flags & UI_Flags_keyboard_clickable)
-    {
+    {        
         if (keyboard_focus_id == e->id)
         {
-            result.keyboard_click = true;
+            result.keyboard_click = key_pressed[KEY_ENTER];
+            result.pressed = key_pressed[KEY_ENTER];
+            result.down = key_down[KEY_ENTER];
+            result.released = key_released[KEY_ENTER];
         }
     }
 
@@ -475,6 +455,21 @@ static UI_Result get_result_from_element(UI_Element *e)
         
         if (keyboard_focus_id == e->id)
         {
+
+            s32 len = 0;
+            {
+                assert(e->text_capacity >= 0);
+                usize len_ = bounded_strlen(e->text, (usize)e->text_capacity);
+                assert(len_ < INT32_MAX);
+                len = (s32) len_;
+            }
+
+            if (is_active(e->id))
+            {
+                s32 v = (mx - e->x) / glyph_width;
+                text_cursor_index = clamp(v, 0, len);
+            }
+
             if (!is_active(e->id) && !is_active(0))
             {
                 keyboard_focus_id = 0;
@@ -485,22 +480,15 @@ static UI_Result get_result_from_element(UI_Element *e)
                 keyboard_focus_id = 0;
             }
 
-            s32 len = 0;
-            {
-                assert(e->text_capacity >= 0);
-                usize len_ = bounded_strlen(e->text, (usize)e->text_capacity);
-                assert(len_ < INT32_MAX);
-                len = (s32) len_;
-            }
 
-            if (key_pressed[KEY_RIGHT] && e->text_cursor_index < len)
+            if (key_pressed[KEY_RIGHT] && text_cursor_index < len)
             {
                 // if (!e->text_select)
                 //     e->text_mark = false;
 
                 if (key_down[KEY_LEFT_CONTROL])
                 {
-                    s32 new_index = e->text_cursor_index;
+                    s32 new_index = text_cursor_index;
 
                     while (new_index < len && is_whitespace(e->text[new_index])) 
                     {
@@ -510,21 +498,21 @@ static UI_Result get_result_from_element(UI_Element *e)
                     {
                         new_index += 1;
                     }
-                    e->text_cursor_index = new_index;
+                    text_cursor_index = new_index;
                 }
                 else
                 {
-                    e->text_cursor_index += 1;   
+                    text_cursor_index += 1;   
                 }
             }
-            else if (key_pressed[KEY_LEFT] && e->text_cursor_index != 0)
+            else if (key_pressed[KEY_LEFT] && text_cursor_index != 0)
             {
                 // if (!e->text_select)
                 //     e->text_mark = false;
 
                 if (key_down[KEY_LEFT_CONTROL])
                 {  
-                    s32 new_index = e->text_cursor_index - 1;
+                    s32 new_index = text_cursor_index - 1;
 
                     while (new_index >= 0 && is_whitespace(e->text[new_index])) 
                     {
@@ -534,25 +522,142 @@ static UI_Result get_result_from_element(UI_Element *e)
                     {
                         new_index -= 1;
                     }
-                    e->text_cursor_index = new_index + 1;
+                    text_cursor_index = new_index + 1;
                 }
                 else
                 {
-                    e->text_cursor_index -= 1;   
+                    text_cursor_index -= 1;   
                 }
             }
-            // draw cursor
-            s32 center_y = e->y + e->h / 2;
-            s32 text_width = glyph_width * len;
+            else if (key_pressed[KEY_BACKSPACE])
+            {
+                // if (e->text_mark)
+                // {
+                //     e->text_mark = false;
 
-            s32 text_start_y = center_y - font_size / 2;
+                //     remove_marked_region_and_set_cursor(e, &len);
+                // }
+                if (text_cursor_index != 0)
+                {
+                    if (key_down[KEY_LEFT_CONTROL])
+                    {
 
+                        s32 start_index = text_cursor_index - 1;
 
-            DrawRectangle(e->x + 7 + glyph_width * e->text_cursor_index, text_start_y, 1, font_size, RED);
+                        // move left while whitespace
+                        while (start_index > 0 && is_whitespace(e->text[start_index])) 
+                        {
+                            start_index -= 1;
+                        }
+                        // move left until no whitespace
+                        while (start_index > 0 && !is_whitespace(e->text[start_index])) 
+                        {
+                            start_index -= 1;
+                        }
+
+                        s32 end_index = text_cursor_index - 1; 
+                        remove_text_region_and_set_cursor(e->text, &len, &text_cursor_index, start_index, end_index);
+
+                    }
+                    else
+                    {
+                        for (s32 i = text_cursor_index; i < len; ++i)
+                        {
+                            e->text[i - 1] = e->text[i];
+                        }
+                        e->text[len - 1] = '\0';
+                        text_cursor_index -= 1;
+                    }
+                }
+            }
+            else if (key_pressed[KEY_DELETE])
+            {
+                // if (e->text_mark)
+                // {
+                //     e->text_mark = false;
+
+                //     remove_marked_region_and_set_cursor(e, &len);
+                // }
+                if (text_cursor_index != len)
+                {
+                    for (s32 i = text_cursor_index + 1; i < len; ++i)
+                    {
+                        e->text[i - 1] = e->text[i];
+                    }
+                    e->text[len - 1] = '\0';
+                }
+            }
+            else if (key_pressed[KEY_HOME])
+            {
+                text_cursor_index = 0;
+            }
+            else if (key_pressed[KEY_END])
+            {
+                text_cursor_index = len;
+            }
+            else if (key_pressed[KEY_C] && key_down[KEY_LEFT_CONTROL])
+            {
+                todo();
+                // s32 start_index = 0;
+                // s32 end_index = 0;
+                // if (e->text_cursor_index < e->text_mark_start_index)
+                // {
+                //     start_index = e->text_cursor_index;
+                //     end_index = e->text_mark_start_index;
+                // }
+                // else
+                // {
+                //     start_index = e->text_mark_start_index;
+                //     end_index = e->text_cursor_index;
+                // }
+
+                // if (e->text_mark)
+                // {
+                //     char buf[128] = {};
+                //     snprintf(buf, sizeof(buf), "%.*s", (int)(end_index - start_index), e->text + start_index);
+                //     SetClipboardText(buf);
+                // }
+            }
+            else if (key_pressed[KEY_V] && key_down[KEY_LEFT_CONTROL])
+            {
+                todo();
+                GetClipboardText();
+            }
+            else
+            {
+
+                for (s32 i = 0; i < char_count; ++i)
+                {
+                    s32 key = unicode_chars[i];
+                    // TODO(Johan) maybe change so, shift still can mark after typing
+                    // if (e->text_select)
+                    // {
+                    //     e->text_select = false;
+                    //     e->text_mark = false;
+                    // }
+                    
+                    // if (e->text_mark)
+                    // {
+                    //     e->text_mark = false;
+                    //     remove_marked_region_and_set_cursor(e, &len);
+                    // }
+
+                    if (len + 1 < e->text_capacity)
+                    {
+                        for (s32 j = len; j-- > text_cursor_index; )
+                        {
+                            e->text[j + 1] = e->text[j];
+                        }
+                        //TODO(Johan) handle unicode characters correctly
+                        e->text[text_cursor_index] = (char) key;
+                        len += 1;
+                        text_cursor_index += 1;
+                    }
+                }
+            }
 
         }
     }
-    printf("keyboard_focus_id %llu\n", keyboard_focus_id);
     return result;
 }
 
@@ -580,11 +685,6 @@ static UI_Element *create_push_element(
     e.data_cap = data_cap;
 
     const UI_Element *le = last_stack + element_count;
-
-    e.text_cursor_index = le->text_cursor_index;
-    // e.text_mark = le->text_mark;
-    // e.text_select = le->text_select;
-    // e.text_mark_start_index = le->text_mark_start_index;
 
     e.text = text;
     e.text_capacity = text_capacity;
@@ -764,22 +864,7 @@ static void draw_text(const char *text, s32 text_len, int pos_x, int pos_y, Colo
     }
 }
 
-static void remove_text_region_and_set_cursor(char *text, s32 *text_len, s32 *text_cursor_index, s32 start, s32 end)
-{
-    s32 region_len = end - start + 1;
-    s32 right_len = *text_len - end - 1;
 
-    memmove(text + start, text + end + 1, (usize)right_len);
-    memset(text + start + right_len, 0, (usize)region_len);
-
-    *text_len -= region_len;
-
-    s32 cursor_change = start - *text_cursor_index;
-    if (cursor_change > 0) cursor_change = 0;
-    if (cursor_change < -region_len) cursor_change = -region_len; 
-
-    *text_cursor_index += cursor_change;
-}
 
 static void remove_marked_region_and_set_cursor(UI_Element *e, s32 *text_len)
 {
@@ -858,6 +943,26 @@ static void end_ui()
 
         if (e->flags & UI_Flags_text_input)
         {
+
+            if (keyboard_focus_id == e->id)
+            {
+                s32 len = 0;
+                {
+                    assert(e->text_capacity >= 0);
+                    usize len_ = bounded_strlen(e->text, (usize)e->text_capacity);
+                    assert(len_ < INT32_MAX);
+                    len = (s32) len_;
+                }
+                // draw cursor
+                s32 center_y = e->y + e->h / 2;
+                s32 text_width = glyph_width * len;
+
+                s32 text_start_y = center_y - font_size / 2;
+
+
+                DrawRectangle(e->x + 7 + glyph_width * text_cursor_index, text_start_y, 1, font_size, RED);
+            }
+
         //     if (is_active(e->id))
         //     {
         //         if (mouse_left_pressed)
@@ -1304,7 +1409,6 @@ int main()
 
 
     Arena temp_arena; init_arena(&temp_arena, 1000000);
-    Arena frame_arena; init_arena(&frame_arena, 1000000);
     Arena compile_arena; init_arena(&compile_arena, 1000000);
     Arena execute_arena; init_arena(&execute_arena, 1000000);
 
@@ -1332,12 +1436,9 @@ int main()
         samples[i] = alloc(&temp_arena, f32, b);
     }
 
-    u32 lens[ARRAY_SIZE(input_buf)] = {};
 
 
     char menu_buf[] = "menu1";
-    char button_bufs[4][16] = {"button1", "button2", "button3", "button4"};
-
 
     bool toggle = false;
 
@@ -1371,19 +1472,17 @@ int main()
         }
 
         {
-            bool data = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
-            mouse_left_pressed = data && !mouse_left;
-            mouse_left_released = !data && mouse_left;
-            mouse_left = data;
+            mouse_left_pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+            mouse_left_released = IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
+            mouse_left = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
         }
         for (int i = 0; i <= 348; ++i)
         {
-            bool data = IsKeyDown(i);
-            key_pressed[i] = data && !key_down[i];
-            key_released[i] = !data && key_down[i];
-            key_down[i] = data;
+            key_pressed[i] = IsKeyPressed(i);
+            key_released[i] = IsKeyReleased(i);
+            key_down[i] = IsKeyDown(i);
         }
-
+        
         mx = GetMouseX();
         my = GetMouseY();
 
@@ -1435,9 +1534,14 @@ int main()
                 memset(draw_text, 0, sizeof(draw_text));
                 memset(draw_samples, 0, sizeof(draw_samples));
 
-                lens[i] = result.len;
+                u32 lens[ARRAY_SIZE(input_buf)] = {};
+                for (u32 j = 0; j < ARRAY_SIZE(input_buf); ++j)
+                {
+                    lens[j] = bounded_strlen(input_buf[j], (usize)text_input_size);
+                }
+
                 clear_arena(&compile_arena);
-                String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, 8);
+                String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, ARRAY_SIZE(input_buf));
                 // String s = string_from_cstr(&compile_arena, "h(x)=x;g(x)=h(x);f(x)=g(x);");
                 printf("%.*s\n", (int)s.len, s.data);
                 Program program;
@@ -1446,14 +1550,35 @@ int main()
                 {
                     Error e = get_error();
 
-                    u32 expr_index = 0;
+
+                    u32 expr_error_index = 1;
                     for (u32 j = 0; j < s.len && j < e.errs[0].error_index; ++j)
                     {
-                        if (s.data[j] == ';')   
+                        if (s.data[j] == ';')
                         {
-                            expr_index += 1;
+                            expr_error_index += 1;
                         }
                     }
+
+                    u32 expr_index = 0;
+                    u32 non_empty = 0;
+
+                    for (u32 j = 0; j < ARRAY_SIZE(input_buf); ++j)
+                    {
+                        if (lens[j] != 0)
+                        {
+                            non_empty += 1;
+                        }
+                        if (non_empty == expr_error_index)
+                        {
+                            break;
+                        }
+                        expr_index += 1;
+                    }
+
+
+
+
                     String err_str = e.errs[0].msg;
 
                     assert(expr_index < 8);
