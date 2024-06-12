@@ -255,8 +255,9 @@ struct UI_State
 
     s32 text_cursor_index;
     // used for selection while holding LSHIFT
-    bool text_mark;
-    bool text_select;
+    //TODO(Johan) redo
+    bool has_text_selected;
+    bool selecting_text;
     s32 text_mark_start_index;
 
 
@@ -269,6 +270,9 @@ struct UI_State
 
     UI_Layout layout_list[512];
     s32 layout_count;
+
+
+    Arena *temp;
 };
 
 
@@ -480,6 +484,8 @@ static UI_Result get_result_from_element(UI_Element *e)
                 len = (s32) len_;
             }
 
+
+            //TODO(Johan) select text with mouse
             if (is_active(e->id))
             {
                 s32 v = (mx - e->x) / glyph_width;
@@ -498,22 +504,22 @@ static UI_Result get_result_from_element(UI_Element *e)
 
 
 
-            if (key_pressed[KEY_LEFT_SHIFT] && !g_state.text_select)
+            if (key_pressed[KEY_LEFT_SHIFT] && !g_state.selecting_text)
             {
-                g_state.text_mark = true;
-                g_state.text_select = true;
+                g_state.has_text_selected = true;
+                g_state.selecting_text = true;
                 g_state.text_mark_start_index = g_state.text_cursor_index;
             }
-            else if (key_released[KEY_LEFT_SHIFT] && g_state.text_select)
+            else if (key_released[KEY_LEFT_SHIFT] && g_state.selecting_text)
             {
-                g_state.text_select = false;
+                g_state.selecting_text = false;
             }
 
 
             if (key_pressed[KEY_RIGHT] && g_state.text_cursor_index < len)
             {
-                if (!g_state.text_select)
-                    g_state.text_mark = false;
+                if (!g_state.selecting_text)
+                    g_state.has_text_selected = false;
 
                 if (key_down[KEY_LEFT_CONTROL])
                 {
@@ -536,8 +542,8 @@ static UI_Result get_result_from_element(UI_Element *e)
             }
             else if (key_pressed[KEY_LEFT] && g_state.text_cursor_index != 0)
             {
-                if (!g_state.text_select)
-                    g_state.text_mark = false;
+                if (!g_state.selecting_text)
+                    g_state.has_text_selected = false;
 
                 if (key_down[KEY_LEFT_CONTROL])
                 {  
@@ -560,9 +566,9 @@ static UI_Result get_result_from_element(UI_Element *e)
             }
             else if (key_pressed[KEY_BACKSPACE])
             {
-                if (g_state.text_mark)
+                if (g_state.has_text_selected)
                 {
-                    g_state.text_mark = false;
+                    g_state.has_text_selected = false;
 
                     remove_marked_region_and_set_cursor(e->text, &len);
                 }
@@ -601,9 +607,9 @@ static UI_Result get_result_from_element(UI_Element *e)
             }
             else if (key_pressed[KEY_DELETE])
             {
-                if (g_state.text_mark)
+                if (g_state.has_text_selected)
                 {
-                    g_state.text_mark = false;
+                    g_state.has_text_selected = false;
 
                     remove_marked_region_and_set_cursor(e->text, &len);
                 }
@@ -626,48 +632,54 @@ static UI_Result get_result_from_element(UI_Element *e)
             }
             else if (key_pressed[KEY_C] && key_down[KEY_LEFT_CONTROL])
             {
-                todo();
-                // s32 start_index = 0;
-                // s32 end_index = 0;
-                // if (e->g_state.text_cursor_index < e->text_mark_start_index)
-                // {
-                //     start_index = e->g_state.text_cursor_index;
-                //     end_index = e->text_mark_start_index;
-                // }
-                // else
-                // {
-                //     start_index = e->text_mark_start_index;
-                //     end_index = e->g_state.text_cursor_index;
-                // }
+                s32 start_index = 0;
+                s32 end_index = 0;
+                if (g_state.text_cursor_index < g_state.text_mark_start_index)
+                {
+                    start_index = g_state.text_cursor_index;
+                    end_index = g_state.text_mark_start_index;
+                }
+                else
+                {
+                    start_index = g_state.text_mark_start_index;
+                    end_index = g_state.text_cursor_index;
+                }
 
-                // if (g_state.text_mark)
-                // {
-                //     char buf[128] = {};
-                //     snprintf(buf, sizeof(buf), "%.*s", (int)(end_index - start_index), e->text + start_index);
-                //     SetClipboardText(buf);
-                // }
+                if (g_state.has_text_selected)
+                {
+                    usize temp = get_arena_pos(g_state.temp);
+                    const char *buf = tprintf(g_state.temp, "%.*s", (int)(end_index - start_index), e->text + start_index);
+                    SetClipboardText(buf);
+                    set_arena_pos(g_state.temp, temp);
+                }
             }
             else if (key_pressed[KEY_V] && key_down[KEY_LEFT_CONTROL])
             {
                 todo();
-                GetClipboardText();
+                const char *clip_text = GetClipboardText();
+            }
+            else if (key_pressed[KEY_A] && key_down[KEY_LEFT_CONTROL])
+            {
+                g_state.has_text_selected = true;
+                g_state.text_cursor_index = 0;
+                g_state.text_mark_start_index = len;
             }
             else
             {
-
                 for (s32 i = 0; i < char_count; ++i)
                 {
                     s32 key = unicode_chars[i];
                     //TODO(Johan) maybe change so, shift still can mark after typing
-                    if (g_state.text_select)
+                    if (g_state.selecting_text)
                     {
-                        g_state.text_select = false;
-                        g_state.text_mark = false;
+                        g_state.selecting_text = false;
+                        g_state.has_text_selected = false;
+                        remove_marked_region_and_set_cursor(e->text, &len);
                     }
                     
-                    if (g_state.text_mark)
+                    if (g_state.has_text_selected)
                     {
-                        g_state.text_mark = false;
+                        g_state.has_text_selected = false;
                         remove_marked_region_and_set_cursor(e->text, &len);
                     }
 
@@ -678,6 +690,7 @@ static UI_Result get_result_from_element(UI_Element *e)
                             e->text[j + 1] = e->text[j];
                         }
                         //TODO(Johan) handle unicode characters correctly
+                        assert(key < CHAR_MAX);
                         e->text[g_state.text_cursor_index] = (char) key;
                         len += 1;
                         g_state.text_cursor_index += 1;
@@ -974,7 +987,7 @@ static void end_ui()
 
                 DrawRectangle(e->x + 7 + glyph_width * g_state.text_cursor_index, text_start_y, 1, font_size, RED);
 
-                if (g_state.text_mark)
+                if (g_state.has_text_selected)
                 {
                     s32 start_index = 0;
                     s32 end_index = 0;
@@ -1190,7 +1203,7 @@ int main()
     Arena compile_arena; init_arena(&compile_arena, 1000000);
     Arena execute_arena; init_arena(&execute_arena, 1000000);
 
-
+    g_state.temp = &temp_arena;
 
     //TODO: horizontal scrolling
     char *input_buf[8] = {};

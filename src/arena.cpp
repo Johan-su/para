@@ -58,7 +58,7 @@ static usize get_arena_pos(Arena *arena)
     return arena->pos;
 }
 
-static void set_arena(Arena *arena, usize pos)
+static void set_arena_pos(Arena *arena, usize pos)
 {
     assert(pos % 8 == 0);
     arena->pos = pos;
