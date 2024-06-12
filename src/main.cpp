@@ -235,6 +235,7 @@ enum UI_Flow
     DOWN,
 };
 
+
 struct UI_Layout
 {
     s32 x, y, w, h;
@@ -455,14 +456,15 @@ static UI_Result get_result_from_element(UI_Element *e)
             result.released = true;
         }
     }
+
     if (e->flags & UI_Flags_keyboard_clickable)
     {        
         if (g_state.keyboard_focus_id == e->id)
         {
-            result.keyboard_click = key_pressed[KEY_ENTER];
-            result.pressed = key_pressed[KEY_ENTER];
-            result.down = key_down[KEY_ENTER];
-            result.released = key_released[KEY_ENTER];
+            result.keyboard_click = key_pressed[KEY_ENTER] || key_pressed[KEY_KP_ENTER];
+            result.pressed = key_pressed[KEY_ENTER] || key_pressed[KEY_KP_ENTER];
+            result.down = key_down[KEY_ENTER] || key_pressed[KEY_KP_ENTER];
+            result.released = key_released[KEY_ENTER] || key_pressed[KEY_KP_ENTER];
         }
     }
 
@@ -1189,6 +1191,7 @@ int main2(void)
 }
 
 
+
 int main()
 {
     // test();
@@ -1226,7 +1229,6 @@ int main()
         usize b = (usize)sample_size;
         samples[i] = alloc(&temp_arena, f32, b);
     }
-
 
 
     char menu_buf[] = "menu1";
@@ -1333,10 +1335,11 @@ int main()
 
                 clear_arena(&compile_arena);
                 String s = concat_and_add_semicolon_at_the_end_of_every_substr(&compile_arena, (char **)input_buf, lens, ARRAY_SIZE(input_buf));
-                // String s = string_from_cstr(&compile_arena, "h(x)=x;g(x)=h(x);f(x)=g(x);");
                 printf("%.*s\n", (int)s.len, s.data);
                 Program program;
+                f64 before = GetTime();
                 int err = compile(&compile_arena, s.data, (u32)s.len, &program);
+                printf("compile time %f\n", GetTime() - before);
                 if (err)
                 {
                     Error e = get_error();
