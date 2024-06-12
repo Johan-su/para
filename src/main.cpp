@@ -243,37 +243,42 @@ struct UI_Layout
     UI_Flow flow;
 };
 
-static u64 active_id = 0;
-static u64 hot_id = 0;
-static UI_Element parent = {};
 
-static u64 keyboard_focus_id = 0;
+struct UI_State
+{
+    u64 active_id;
+    u64 hot_id;
+    UI_Element parent;
 
-
-//TODO add text mark
-
-static s32 text_cursor_index = 0;
-// used for selection while holding LSHIFT
-// bool text_mark;
-// bool text_select;
-// s32 text_mark_start_index;
+    u64 keyboard_focus_id;
 
 
-static UI_Element last_stack[512] = {};
-static s32 last_count = 0;
+    s32 text_cursor_index;
+    // used for selection while holding LSHIFT
+    bool text_mark;
+    bool text_select;
+    s32 text_mark_start_index;
 
-static UI_Element element_list[512] = {};
-static s32 element_count = 0;
+
+    UI_Element last_stack[512];
+    s32 last_count;
+
+    UI_Element element_list[512];
+    s32 element_count;
 
 
-static UI_Layout layout_list[512] = {};
-static s32 layout_count = 0;
+    UI_Layout layout_list[512];
+    s32 layout_count;
+};
+
+
+static UI_State g_state = {};
 
 
 static void push_sub_layout(s32 w, s32 h, UI_Flow flow)
 {
-    assert(layout_count > 0);
-    UI_Layout *l = layout_list + layout_count - 1;
+    assert(g_state.layout_count > 0);
+    UI_Layout *l = g_state.layout_list + g_state.layout_count - 1;
     UI_Layout layout = {l->x, l->y, w, h, flow};
 
 
@@ -298,49 +303,49 @@ static void push_sub_layout(s32 w, s32 h, UI_Flow flow)
     }
 
 
-    assert(layout_count < (s32) sizeof(layout_list));
-    layout_list[layout_count++] = layout;
+    assert(g_state.layout_count < (s32) sizeof(g_state.layout_list));
+    g_state.layout_list[g_state.layout_count++] = layout;
 }
 
 static void push_layout(UI_Layout layout)
 {
-    assert(layout_count < (s32) sizeof(layout_list));
-    layout_list[layout_count++] = layout;
+    assert(g_state.layout_count < (s32) sizeof(g_state.layout_list));
+    g_state.layout_list[g_state.layout_count++] = layout;
 }
 
 
 static void pop_layout()
 {
-    assert(layout_count > 0);
-    layout_count -= 1;
+    assert(g_state.layout_count > 0);
+    g_state.layout_count -= 1;
 }
 
 static UI_Element *append_element(UI_Element element)
 {
-    assert(element_count < (s32) sizeof(element_list));
-    element_list[element_count++] = element;
-    return element_list + element_count - 1;
+    assert(g_state.element_count < (s32) sizeof(g_state.element_list));
+    g_state.element_list[g_state.element_count++] = element;
+    return g_state.element_list + g_state.element_count - 1;
 }
 
 
 static bool is_active(u64 id)
 {
-    return active_id == id;
+    return g_state.active_id == id;
 }
 
 static void set_active(u64 id)
 {
-    active_id = id;
+    g_state.active_id = id;
 }
 
 static bool is_hot(u64 id)
 {
-    return hot_id == id;
+    return g_state.hot_id == id;
 }
 
 static void set_hot(u64 id)
 {
-    hot_id = id;
+    g_state.hot_id = id;
 }
 
 
@@ -356,13 +361,13 @@ static bool hover(s32 x, s32 y, s32 w, s32 h)
 
 static void begin_children()
 {
-    assert(element_count > 0);
-    parent = element_list[element_count - 1];
+    assert(g_state.element_count > 0);
+    g_state.parent = g_state.element_list[g_state.element_count - 1];
 }
 
 static void end_children()
 {
-    parent = {};
+    g_state.parent = {};
 }
 
 
@@ -399,14 +404,27 @@ static void remove_text_region_and_set_cursor(char *text, s32 *text_len, s32 *cu
     *cursor_index += cursor_change;
 }
 
+static void remove_marked_region_and_set_cursor(char *text, s32 *text_len)
+{
+    s32 start_index = 0;
+    s32 end_index = 0;
+    if (g_state.text_cursor_index < g_state.text_mark_start_index)
+    {
+        start_index = g_state.text_cursor_index;
+        end_index = g_state.text_mark_start_index;
+    }
+    else
+    {
+        start_index = g_state.text_mark_start_index;
+        end_index = g_state.text_cursor_index;
+    }
+
+    remove_text_region_and_set_cursor(text, text_len, &g_state.text_cursor_index, start_index, end_index - 1);
+}
+
 static UI_Result get_result_from_element(UI_Element *e)
 {
     UI_Result result = {};
-
-        // if (e->active)
-        // {
-        //     printf("e->index = %d active\n", e->index);
-        // }
 
     bool is_hover = hover(e->x + 1, e->y + 1, e->w - 1, e->h - 1);
     if (e->flags & UI_Flags_mouse_clickable)
@@ -435,7 +453,7 @@ static UI_Result get_result_from_element(UI_Element *e)
     }
     if (e->flags & UI_Flags_keyboard_clickable)
     {        
-        if (keyboard_focus_id == e->id)
+        if (g_state.keyboard_focus_id == e->id)
         {
             result.keyboard_click = key_pressed[KEY_ENTER];
             result.pressed = key_pressed[KEY_ENTER];
@@ -448,10 +466,10 @@ static UI_Result get_result_from_element(UI_Element *e)
     {
         if ((e->flags & UI_Flags_mouse_clickable) && is_active(e->id) && mouse_left_pressed)
         {
-            keyboard_focus_id = e->id;
+            g_state.keyboard_focus_id = e->id;
         }
         
-        if (keyboard_focus_id == e->id)
+        if (g_state.keyboard_focus_id == e->id)
         {
 
             s32 len = 0;
@@ -465,28 +483,41 @@ static UI_Result get_result_from_element(UI_Element *e)
             if (is_active(e->id))
             {
                 s32 v = (mx - e->x) / glyph_width;
-                text_cursor_index = clamp(v, 0, len);
+                g_state.text_cursor_index = clamp(v, 0, len);
             }
 
             if (!is_active(e->id) && !is_active(0))
             {
-                keyboard_focus_id = 0;
+                g_state.keyboard_focus_id = 0;
             }
 
             if (key_pressed[KEY_ESCAPE] || key_pressed[KEY_ENTER] || key_pressed[KEY_KP_ENTER])
             {
-                keyboard_focus_id = 0;
+                g_state.keyboard_focus_id = 0;
             }
 
 
-            if (key_pressed[KEY_RIGHT] && text_cursor_index < len)
+
+            if (key_pressed[KEY_LEFT_SHIFT] && !g_state.text_select)
             {
-                // if (!e->text_select)
-                //     e->text_mark = false;
+                g_state.text_mark = true;
+                g_state.text_select = true;
+                g_state.text_mark_start_index = g_state.text_cursor_index;
+            }
+            else if (key_released[KEY_LEFT_SHIFT] && g_state.text_select)
+            {
+                g_state.text_select = false;
+            }
+
+
+            if (key_pressed[KEY_RIGHT] && g_state.text_cursor_index < len)
+            {
+                if (!g_state.text_select)
+                    g_state.text_mark = false;
 
                 if (key_down[KEY_LEFT_CONTROL])
                 {
-                    s32 new_index = text_cursor_index;
+                    s32 new_index = g_state.text_cursor_index;
 
                     while (new_index < len && is_whitespace(e->text[new_index])) 
                     {
@@ -496,21 +527,21 @@ static UI_Result get_result_from_element(UI_Element *e)
                     {
                         new_index += 1;
                     }
-                    text_cursor_index = new_index;
+                    g_state.text_cursor_index = new_index;
                 }
                 else
                 {
-                    text_cursor_index += 1;   
+                    g_state.text_cursor_index += 1;   
                 }
             }
-            else if (key_pressed[KEY_LEFT] && text_cursor_index != 0)
+            else if (key_pressed[KEY_LEFT] && g_state.text_cursor_index != 0)
             {
-                // if (!e->text_select)
-                //     e->text_mark = false;
+                if (!g_state.text_select)
+                    g_state.text_mark = false;
 
                 if (key_down[KEY_LEFT_CONTROL])
                 {  
-                    s32 new_index = text_cursor_index - 1;
+                    s32 new_index = g_state.text_cursor_index - 1;
 
                     while (new_index >= 0 && is_whitespace(e->text[new_index])) 
                     {
@@ -520,27 +551,27 @@ static UI_Result get_result_from_element(UI_Element *e)
                     {
                         new_index -= 1;
                     }
-                    text_cursor_index = new_index + 1;
+                    g_state.text_cursor_index = new_index + 1;
                 }
                 else
                 {
-                    text_cursor_index -= 1;   
+                    g_state.text_cursor_index -= 1;   
                 }
             }
             else if (key_pressed[KEY_BACKSPACE])
             {
-                // if (e->text_mark)
-                // {
-                //     e->text_mark = false;
+                if (g_state.text_mark)
+                {
+                    g_state.text_mark = false;
 
-                //     remove_marked_region_and_set_cursor(e, &len);
-                // }
-                if (text_cursor_index != 0)
+                    remove_marked_region_and_set_cursor(e->text, &len);
+                }
+                if (g_state.text_cursor_index != 0)
                 {
                     if (key_down[KEY_LEFT_CONTROL])
                     {
 
-                        s32 start_index = text_cursor_index - 1;
+                        s32 start_index = g_state.text_cursor_index - 1;
 
                         // move left while whitespace
                         while (start_index > 0 && is_whitespace(e->text[start_index])) 
@@ -553,32 +584,32 @@ static UI_Result get_result_from_element(UI_Element *e)
                             start_index -= 1;
                         }
 
-                        s32 end_index = text_cursor_index - 1; 
-                        remove_text_region_and_set_cursor(e->text, &len, &text_cursor_index, start_index, end_index);
+                        s32 end_index = g_state.text_cursor_index - 1; 
+                        remove_text_region_and_set_cursor(e->text, &len, &g_state.text_cursor_index, start_index, end_index);
 
                     }
                     else
                     {
-                        for (s32 i = text_cursor_index; i < len; ++i)
+                        for (s32 i = g_state.text_cursor_index; i < len; ++i)
                         {
                             e->text[i - 1] = e->text[i];
                         }
                         e->text[len - 1] = '\0';
-                        text_cursor_index -= 1;
+                        g_state.text_cursor_index -= 1;
                     }
                 }
             }
             else if (key_pressed[KEY_DELETE])
             {
-                // if (e->text_mark)
-                // {
-                //     e->text_mark = false;
-
-                //     remove_marked_region_and_set_cursor(e, &len);
-                // }
-                if (text_cursor_index != len)
+                if (g_state.text_mark)
                 {
-                    for (s32 i = text_cursor_index + 1; i < len; ++i)
+                    g_state.text_mark = false;
+
+                    remove_marked_region_and_set_cursor(e->text, &len);
+                }
+                if (g_state.text_cursor_index != len)
+                {
+                    for (s32 i = g_state.text_cursor_index + 1; i < len; ++i)
                     {
                         e->text[i - 1] = e->text[i];
                     }
@@ -587,29 +618,29 @@ static UI_Result get_result_from_element(UI_Element *e)
             }
             else if (key_pressed[KEY_HOME])
             {
-                text_cursor_index = 0;
+                g_state.text_cursor_index = 0;
             }
             else if (key_pressed[KEY_END])
             {
-                text_cursor_index = len;
+                g_state.text_cursor_index = len;
             }
             else if (key_pressed[KEY_C] && key_down[KEY_LEFT_CONTROL])
             {
                 todo();
                 // s32 start_index = 0;
                 // s32 end_index = 0;
-                // if (e->text_cursor_index < e->text_mark_start_index)
+                // if (e->g_state.text_cursor_index < e->text_mark_start_index)
                 // {
-                //     start_index = e->text_cursor_index;
+                //     start_index = e->g_state.text_cursor_index;
                 //     end_index = e->text_mark_start_index;
                 // }
                 // else
                 // {
                 //     start_index = e->text_mark_start_index;
-                //     end_index = e->text_cursor_index;
+                //     end_index = e->g_state.text_cursor_index;
                 // }
 
-                // if (e->text_mark)
+                // if (g_state.text_mark)
                 // {
                 //     char buf[128] = {};
                 //     snprintf(buf, sizeof(buf), "%.*s", (int)(end_index - start_index), e->text + start_index);
@@ -627,29 +658,29 @@ static UI_Result get_result_from_element(UI_Element *e)
                 for (s32 i = 0; i < char_count; ++i)
                 {
                     s32 key = unicode_chars[i];
-                    // TODO(Johan) maybe change so, shift still can mark after typing
-                    // if (e->text_select)
-                    // {
-                    //     e->text_select = false;
-                    //     e->text_mark = false;
-                    // }
+                    //TODO(Johan) maybe change so, shift still can mark after typing
+                    if (g_state.text_select)
+                    {
+                        g_state.text_select = false;
+                        g_state.text_mark = false;
+                    }
                     
-                    // if (e->text_mark)
-                    // {
-                    //     e->text_mark = false;
-                    //     remove_marked_region_and_set_cursor(e, &len);
-                    // }
+                    if (g_state.text_mark)
+                    {
+                        g_state.text_mark = false;
+                        remove_marked_region_and_set_cursor(e->text, &len);
+                    }
 
                     if (len + 1 < e->text_capacity)
                     {
-                        for (s32 j = len; j-- > text_cursor_index; )
+                        for (s32 j = len; j-- > g_state.text_cursor_index; )
                         {
                             e->text[j + 1] = e->text[j];
                         }
                         //TODO(Johan) handle unicode characters correctly
-                        e->text[text_cursor_index] = (char) key;
+                        e->text[g_state.text_cursor_index] = (char) key;
                         len += 1;
-                        text_cursor_index += 1;
+                        g_state.text_cursor_index += 1;
                     }
                 }
             }
@@ -677,20 +708,20 @@ static UI_Element *create_push_element(
     e.flags = flags;
 
     e.id = id;
-    e.parent_id = parent.id;
+    e.parent_id = g_state.parent.id;
 
     e.data = data;
     e.data_cap = data_cap;
 
-    const UI_Element *le = last_stack + element_count;
+    const UI_Element *le = g_state.last_stack + g_state.element_count;
 
     e.text = text;
     e.text_capacity = text_capacity;
 
     e.background_color = background_color;
 
-    assert(layout_count > 0);
-    UI_Layout *l = layout_list + layout_count - 1;
+    assert(g_state.layout_count > 0);
+    UI_Layout *l = g_state.layout_list + g_state.layout_count - 1;
 
     e.x = l->x;
     e.y = l->y;
@@ -864,24 +895,7 @@ static void draw_text(const char *text, s32 text_len, int pos_x, int pos_y, Colo
 
 
 
-static void remove_marked_region_and_set_cursor(UI_Element *e, s32 *text_len)
-{
-    todo();
-    // s32 start_index = 0;
-    // s32 end_index = 0;
-    // if (e->text_cursor_index < e->text_mark_start_index)
-    // {
-    //     start_index = e->text_cursor_index;
-    //     end_index = e->text_mark_start_index;
-    // }
-    // else
-    // {
-    //     start_index = e->text_mark_start_index;
-    //     end_index = e->text_cursor_index;
-    // }
 
-    // remove_text_region_and_set_cursor(e->text, text_len, &e->text_cursor_index, start_index, end_index - 1);
-}
 
 
 
@@ -901,12 +915,12 @@ static void remove_marked_region_and_set_cursor(UI_Element *e, s32 *text_len)
 
 static bool has_active_children(u64 id)
 {
-    for (s32 i = 0; i < element_count; ++i)
+    for (s32 i = 0; i < g_state.element_count; ++i)
     {
-        UI_Element *e = element_list + i;
+        UI_Element *e = g_state.element_list + i;
 
         // if (e->parent_id == id && (e->active || hover(e->x + 1, e->y + 1, e->w - 1, e->h - 1)))
-        if (id == active_id && e->parent_id == id)
+        if (id == g_state.active_id && e->parent_id == id)
         {
             return true;   
         }
@@ -917,7 +931,7 @@ static bool has_active_children(u64 id)
 static void end_ui()
 {
     // iterating over all elements
-    for (UI_Element *e = element_list; e < element_list + element_count; ++e)
+    for (UI_Element *e = g_state.element_list; e < g_state.element_list + g_state.element_count; ++e)
     {
         if (e->flags & UI_Flags_draw_background)
         {
@@ -942,7 +956,7 @@ static void end_ui()
         if (e->flags & UI_Flags_text_input)
         {
 
-            if (keyboard_focus_id == e->id)
+            if (g_state.keyboard_focus_id == e->id)
             {
                 s32 len = 0;
                 {
@@ -958,7 +972,26 @@ static void end_ui()
                 s32 text_start_y = center_y - font_size / 2;
 
 
-                DrawRectangle(e->x + 7 + glyph_width * text_cursor_index, text_start_y, 1, font_size, RED);
+                DrawRectangle(e->x + 7 + glyph_width * g_state.text_cursor_index, text_start_y, 1, font_size, RED);
+
+                if (g_state.text_mark)
+                {
+                    s32 start_index = 0;
+                    s32 end_index = 0;
+                    if (g_state.text_cursor_index < g_state.text_mark_start_index)
+                    {
+                        start_index = g_state.text_cursor_index;
+                        end_index = g_state.text_mark_start_index;
+                    }
+                    else
+                    {
+                        start_index = g_state.text_mark_start_index;
+                        end_index = g_state.text_cursor_index;
+                    }
+                    s32 mark_len = end_index - start_index;
+
+                    DrawRectangle(e->x + 7 + glyph_width * start_index, text_start_y, glyph_width * mark_len, font_size, BLUE);
+                }
             }
         }
 
@@ -1020,12 +1053,12 @@ static void end_ui()
         }
 
     }
-    active_id = 0;
-    memcpy(last_stack, element_list, sizeof(element_list));
-    last_count = element_count;
-    element_count = 0;
+    g_state.active_id = 0;
+    memcpy(g_state.last_stack, g_state.element_list, sizeof(g_state.element_list));
+    g_state.last_count = g_state.element_count;
+    g_state.element_count = 0;
     // TODO(Johan) remove this memset. it is only for debugging.
-    memset(element_list, 0, sizeof(element_list));
+    memset(g_state.element_list, 0, sizeof(g_state.element_list));
 }
 
 
