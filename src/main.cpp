@@ -204,6 +204,7 @@ enum UI_Flags : u64
     UI_Flags_brighten_background_when_active = (1 << 7),
     UI_Flags_horizontal_scroll               = (1 << 8),
     UI_Flags_draw_samples                    = (1 << 9),
+    UI_Flags_draw_graph                      = (1 << 10),
 };
 
 struct UI_Element
@@ -872,6 +873,29 @@ static UI_Result plot_lines(f32 *buf, s32 buf_size, s32 w, s32 h)
     return result;
 }
 
+
+static UI_Result plot_graph(f32 *x_interleaved_y, s32 buf_size, s32 w, s32 h)
+{
+    UI_Element *e = create_push_element(
+        UI_Flags_draw_background|
+        UI_Flags_draw_border|
+        UI_Flags_draw_graph|
+        UI_Flags_mouse_clickable,
+        (u64) x_interleaved_y,
+        x_interleaved_y, buf_size,
+        nullptr,
+        0,
+        ColorFromHSV(236.0f, 0.47f, 0.45f),
+        w,
+        h
+    );
+    
+    UI_Result result = get_result_from_element(e);
+
+    return result;
+}
+
+
 static void begin_ui()
 {
     UI_Element e = {};
@@ -1010,6 +1034,12 @@ static void end_ui()
             }
         }
 
+
+        if (e->flags & UI_Flags_draw_graph)
+        {
+            todo();
+        }
+
         if (e->flags & UI_Flags_draw_samples)
         {
             f32 max_y = -INFINITY;
@@ -1069,6 +1099,7 @@ static void end_ui()
 
     }
     g_state.active_id = 0;
+    g_state.hot_id = 0;
     memcpy(g_state.last_stack, g_state.element_list, sizeof(g_state.element_list));
     g_state.last_count = g_state.element_count;
     g_state.element_count = 0;
@@ -1236,6 +1267,11 @@ int main()
     bool toggle = false;
 
 
+    bool draw_big_graph = false;
+    u32 big_graph_sample_id = 0;
+
+    String big_graph_button_str = string_from_cstr(&temp_arena, "close");
+
     char menu[] = "menu";
     char buttons[10][16] = {
         "1",
@@ -1297,24 +1333,6 @@ int main()
         s32 text_w = 128 * 3;        
         s32 text_h = 48;
 
-        push_sub_layout(50, 500, DOWN);
-        {
-            if (dropdown_menu(menu, sizeof(menu), 50, 50).pressed)
-            {
-                printf("test click\n");
-                toggle = !toggle;
-            }
-            if (toggle)
-            {
-                for (u32 i = 0; i < 10; ++i)
-                {
-                    button(buttons[i], 16, 40, 40);
-                }
-            }
-        }
-        pop_layout();
-
-
 
         push_sub_layout(2 * text_w, screen_height, DOWN);
         begin_children();
@@ -1339,7 +1357,7 @@ int main()
                 Program program;
                 f64 before = GetTime();
                 int err = compile(&compile_arena, s.data, (u32)s.len, &program);
-                printf("compile time %f\n", GetTime() - before);
+                printf("compile time %fs\n", GetTime() - before);
                 if (err)
                 {
                     Error e = get_error();
@@ -1454,6 +1472,17 @@ int main()
             {
                 if (plot_lines(samples[i], sample_size, 48, 48).pressed)
                 {
+                    
+                    if (big_graph_sample_id != i)
+                    {
+                        draw_big_graph = true;
+                    }
+                    else
+                    {
+                        draw_big_graph = !draw_big_graph;
+                    }
+
+                    big_graph_sample_id = i;
                     printf("plot %zu pressed\n", i);
                 }
             }
@@ -1467,6 +1496,21 @@ int main()
         }
         end_children();
         pop_layout();
+
+
+        push_sub_layout(500, 550, UI_Flow::DOWN);
+        if (draw_big_graph)
+        {
+            plot_lines(samples[big_graph_sample_id], sample_size, 500, 500);
+            if (button(big_graph_button_str.data, (s32)big_graph_button_str.len, 100, 50).pressed)
+            {
+                draw_big_graph = false;
+            }
+        }
+        pop_layout();
+
+
+
 
         pop_layout();
         end_ui();
