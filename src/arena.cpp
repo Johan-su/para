@@ -1,33 +1,31 @@
-
 struct Arena
 {
-    usize pos;
-    usize max_capacity;
+    u64 pos;
+    u64 max_capacity;
     u8 *data;
 };
 
 
-
-static void init_arena(Arena *arena, usize max_capacity)
+void init_arena(Arena *arena, u64 max_capacity)
 {
     arena->pos = 0;
     arena->data = (u8 *)calloc(max_capacity, 1);
     arena->max_capacity = max_capacity;
 }
 
-static void clean_arena(Arena *arena)
+void clean_arena(Arena *arena)
 {
     free(arena->data);
     memset(arena, 0, sizeof(*arena));
 }
 
-static usize align_to_8_boundry(usize a)
+u64 align_to_8_boundry(u64 a)
 {
     usize offset = (8 - (a % 8)) % 8;
     return a + offset;
 }
 
-static void *alloc_arena(Arena *arena, usize byte_amount)
+void *alloc_arena(Arena *arena, u64 byte_amount)
 {
     assert(arena->pos % 8 == 0);
     if (arena->pos + byte_amount > arena->max_capacity)
@@ -47,20 +45,19 @@ static void *alloc_arena(Arena *arena, usize byte_amount)
     return (void *)p;
 }
 
-static void clear_arena(Arena *arena)
+void clear_arena(Arena *arena)
 {
     arena->pos = 0;
 }
 
-static usize get_arena_pos(Arena *arena)
+u64 get_arena_pos(Arena *arena)
 {
     assert(arena->pos % 8 == 0);
     return arena->pos;
 }
 
-static void set_arena_pos(Arena *arena, usize pos)
+void set_arena_pos(Arena *arena, u64 pos)
 {
     assert(pos % 8 == 0);
     arena->pos = pos;
 }
-

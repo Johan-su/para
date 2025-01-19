@@ -8,11 +8,9 @@ set WINLIB= -l User32.lib -l Gdi32.lib -l Shell32.lib -l Winmm.lib
 
 if not exist build mkdir build
 
-cd ./build
+pushd build
 
-@REM %CLANG% ../src/main.cpp %FLAGS% %WINLIB% -l opengl32 -l ../lib/raylib.lib  -I ../lib/include -o para.exe
-%CLANG% -c ../src/main.cpp %FLAGS% -I ../lib/include
-%CLANG% main.o -l ../lib/raylib.lib %FLAGS% %WINLIB% -o para.exe
-@REM %CLANG% ../src/parse.cpp %SANITIZE% %FLAGS% -o para.exe
+%CLANG% -E -Wno-macro-redefined ../src/meta.cpp > ../src/generated.cpp
+%CLANG% %WARNINGS% %FLAGS% -l ../lib/raylib.lib %WINLIB% -I ../lib/include  ../src/main.cpp -o para.exe
 
-cd ..
+popd build
