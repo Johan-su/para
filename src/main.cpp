@@ -228,6 +228,7 @@ s64 get_precedence(NodeType t) {
         case NODE_DIV: return 2;
         case NODE_UNARYADD: return 100;
         case NODE_UNARYSUB: return 101;
+        case NODE_OPENPAREN: return 0;
     }
     assert(false && "cannot get precedence of non operator");
     return 0;
@@ -244,6 +245,7 @@ bool is_left_associative(NodeType t) {
         case NODE_DIV: return true;
         case NODE_UNARYADD: return false;
         case NODE_UNARYSUB: return false;
+        case NODE_OPENPAREN: return true;
     }
     assert(false && "cannot get associativity of non operator");
     return false;
@@ -256,6 +258,7 @@ Node *make_node_from_stacks(Parse_Context *ctx) {
     switch (top->type) {
         case NODE_INVALID:
         case NODE_NUMBER: 
+        case NODE_OPENPAREN:
             assert(false);
         case NODE_ADD:
         case NODE_SUB:
@@ -281,11 +284,9 @@ void make_all_nodes_from_operator_ctx(Parse_Context *ctx) {
 
 void parse_expr(Parse_Context *ctx) {
 
-    u64 unclosed_parens = 0;
-
     while (ctx->iter < ctx->lex->token_count) {
 
-        if (ctx->op_count >= 2) {
+        if (ctx->op_count >= 2 && ctx->op_stack[ctx->op_count - 1]->type != NODE_OPENPAREN) {
             s64 p_top = get_precedence(ctx->op_stack[ctx->op_count - 1]->type);
             bool left_associative_top = is_left_associative(ctx->op_stack[ctx->op_count - 1]->type);
 
@@ -381,10 +382,30 @@ void parse_expr(Parse_Context *ctx) {
 
             push_op(ctx, div);
         } else if (is_token(ctx, TOKEN_OPENPAREN, 0)) {
-            consume(ctx);
-            unclosed_parens += 1;
+            u64 open_paren_index = consume(ctx);
+
+            Node *open_paren = (Node *)calloc(1, sizeof(*open_paren));
+
+            open_paren->type = NODE_OPENPAREN;
+            open_paren->token_index = open_paren_index;
+
+            push_op(ctx, open_paren);
         } else if (is_token(ctx, TOKEN_CLOSEPAREN, 0)) {
-            todo();
+            consume(ctx);
+
+            while (true) {
+                if (ctx->op_count == 0) {
+                    // report mismatched parenthesis error here
+                    todo();
+                }
+                if (ctx->op_stack[ctx->op_count - 1]->type == NODE_OPENPAREN) {
+                    pop_op(ctx);
+                    break;
+                }
+                Node *n = make_node_from_stacks(ctx); 
+                push_node(ctx, n);
+            }
+
         } else {
             assert(false);
         }
