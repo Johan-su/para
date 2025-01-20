@@ -96,17 +96,43 @@ void tokenize(Lexer *lex, String src) {
 
             Token t = Token {TOKEN_NUMBER, index_start, index_end};
             insert_token(lex, t);
+            continue;
         }
 
         // 1 character tokens
         {
-            switch (src.dat[lex->iter]) {
-                case '+': insert_token(lex, Token {TOKEN_PLUS, lex->iter, lex->iter + 1}); lex->iter += 1; break;
-                case '-': insert_token(lex, Token {TOKEN_MINUS, lex->iter, lex->iter + 1}); lex->iter += 1; break;
-                case '*': insert_token(lex, Token {TOKEN_STAR, lex->iter, lex->iter + 1}); lex->iter += 1; break;
-                case '/': insert_token(lex, Token {TOKEN_SLASH, lex->iter, lex->iter + 1}); lex->iter += 1; break;
+            if (src.dat[lex->iter] == '+') {
+                insert_token(lex, Token {TOKEN_PLUS, lex->iter, lex->iter + 1}); 
+                lex->iter += 1; 
+                continue;
+            }
+            if (src.dat[lex->iter] == '-') {
+                insert_token(lex, Token {TOKEN_MINUS, lex->iter, lex->iter + 1});
+                lex->iter += 1; 
+                continue;
+            }
+            if (src.dat[lex->iter] == '*') {
+                insert_token(lex, Token {TOKEN_STAR, lex->iter, lex->iter + 1}); 
+                lex->iter += 1; 
+                continue;
+            }
+            if (src.dat[lex->iter] == '/') {
+                insert_token(lex, Token {TOKEN_SLASH, lex->iter, lex->iter + 1}); 
+                lex->iter += 1; 
+                continue;
+            }
+            if (src.dat[lex->iter] == '(') {
+                insert_token(lex, Token {TOKEN_OPENPAREN, lex->iter, lex->iter + 1}); 
+                lex->iter += 1; 
+                continue;
+            }
+            if (src.dat[lex->iter] == ')') {
+                insert_token(lex, Token {TOKEN_CLOSEPAREN, lex->iter, lex->iter + 1}); 
+                lex->iter += 1; 
+                continue;
             }
         }
+        todo();
     }
 
 
@@ -255,6 +281,8 @@ void make_all_nodes_from_operator_ctx(Parse_Context *ctx) {
 
 void parse_expr(Parse_Context *ctx) {
 
+    u64 unclosed_parens = 0;
+
     while (ctx->iter < ctx->lex->token_count) {
 
         if (ctx->op_count >= 2) {
@@ -352,6 +380,13 @@ void parse_expr(Parse_Context *ctx) {
             div->nodes = (Node **)calloc(div->node_count, sizeof(Node *));
 
             push_op(ctx, div);
+        } else if (is_token(ctx, TOKEN_OPENPAREN, 0)) {
+            consume(ctx);
+            unclosed_parens += 1;
+        } else if (is_token(ctx, TOKEN_CLOSEPAREN, 0)) {
+            todo();
+        } else {
+            assert(false);
         }
     }
     make_all_nodes_from_operator_ctx(ctx);
@@ -374,7 +409,7 @@ Node *parse(Parse_Context *ctx) {
 }
 
 
-void display_node(Parse_Context *ctx, Node *tree) {
+void graphviz_out(Parse_Context *ctx, Node *tree) {
     FILE *f = fopen("./input.dot", "wb");
     fprintf(f, "graph G {\n");
 
@@ -390,7 +425,8 @@ void display_node(Parse_Context *ctx, Node *tree) {
         fprintf(f, "n%llu [label=\"%.*s\"]\n", (u64)top, (int)len, ctx->lex->src.dat + t.start);
 
         for (u64 i = 0; i < top->node_count; ++i) {
-            todo();
+            fprintf(f, "n%llu -- n%llu\n", (u64)top, (u64)top->nodes[i]);
+            stack[count++] = top->nodes[i];
         }
 
     }
@@ -406,14 +442,14 @@ int main(void) {
 
     Lexer lex = {};
 
-    tokenize(&lex, str_from_cstr("1 - 2 * 3 / 4"));
+    tokenize(&lex, str_from_cstr("1 - 2 * (3 / 4)"));
 
     Parse_Context context = {};
     context.lex = &lex;
 
     Node *tree = parse(&context);
 
-    display_node(&context, tree);
+    graphviz_out(&context, tree);
 
     return 0;
 
