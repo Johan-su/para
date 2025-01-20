@@ -9,13 +9,19 @@ Y(NodeType) \
 X(TOKEN_INVALID) \
 X(TOKEN_NUMBER) \
 X(TOKEN_PLUS) \
-X(TOKEN_END) \
+X(TOKEN_MINUS) \
+X(TOKEN_STAR) \
+X(TOKEN_SLASH) \
 
 #define NodeTypeTable \
 X(NODE_INVALID) \
 X(NODE_NUMBER) \
 X(NODE_ADD) \
-
+X(NODE_SUB) \
+X(NODE_MUL) \
+X(NODE_DIV) \
+X(NODE_UNARYADD) \
+X(NODE_UNARYSUB) \
 
 
 
@@ -28,13 +34,11 @@ enum name { \
 enumTable
 
 
-#define X(field) case field: return #field;
+#define X(field) #field,
 #define Y(name) \
-const char *str_##name(name t) { \
-    switch (t) { \
-        name##Table \
-    } \
-    return nullptr; \
-}
+const char *str_##name[] = { \
+    name##Table \
+}; \
+
 
 enumTable

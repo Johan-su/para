@@ -94,19 +94,20 @@ void tokenize(Lexer *lex, String src) {
             }
             u64 index_end = lex->iter;
 
-            Token t = Token {TOKEN_NUMBER, index_start, index_start};
+            Token t = Token {TOKEN_NUMBER, index_start, index_end};
             insert_token(lex, t);
         }
 
         // 1 character tokens
         {
             switch (src.dat[lex->iter]) {
-                case '+': insert_token(lex, Token {TOKEN_PLUS, lex->iter, lex->iter + 1}); break;
+                case '+': insert_token(lex, Token {TOKEN_PLUS, lex->iter, lex->iter + 1}); lex->iter += 1; break;
+                case '-': insert_token(lex, Token {TOKEN_MINUS, lex->iter, lex->iter + 1}); lex->iter += 1; break;
+                case '*': insert_token(lex, Token {TOKEN_STAR, lex->iter, lex->iter + 1}); lex->iter += 1; break;
+                case '/': insert_token(lex, Token {TOKEN_SLASH, lex->iter, lex->iter + 1}); lex->iter += 1; break;
             }
-            lex->iter += 1;
         }
     }
-    insert_token(lex, Token {TOKEN_END, lex->iter, lex->iter + 1});
 
 
 }
@@ -120,27 +121,33 @@ struct Node {
 
     u64 token_index;
 
-    Node *nodes;
+    Node **nodes;
     u64 node_count;
 };
 
 struct Parse_Context {
-    Node top_tree;
-    Node *node_stack[512];
+    Node *node_stack[32];
     u64 stack_count;
 
+    Node *op_stack[32];
+    u64 op_count;
 
     Lexer *lex;
     u64 iter;
 };
 
-bool is_token(Parse_Context *ctx, TokenType t) {
-   return ctx->lex->tokens[ctx->iter].type == t; 
+bool is_token(Parse_Context *ctx, TokenType t, s64 offset) {
+    if ((s64)ctx->iter + offset < 0) return false;
+    if ((s64)ctx->iter + offset > (s64)ctx->lex->token_count) return false;
+
+    return ctx->lex->tokens[(s64)ctx->iter + offset].type == t; 
 }
 
 u64 consume(Parse_Context *ctx) {
     assert(ctx->iter < ctx->lex->token_count);
-    return ctx->iter;
+    u64 token_index = ctx->iter;
+    ctx->iter += 1;
+    return token_index;
 }
 
 void push_node(Parse_Context *ctx, Node *n) {
@@ -153,6 +160,16 @@ Node *pop_node(Parse_Context *ctx) {
     return ctx->node_stack[--ctx->stack_count];
 }
 
+void push_op(Parse_Context *ctx, Node *n) {
+    assert(ctx->op_count < ARRAY_SIZE(ctx->op_stack));
+    ctx->op_stack[ctx->op_count++] = n;
+}
+
+Node *pop_op(Parse_Context *ctx) {
+    assert(ctx->op_count > 0);
+    return ctx->op_stack[--ctx->op_count];
+}
+
 Node *make_number(Parse_Context *ctx, u64 token_index) {
     Node *n = (Node *)calloc(1, sizeof(*n));
 
@@ -161,33 +178,183 @@ Node *make_number(Parse_Context *ctx, u64 token_index) {
     n->type = NODE_NUMBER;
     n->token_index = token_index;
     n->num = atof((const char *)ctx->lex->src.dat + t.start);
+    return n;
 }
 
-bool is_prev_node(Parse_Context *ctx, NodeType t) {
-
-    if (ctx->stack_count == 0) return false;
-    else return ctx->node_stack[ctx->stack_count - 1]->type == t; 
-}
-
-bool is_prev_binop(Parse_Context *ctx) {
-    if (is_prev_node(ctx, NODE_ADD)) return true;
+bool is_binop(Parse_Context *ctx, s64 offset) {
+    if (is_token(ctx, TOKEN_PLUS, offset)) return true;
+    if (is_token(ctx, TOKEN_MINUS, offset)) return true;
+    if (is_token(ctx, TOKEN_STAR, offset)) return true;
+    if (is_token(ctx, TOKEN_SLASH, offset)) return true;
 
 
     return false;
 }
 
-void parse_expr(Parse_Context *ctx) {
+s64 get_precedence(NodeType t) {
+    switch (t) {
+        case NODE_INVALID:
+        case NODE_NUMBER:
+            assert(false && "cannot get precedence of non operator");
+        case NODE_ADD: return 1;
+        case NODE_SUB: return 1;
+        case NODE_MUL: return 2;
+        case NODE_DIV: return 2;
+        case NODE_UNARYADD: return 100;
+        case NODE_UNARYSUB: return 101;
+    }
+    assert(false && "cannot get precedence of non operator");
+    return 0;
+}
 
-    if (is_token(ctx, TOKEN_NUMBER)) {
-        u64 token_index = consume(ctx);
-        Node *n = make_number(ctx, token_index);
-        
-        push_node(ctx, n);
-    } else if (is_token(ctx, TOKEN_PLUS)) {
-        ASFA
-        todo();
+bool is_left_associative(NodeType t) {
+    switch (t) {
+        case NODE_INVALID:
+        case NODE_NUMBER:
+            assert(false && "cannot get associativity of non operator");
+        case NODE_ADD: return true;
+        case NODE_SUB: return true;
+        case NODE_MUL: return true;
+        case NODE_DIV: return true;
+        case NODE_UNARYADD: return false;
+        case NODE_UNARYSUB: return false;
+    }
+    assert(false && "cannot get associativity of non operator");
+    return false;
+}
+
+Node *make_node_from_stacks(Parse_Context *ctx) {
+    Node *top = pop_op(ctx);
+
+
+    switch (top->type) {
+        case NODE_INVALID:
+        case NODE_NUMBER: 
+            assert(false);
+        case NODE_ADD:
+        case NODE_SUB:
+        case NODE_MUL:
+        case NODE_DIV:
+        case NODE_UNARYADD:
+        case NODE_UNARYSUB: {
+            for (u64 i = top->node_count; i-- > 0;) {
+                top->nodes[i] = pop_node(ctx);
+            }
+        } break;
     }
 
+    return top;
+}
+
+void make_all_nodes_from_operator_ctx(Parse_Context *ctx) {
+    while (ctx->op_count > 0) {
+        Node *n = make_node_from_stacks(ctx);
+        push_node(ctx, n);
+    }
+}
+
+void parse_expr(Parse_Context *ctx) {
+
+    while (ctx->iter < ctx->lex->token_count) {
+
+        if (ctx->op_count >= 2) {
+            s64 p_top = get_precedence(ctx->op_stack[ctx->op_count - 1]->type);
+            bool left_associative_top = is_left_associative(ctx->op_stack[ctx->op_count - 1]->type);
+
+            s64 p_prev = get_precedence(ctx->op_stack[ctx->op_count - 2]->type);
+
+
+
+
+            if (p_top < p_prev || (p_top == p_prev && left_associative_top)) {
+
+                // ignore top
+                {
+                    Node *top = pop_op(ctx);
+                    make_all_nodes_from_operator_ctx(ctx);
+                    push_op(ctx, top);
+                }
+            }
+
+        }
+
+
+
+        if (is_token(ctx, TOKEN_NUMBER, 0)) {
+            u64 token_index = consume(ctx);
+            Node *n = make_number(ctx, token_index);
+            
+            push_node(ctx, n);
+        } else if (is_token(ctx, TOKEN_PLUS, 0)) {
+
+            if (is_binop(ctx, -1)) {
+                u64 plus_index = consume(ctx);
+                // unary add
+
+                Node *unary_add = (Node *)calloc(1, sizeof(*unary_add));
+                unary_add->token_index = plus_index;
+                unary_add->type = NODE_UNARYADD;
+                unary_add->node_count = 1;
+                unary_add->nodes = (Node **)calloc(unary_add->node_count, sizeof(Node *));
+
+                push_op(ctx, unary_add);
+            } else {
+                u64 plus_index = consume(ctx);
+                
+                Node *add = (Node *)calloc(1, sizeof(*add));
+                add->token_index = plus_index;
+                add->type = NODE_ADD;
+                add->node_count = 2;
+                add->nodes = (Node **)calloc(add->node_count, sizeof(Node *));
+
+                push_op(ctx, add);
+            }
+        } else if (is_token(ctx, TOKEN_MINUS, 0)) {
+            if (is_binop(ctx, -1)) {
+                u64 plus_index = consume(ctx);
+                // unary sub
+
+                Node *unary_sub = (Node *)calloc(1, sizeof(*unary_sub));
+                unary_sub->token_index = plus_index;
+                unary_sub->type = NODE_UNARYSUB;
+                unary_sub->node_count = 1;
+                unary_sub->nodes = (Node **)calloc(unary_sub->node_count, sizeof(Node *));
+
+                push_op(ctx, unary_sub);
+            } else {
+                u64 minus_index = consume(ctx);
+                
+                Node *sub = (Node *)calloc(1, sizeof(*sub));
+                sub->token_index = minus_index;
+                sub->type = NODE_SUB;
+                sub->node_count = 2;
+                sub->nodes = (Node **)calloc(sub->node_count, sizeof(Node *));
+
+                push_op(ctx, sub);
+            }
+        } else if (is_token(ctx, TOKEN_STAR, 0)) {
+            u64 star_index = consume(ctx);
+            
+            Node *mul = (Node *)calloc(1, sizeof(*mul));
+            mul->token_index = star_index;
+            mul->type = NODE_MUL;
+            mul->node_count = 2;
+            mul->nodes = (Node **)calloc(mul->node_count, sizeof(Node *));
+
+            push_op(ctx, mul);
+        } else if (is_token(ctx, TOKEN_SLASH, 0)) {
+            u64 slash_index = consume(ctx);
+            
+            Node *div = (Node *)calloc(1, sizeof(*div));
+            div->token_index = slash_index;
+            div->type = NODE_DIV;
+            div->node_count = 2;
+            div->nodes = (Node **)calloc(div->node_count, sizeof(Node *));
+
+            push_op(ctx, div);
+        }
+    }
+    make_all_nodes_from_operator_ctx(ctx);
 }
 
 void parse_statement(Parse_Context *ctx) {
@@ -195,28 +362,58 @@ void parse_statement(Parse_Context *ctx) {
 }
 
 
-Node parse(Lexer *lex) {
+Node *parse(Parse_Context *ctx) {
 
-    Parse_Context context = {};
-    context.lex = lex;
 
-    while (context.iter < lex->token_count) {
-        parse_statement(&context);
+    while (ctx->iter < ctx->lex->token_count) {
+        parse_statement(ctx);
     }
 
 
-    return context.top_tree;
+    return ctx->node_stack[0];
+}
+
+
+void display_node(Parse_Context *ctx, Node *tree) {
+    FILE *f = fopen("./input.dot", "wb");
+    fprintf(f, "graph G {\n");
+
+    Node **stack = (Node **)calloc(4096, sizeof(*stack));
+    u64 count = 0; 
+
+    stack[count++] = tree;
+
+    while (count != 0) {
+        Node *top = stack[--count];
+        Token t = ctx->lex->tokens[top->token_index];
+        u64 len = t.end - t.start;
+        fprintf(f, "n%llu [label=\"%.*s\"]\n", (u64)top, (int)len, ctx->lex->src.dat + t.start);
+
+        for (u64 i = 0; i < top->node_count; ++i) {
+            todo();
+        }
+
+    }
+
+
+    fprintf(f, "}");
+    fclose(f);
 }
 
 
 
 int main(void) {
 
-    printf("test\n");
-
     Lexer lex = {};
 
-    tokenize(&lex, str_from_cstr("1 + 1"));
+    tokenize(&lex, str_from_cstr("1 - 2 * 3 / 4"));
+
+    Parse_Context context = {};
+    context.lex = &lex;
+
+    Node *tree = parse(&context);
+
+    display_node(&context, tree);
 
     return 0;
 

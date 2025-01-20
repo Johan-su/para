@@ -62,6 +62,7 @@ do {                                                    \
 
 
 void assert_function(const char *cond, const char *file, s32 line) {
+    fprintf(stderr, "Assertion failed '%s' %s:%d\n", cond, file, line);
 #ifdef x86_64 
     asm("int3");
 #else
