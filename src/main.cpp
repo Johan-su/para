@@ -80,10 +80,7 @@ void tokenize(Lexer *lex, String src) {
     while (lex->iter < src.count) {
         if (is_whitespace(src.dat[lex->iter])) {
             lex->iter += 1;
-            continue;
-        }
-
-        if (is_digit(src.dat[lex->iter])) {
+        } else if (is_digit(src.dat[lex->iter])) {
             u64 index_start = lex->iter;
             lex->iter += 1;
             while (is_digit(src.dat[lex->iter])) {
@@ -96,46 +93,46 @@ void tokenize(Lexer *lex, String src) {
 
             Token t = Token {TOKEN_NUMBER, index_start, index_end};
             insert_token(lex, t);
-            continue;
-        }
+        } else if (src.dat[lex->iter] == '+') { // 1 character tokens
+            insert_token(lex, Token {TOKEN_PLUS, lex->iter, lex->iter + 1}); 
+            lex->iter += 1; 
 
-        // 1 character tokens
-        {
-            if (src.dat[lex->iter] == '+') {
-                insert_token(lex, Token {TOKEN_PLUS, lex->iter, lex->iter + 1}); 
-                lex->iter += 1; 
-                continue;
+        } else if (src.dat[lex->iter] == '-') {
+            insert_token(lex, Token {TOKEN_MINUS, lex->iter, lex->iter + 1});
+            lex->iter += 1; 
+
+        } else if (src.dat[lex->iter] == '*') {
+            insert_token(lex, Token {TOKEN_STAR, lex->iter, lex->iter + 1}); 
+            lex->iter += 1; 
+
+        } else if (src.dat[lex->iter] == '/') {
+            insert_token(lex, Token {TOKEN_SLASH, lex->iter, lex->iter + 1}); 
+            lex->iter += 1; 
+
+        } else if (src.dat[lex->iter] == '(') {
+            insert_token(lex, Token {TOKEN_OPENPAREN, lex->iter, lex->iter + 1}); 
+            lex->iter += 1; 
+
+        } else if (src.dat[lex->iter] == ')') {
+            insert_token(lex, Token {TOKEN_CLOSEPAREN, lex->iter, lex->iter + 1}); 
+            lex->iter += 1; 
+
+        } else if (is_alpha(src.dat[lex->iter])) {
+
+            u64 index_start = lex->iter;
+            lex->iter += 1;
+            while (is_alpha(src.dat[lex->iter]) || is_digit(src.dat[lex->iter])) {
+                lex->iter += 1;
             }
-            if (src.dat[lex->iter] == '-') {
-                insert_token(lex, Token {TOKEN_MINUS, lex->iter, lex->iter + 1});
-                lex->iter += 1; 
-                continue;
-            }
-            if (src.dat[lex->iter] == '*') {
-                insert_token(lex, Token {TOKEN_STAR, lex->iter, lex->iter + 1}); 
-                lex->iter += 1; 
-                continue;
-            }
-            if (src.dat[lex->iter] == '/') {
-                insert_token(lex, Token {TOKEN_SLASH, lex->iter, lex->iter + 1}); 
-                lex->iter += 1; 
-                continue;
-            }
-            if (src.dat[lex->iter] == '(') {
-                insert_token(lex, Token {TOKEN_OPENPAREN, lex->iter, lex->iter + 1}); 
-                lex->iter += 1; 
-                continue;
-            }
-            if (src.dat[lex->iter] == ')') {
-                insert_token(lex, Token {TOKEN_CLOSEPAREN, lex->iter, lex->iter + 1}); 
-                lex->iter += 1; 
-                continue;
-            }
+            u64 index_end = lex->iter;
+            Token t = Token {TOKEN_IDENTIFIER, index_start, index_end};
+
+            insert_token(lex, t);
+        } else {
+            todo();
+
         }
-        todo();
     }
-
-
 }
 
 
@@ -247,7 +244,6 @@ bool is_left_associative(NodeType t) {
         case NODE_UNARYSUB: return false;
         case NODE_OPENPAREN: return true;
     }
-    assert(false && "cannot get associativity of non operator");
     return false;
 }
 
@@ -282,18 +278,29 @@ void make_all_nodes_from_operator_ctx(Parse_Context *ctx) {
     }
 }
 
-void parse_expr(Parse_Context *ctx) {
+Node *make_openparen(Parse_Context *ctx, u64 token_index) {
+    Node *open_paren = (Node *)calloc(1, sizeof(*open_paren));
+
+    open_paren->type = NODE_OPENPAREN;
+    open_paren->token_index = token_index;
+
+    return open_paren;
+}
+
+void parse_expr(Parse_Context *ctx, u64 stop_token_types) {
 
     while (ctx->iter < ctx->lex->token_count) {
+
+        if (ctx->lex->tokens[ctx->iter].type & stop_token_types) {
+            break;
+        }
+
 
         if (ctx->op_count >= 2 && ctx->op_stack[ctx->op_count - 1]->type != NODE_OPENPAREN) {
             s64 p_top = get_precedence(ctx->op_stack[ctx->op_count - 1]->type);
             bool left_associative_top = is_left_associative(ctx->op_stack[ctx->op_count - 1]->type);
 
             s64 p_prev = get_precedence(ctx->op_stack[ctx->op_count - 2]->type);
-
-
-
 
             if (p_top < p_prev || (p_top == p_prev && left_associative_top)) {
 
@@ -307,9 +314,37 @@ void parse_expr(Parse_Context *ctx) {
 
         }
 
+        if (is_token(ctx, TOKEN_IDENTIFIER, 0)) {
+
+            u64 id_index = consume(ctx);
+
+            if (is_token(ctx, TOKEN_OPENPAREN, 0)) {
+
+                consume(ctx);
+
+                while (true) {
+                    if (is_token(ctx, TOKEN_CLOSEPAREN, 0)) break;
+
+                    parse_expr(ctx, TOKEN_COMMA|TOKEN_CLOSEPAREN);
+
+                    if (!is_token(ctx, TOKEN_CLOSEPAREN, 0) && !is_token(ctx, TOKEN_COMMA, 0)) {
+                        // report error 
+                        todo();
+                    }
+                }
+
+                u64 close_paren = consume(ctx);
 
 
-        if (is_token(ctx, TOKEN_NUMBER, 0)) {
+                
+
+                // function call
+                todo();
+            } else {
+                // var
+                todo();
+            }
+        } else if (is_token(ctx, TOKEN_NUMBER, 0)) {
             u64 token_index = consume(ctx);
             Node *n = make_number(ctx, token_index);
             
@@ -384,10 +419,8 @@ void parse_expr(Parse_Context *ctx) {
         } else if (is_token(ctx, TOKEN_OPENPAREN, 0)) {
             u64 open_paren_index = consume(ctx);
 
-            Node *open_paren = (Node *)calloc(1, sizeof(*open_paren));
+            Node *open_paren = make_openparen(ctx, open_paren_index);
 
-            open_paren->type = NODE_OPENPAREN;
-            open_paren->token_index = open_paren_index;
 
             push_op(ctx, open_paren);
         } else if (is_token(ctx, TOKEN_CLOSEPAREN, 0)) {
@@ -463,7 +496,7 @@ int main(void) {
 
     Lexer lex = {};
 
-    tokenize(&lex, str_from_cstr("1 - 2 * (3 / 4)"));
+    tokenize(&lex, str_from_cstr("f(x) + 1 - 4 * 4 + 2 * (3 / 4)"));
 
     Parse_Context context = {};
     context.lex = &lex;
