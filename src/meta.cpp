@@ -43,8 +43,7 @@ X(NODE_OPENPAREN) \
 #define Y(name) \
 enum name { \
     name##Table \
-    name##COUNT \
-};
+}; \
 
 enumTable
 
@@ -75,4 +74,3 @@ enum name { \
 }; \
 
 enumFlagTable
-

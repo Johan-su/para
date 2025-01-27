@@ -117,6 +117,10 @@ void tokenize(Lexer *lex, String src) {
             insert_token(lex, Token {TOKEN_CLOSEPAREN, lex->iter, lex->iter + 1}); 
             lex->iter += 1; 
 
+        } else if (src.dat[lex->iter] == ',') {
+            insert_token(lex, Token {TOKEN_COMMA, lex->iter, lex->iter + 1}); 
+            lex->iter += 1; 
+
         } else if (is_alpha(src.dat[lex->iter])) {
 
             u64 index_start = lex->iter;
@@ -129,8 +133,8 @@ void tokenize(Lexer *lex, String src) {
 
             insert_token(lex, t);
         } else {
+            printf("char %c\n", src.dat[lex->iter]);
             todo();
-
         }
     }
 }
@@ -218,6 +222,8 @@ s64 get_precedence(NodeType t) {
     switch (t) {
         case NODE_INVALID:
         case NODE_NUMBER:
+        case NODE_FUNCTION:
+        case NODE_VARIABLE:
             assert(false && "cannot get precedence of non operator");
         case NODE_ADD: return 1;
         case NODE_SUB: return 1;
@@ -235,6 +241,8 @@ bool is_left_associative(NodeType t) {
     switch (t) {
         case NODE_INVALID:
         case NODE_NUMBER:
+        case NODE_FUNCTION:
+        case NODE_VARIABLE:
             assert(false && "cannot get associativity of non operator");
         case NODE_ADD: return true;
         case NODE_SUB: return true;
@@ -255,6 +263,8 @@ Node *make_node_from_stacks(Parse_Context *ctx) {
         case NODE_INVALID:
         case NODE_NUMBER: 
         case NODE_OPENPAREN:
+        case NODE_FUNCTION:
+        case NODE_VARIABLE:
             assert(false);
         case NODE_ADD:
         case NODE_SUB:
@@ -278,13 +288,21 @@ void make_all_nodes_from_operator_ctx(Parse_Context *ctx) {
     }
 }
 
-Node *make_openparen(Parse_Context *ctx, u64 token_index) {
-    Node *open_paren = (Node *)calloc(1, sizeof(*open_paren));
+Node *make_function_call(Parse_Context *ctx, u64 token_index, u64 arg_count) {
+    Node *func = (Node *)calloc(1, sizeof(*func));
 
-    open_paren->type = NODE_OPENPAREN;
-    open_paren->token_index = token_index;
+    func->type = NODE_FUNCTION;
+    func->token_index = token_index;
+    func->node_count = arg_count;
 
-    return open_paren;
+    func->nodes = (Node **)calloc(func->node_count, sizeof(Node *));
+
+    for (u64 i = func->node_count; i-- > 0;) {
+        func->nodes[i] = pop_node(ctx);
+    }
+
+
+    return func;
 }
 
 void parse_expr(Parse_Context *ctx, u64 stop_token_types) {
@@ -322,24 +340,54 @@ void parse_expr(Parse_Context *ctx, u64 stop_token_types) {
 
                 consume(ctx);
 
-                while (true) {
-                    if (is_token(ctx, TOKEN_CLOSEPAREN, 0)) break;
+                u64 func_close_index = 0;
+                {
+                    u64 unclosed_paren_count = 1;
+                    for (u64 i = ctx->iter; i < ctx->lex->token_count; ++i) {
 
-                    parse_expr(ctx, TOKEN_COMMA|TOKEN_CLOSEPAREN);
+                        if (ctx->lex->tokens[i].type == TOKEN_OPENPAREN) unclosed_paren_count += 1;
 
-                    if (!is_token(ctx, TOKEN_CLOSEPAREN, 0) && !is_token(ctx, TOKEN_COMMA, 0)) {
-                        // report error 
-                        todo();
+                        if (ctx->lex->tokens[i].type == TOKEN_CLOSEPAREN) {
+                            if (unclosed_paren_count == 1) {
+                                func_close_index = i;
+                                goto skip;
+                            } else {
+                                unclosed_paren_count -= 1;
+                            }
+                        }
                     }
+                    todo();
+                }
+                skip:;
+
+
+
+                u64 arg_count = 0;
+                {
+                    u64 before_count = ctx->lex->token_count;
+                    while (!is_token(ctx, TOKEN_CLOSEPAREN, 0)) {
+                        
+                        ctx->lex->token_count = func_close_index;
+                        parse_expr(ctx, TOKEN_COMMA);
+
+                        arg_count += 1;
+                        if (is_token(ctx, TOKEN_CLOSEPAREN, 0)) {
+                            break;
+                        } else if (is_token(ctx, TOKEN_COMMA, 0)) {
+                            consume(ctx);
+                        } else {
+                            // report error 
+                            todo();
+                        }
+                    }
+                    ctx->lex->token_count = before_count;
+                    consume(ctx);
                 }
 
-                u64 close_paren = consume(ctx);
 
 
-                
-
-                // function call
-                todo();
+                Node *function_call = make_function_call(ctx, id_index, arg_count); 
+                push_node(ctx, function_call);
             } else {
                 // var
                 todo();
@@ -419,8 +467,10 @@ void parse_expr(Parse_Context *ctx, u64 stop_token_types) {
         } else if (is_token(ctx, TOKEN_OPENPAREN, 0)) {
             u64 open_paren_index = consume(ctx);
 
-            Node *open_paren = make_openparen(ctx, open_paren_index);
+            Node *open_paren = (Node *)calloc(1, sizeof(*open_paren));
 
+            open_paren->type = NODE_OPENPAREN;
+            open_paren->token_index = open_paren_index;
 
             push_op(ctx, open_paren);
         } else if (is_token(ctx, TOKEN_CLOSEPAREN, 0)) {
@@ -447,7 +497,7 @@ void parse_expr(Parse_Context *ctx, u64 stop_token_types) {
 }
 
 void parse_statement(Parse_Context *ctx) {
-    parse_expr(ctx);
+    parse_expr(ctx, TOKEN_INVALID);
 }
 
 
@@ -490,13 +540,15 @@ void graphviz_out(Parse_Context *ctx, Node *tree) {
     fclose(f);
 }
 
-
+struct Box {
+    f32 x, y;
+};
 
 int main(void) {
 
     Lexer lex = {};
 
-    tokenize(&lex, str_from_cstr("f(x) + 1 - 4 * 4 + 2 * (3 / 4)"));
+    tokenize(&lex, str_from_cstr("f((2*(2 + 3)) * 2,2,(((5+4)*3)*3),4,5)"));
 
     Parse_Context context = {};
     context.lex = &lex;
@@ -505,26 +557,33 @@ int main(void) {
 
     graphviz_out(&context, tree);
 
-    return 0;
 
-    InitWindow(1000, 1000, "Para");
+    int current_monitor = GetCurrentMonitor();
 
+    int screen_w = GetMonitorWidth(current_monitor);
+    int screen_h = GetMonitorHeight(current_monitor);
+
+
+    InitWindow(screen_w, screen_h, "Para");
     SetWindowState(FLAG_WINDOW_RESIZABLE);
-
     SetTargetFPS(60);
 
-    while (!WindowShouldClose())
-    {
+    f32 x, y = 0;
+
+    while (!WindowShouldClose()) {
         BeginDrawing();
 
+        int render_w = GetRenderWidth();
+        int render_h = GetRenderHeight();
 
-        if (IsWindowResized()) {
-            printf("resized window\n");
-        }
+        DrawRectangleV(Vector2 {x, y}, Vector2 {400, 50}, DARKGREEN);
+        char buf[128];
+        snprintf(buf, sizeof(buf), "x: %d, y: %d", render_w, render_h);
+        DrawText(buf, 0, 0, 12, LIGHTGRAY);
 
-        ClearBackground(RAYWHITE);
         DrawText("Congrats! You created your first window!", 190, 200, 20, LIGHTGRAY);
 
+        ClearBackground(GRAY);
         EndDrawing();
     }
 
