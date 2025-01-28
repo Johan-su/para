@@ -568,7 +568,16 @@ int main(void) {
     SetWindowState(FLAG_WINDOW_RESIZABLE);
     SetTargetFPS(60);
 
-    f32 x, y = 0;
+    int mx = GetMouseX();
+    int my = GetMouseY();
+
+
+    f32 x = 0, y = 0;
+    f32 w = 400, h = 50;
+    char text_buf[64] = {};
+    char text_count = 0;
+
+    bool active = false;
 
     while (!WindowShouldClose()) {
         BeginDrawing();
@@ -576,7 +585,56 @@ int main(void) {
         int render_w = GetRenderWidth();
         int render_h = GetRenderHeight();
 
-        DrawRectangleV(Vector2 {x, y}, Vector2 {400, 50}, DARKGREEN);
+
+
+        {
+            bool x_intercept = mx >= x && mx <= x + w;
+            bool y_intercept = my >= y && my <= y + h;
+            if (x_intercept && y_intercept && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                active = !active;
+            }
+
+
+
+            if (active) {
+                int chars_pressed[16];
+                u64 char_count = 0;
+                while (true) {
+                    int tmp = GetCharPressed();
+                    if (tmp == 0) break;
+
+                    chars_pressed[char_count++] = tmp;
+                }
+
+                
+                for (u64 i = 0; i < char_count && text_count < ARRAY_SIZE(text_buf) - 1; ++i) {
+                    text_buf[text_count++] = chars_pressed[i];
+                }
+
+
+                int keys_pressed[16];
+                u64 key_count = 0;
+                while (true) {
+                    int tmp = GetKeyPressed();
+                    if (tmp == 0) break;
+                    if (tmp != KEY_BACKSPACE) continue;
+
+                    keys_pressed[key_count++] = tmp;
+                }
+                
+                for (u64 i = 0; i < key_count && text_count > 0; ++i) {
+                    text_buf[--text_count] = '\0';
+                }
+            }
+
+
+
+            DrawRectangleV(Vector2 {x, y}, Vector2 {w, h}, DARKGREEN);
+            DrawText(text_buf, 10, 25, 20, LIGHTGRAY);
+            
+
+        }
+
         char buf[128];
         snprintf(buf, sizeof(buf), "x: %d, y: %d", render_w, render_h);
         DrawText(buf, 0, 0, 12, LIGHTGRAY);
