@@ -543,8 +543,8 @@ void graphviz_out(Parse_Context *ctx, Node *tree) {
 
 
 bool mouse_collides(f32 x, f32 y, f32 w, f32 h) {
-    int mx = GetMouseX();
-    int my = GetMouseY();
+    f32 mx = (f32)GetMouseX();
+    f32 my = (f32)GetMouseY();
 
     bool x_intercept = mx >= x && mx <= x + w;
     bool y_intercept = my >= y && my <= y + h;
@@ -569,30 +569,34 @@ int main(void) {
 
 
 
-    int screen_w = 2560;
-    int screen_h = 1440;
+    int screen_w = 1366;
+    int screen_h = 768;
 
 
     InitWindow(screen_w, screen_h, "Para");
 
-    SetWindowState(FLAG_WINDOW_RESIZABLE|FLAG_WINDOW_MAXIMIZED);
+    SetWindowState(FLAG_WINDOW_RESIZABLE);
     SetTargetFPS(60);
 
 
 
-    f32 x = 0, y = 0;
-    f32 w = 400, h = 50;
+    f32 x = 0;
+    f32 y = 0;
 
-    f32 drag_bar_height = 15;
-    f32 text_height = 35;
+    f32 w = 400;
+    f32 h = 50;
 
-    char text_buf[64] = {};
-    char text_count = 0;
+
+    char text_buf[5][64] = {};
+    u64 text_count[5] = {};
 
     bool active = false;
+    u64 active_id = 0;
     bool dragging = false;
+
     f32 drag_x_offset = 0;
     f32 drag_y_offset = 0;
+
 
     while (!WindowShouldClose()) {
         int mx = GetMouseX();
@@ -618,63 +622,72 @@ int main(void) {
             keys_pressed[key_count++] = tmp;
         }
 
+        f32 h_offset = y;
 
         BeginDrawing();
 
-        int render_w = GetRenderWidth();
-        int render_h = GetRenderHeight();
+#define TEXT_INPUT_FONT_SIZE 20
+#define TEXT_INPUT_HEIGHT 35
+#define DRAG_BAR_HEIGHT 15
+
 
         {
-
-
-
-            if (mouse_collides(x, y, w, drag_bar_height) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                dragging = true;
-                drag_x_offset = (f32)mx - x;
-                drag_y_offset = (f32)my - y;
-            }
-
             if (dragging && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                 dragging = false;
             }
 
+
             if (dragging ) {
-                x = mx - drag_x_offset;
-                y = my - drag_y_offset;
+                x = (f32)mx - drag_x_offset;
+                y = (f32)my - drag_y_offset;
             }
 
-            if (mouse_collides(x, y + drag_bar_height, w, text_height) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                active = !active;
+            {
+                if (mouse_collides(x, h_offset, w, DRAG_BAR_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    dragging = true;
+                    drag_x_offset = (f32)mx - x;
+                    drag_y_offset = (f32)my - y;
+                }
+                DrawRectangleV(Vector2 {x, y}, Vector2 {w, DRAG_BAR_HEIGHT}, GREEN);
             }
+            h_offset += DRAG_BAR_HEIGHT;
+
+            for (u64 i = 0; i < 5; ++i) {
 
 
-
-            if (active) {
-
-                for (u64 i = 0; i < char_count && text_count < ARRAY_SIZE(text_buf) - 1; ++i) {
-                    text_buf[text_count++] = chars_pressed[i];
+                if (mouse_collides(x, h_offset, w, TEXT_INPUT_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    if (active && active_id == i) active = false;
+                    else {
+                        active_id = i;
+                        active = true;
+                    }
                 }
 
-                
-                for (u64 i = 0; i < key_count && text_count > 0; ++i) {
-                    text_buf[--text_count] = '\0';
+
+                if (active && active_id == i) {
+
+                    for (u64 j = 0; j < char_count && text_count[i] < ARRAY_SIZE(text_buf[i]) - 1; ++j) {
+                        text_buf[i][text_count[i]++] = (char)chars_pressed[j];
+                    }
+
+                    
+                    for (u64 j = 0; j < key_count && text_count[i] > 0; ++j) {
+                        text_buf[i][--text_count[i]] = '\0';
+                    }
                 }
+
+                Color color;
+                if (i % 2 == 0) {
+                    color = DARKGREEN;
+                } else {
+                    color = LIME;
+                }
+                DrawRectangleV(Vector2 {x, h_offset}, Vector2 {w, TEXT_INPUT_HEIGHT}, color);
+                DrawText(text_buf[i], (s32)x + 5, (s32)(h_offset) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
+
+                h_offset += TEXT_INPUT_HEIGHT;
             }
-
-
-
-            DrawRectangleV(Vector2 {x, y}, Vector2 {w, drag_bar_height}, GREEN);
-            DrawRectangleV(Vector2 {x, y + drag_bar_height}, Vector2 {w, text_height}, DARKGREEN);
-            DrawText(text_buf, x + 10, y + 30, 20, LIGHTGRAY);
-            
-
         }
-
-        char buf[128];
-        snprintf(buf, sizeof(buf), "x: %d, y: %d", render_w, render_h);
-        DrawText(buf, 0, 0, 12, LIGHTGRAY);
-
-        DrawText("Congrats! You created your first window!", 190, 200, 20, LIGHTGRAY);
 
         ClearBackground(GRAY);
         EndDrawing();
