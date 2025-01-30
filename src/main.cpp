@@ -540,9 +540,19 @@ void graphviz_out(Parse_Context *ctx, Node *tree) {
     fclose(f);
 }
 
-struct Box {
-    f32 x, y;
-};
+
+
+bool mouse_collides(f32 x, f32 y, f32 w, f32 h) {
+    int mx = GetMouseX();
+    int my = GetMouseY();
+
+    bool x_intercept = mx >= x && mx <= x + w;
+    bool y_intercept = my >= y && my <= y + h;
+
+    return x_intercept && y_intercept;
+}
+
+
 
 int main(void) {
 
@@ -558,69 +568,93 @@ int main(void) {
     graphviz_out(&context, tree);
 
 
-    int current_monitor = GetCurrentMonitor();
 
-    int screen_w = GetMonitorWidth(current_monitor);
-    int screen_h = GetMonitorHeight(current_monitor);
+    int screen_w = 2560;
+    int screen_h = 1440;
 
 
     InitWindow(screen_w, screen_h, "Para");
-    SetWindowState(FLAG_WINDOW_RESIZABLE);
+
+    SetWindowState(FLAG_WINDOW_RESIZABLE|FLAG_WINDOW_MAXIMIZED);
     SetTargetFPS(60);
 
-    int mx = GetMouseX();
-    int my = GetMouseY();
 
 
     f32 x = 0, y = 0;
     f32 w = 400, h = 50;
+
+    f32 drag_bar_height = 15;
+    f32 text_height = 35;
+
     char text_buf[64] = {};
     char text_count = 0;
 
     bool active = false;
+    bool dragging = false;
+    f32 drag_x_offset = 0;
+    f32 drag_y_offset = 0;
 
     while (!WindowShouldClose()) {
+        int mx = GetMouseX();
+        int my = GetMouseY();
+
+
+        int chars_pressed[16];
+        u64 char_count = 0;
+        while (true) {
+            int tmp = GetCharPressed();
+            if (tmp == 0) break;
+
+            chars_pressed[char_count++] = tmp;
+        }
+
+        int keys_pressed[16];
+        u64 key_count = 0;
+        while (true) {
+            int tmp = GetKeyPressed();
+            if (tmp == 0) break;
+            if (tmp != KEY_BACKSPACE) continue;
+
+            keys_pressed[key_count++] = tmp;
+        }
+
+
         BeginDrawing();
 
         int render_w = GetRenderWidth();
         int render_h = GetRenderHeight();
 
-
-
         {
-            bool x_intercept = mx >= x && mx <= x + w;
-            bool y_intercept = my >= y && my <= y + h;
-            if (x_intercept && y_intercept && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+
+
+
+            if (mouse_collides(x, y, w, drag_bar_height) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                dragging = true;
+                drag_x_offset = (f32)mx - x;
+                drag_y_offset = (f32)my - y;
+            }
+
+            if (dragging && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                dragging = false;
+            }
+
+            if (dragging ) {
+                x = mx - drag_x_offset;
+                y = my - drag_y_offset;
+            }
+
+            if (mouse_collides(x, y + drag_bar_height, w, text_height) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 active = !active;
             }
 
 
 
             if (active) {
-                int chars_pressed[16];
-                u64 char_count = 0;
-                while (true) {
-                    int tmp = GetCharPressed();
-                    if (tmp == 0) break;
 
-                    chars_pressed[char_count++] = tmp;
-                }
-
-                
                 for (u64 i = 0; i < char_count && text_count < ARRAY_SIZE(text_buf) - 1; ++i) {
                     text_buf[text_count++] = chars_pressed[i];
                 }
 
-
-                int keys_pressed[16];
-                u64 key_count = 0;
-                while (true) {
-                    int tmp = GetKeyPressed();
-                    if (tmp == 0) break;
-                    if (tmp != KEY_BACKSPACE) continue;
-
-                    keys_pressed[key_count++] = tmp;
-                }
                 
                 for (u64 i = 0; i < key_count && text_count > 0; ++i) {
                     text_buf[--text_count] = '\0';
@@ -629,8 +663,9 @@ int main(void) {
 
 
 
-            DrawRectangleV(Vector2 {x, y}, Vector2 {w, h}, DARKGREEN);
-            DrawText(text_buf, 10, 25, 20, LIGHTGRAY);
+            DrawRectangleV(Vector2 {x, y}, Vector2 {w, drag_bar_height}, GREEN);
+            DrawRectangleV(Vector2 {x, y + drag_bar_height}, Vector2 {w, text_height}, DARKGREEN);
+            DrawText(text_buf, x + 10, y + 30, 20, LIGHTGRAY);
             
 
         }
