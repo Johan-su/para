@@ -552,6 +552,10 @@ bool mouse_collides(f32 x, f32 y, f32 w, f32 h) {
     return x_intercept && y_intercept;
 }
 
+struct Pane {
+    f32 x, y;
+    f32 w, h;
+};
 
 
 int main(void) {
@@ -579,12 +583,15 @@ int main(void) {
     SetTargetFPS(60);
 
 
+    Pane p1 = {
+        0, 0,
+        400, 50,
+    };
 
-    f32 x = 0;
-    f32 y = 0;
-
-    f32 w = 400;
-    f32 h = 50;
+    Pane p2 = {
+        500, 0,
+        400, 400,
+    };
 
 
     char text_buf[5][64] = {};
@@ -592,7 +599,10 @@ int main(void) {
 
     bool active = false;
     u64 active_id = 0;
+    
     bool dragging = false;
+    u64 drag_id = 0;
+
 
     f32 drag_x_offset = 0;
     f32 drag_y_offset = 0;
@@ -622,7 +632,8 @@ int main(void) {
             keys_pressed[key_count++] = tmp;
         }
 
-        f32 h_offset = y;
+        u64 pane_id = -1;
+        f32 h_offset;
 
         BeginDrawing();
 
@@ -630,32 +641,34 @@ int main(void) {
 #define TEXT_INPUT_HEIGHT 35
 #define DRAG_BAR_HEIGHT 15
 
-
+        pane_id += 1;
+        h_offset = p1.y;
         {
-            if (dragging && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+            if (dragging && drag_id == pane_id && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                 dragging = false;
             }
 
 
-            if (dragging ) {
-                x = (f32)mx - drag_x_offset;
-                y = (f32)my - drag_y_offset;
+            if (dragging && drag_id == pane_id) {
+                p1.x = (f32)mx - drag_x_offset;
+                p1.y = (f32)my - drag_y_offset;
             }
 
             {
-                if (mouse_collides(x, h_offset, w, DRAG_BAR_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                if (mouse_collides(p1.x, h_offset, p1.w, DRAG_BAR_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                     dragging = true;
-                    drag_x_offset = (f32)mx - x;
-                    drag_y_offset = (f32)my - y;
+                    drag_id = pane_id;
+                    drag_x_offset = (f32)mx - p1.x;
+                    drag_y_offset = (f32)my - p1.y;
                 }
-                DrawRectangleV(Vector2 {x, y}, Vector2 {w, DRAG_BAR_HEIGHT}, GREEN);
+                DrawRectangleV(Vector2 {p1.x, h_offset}, Vector2 {p1.w, DRAG_BAR_HEIGHT}, GREEN);
             }
             h_offset += DRAG_BAR_HEIGHT;
 
             for (u64 i = 0; i < 5; ++i) {
 
 
-                if (mouse_collides(x, h_offset, w, TEXT_INPUT_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                if (mouse_collides(p1.x, h_offset, p1.w, TEXT_INPUT_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                     if (active && active_id == i) active = false;
                     else {
                         active_id = i;
@@ -682,11 +695,38 @@ int main(void) {
                 } else {
                     color = LIME;
                 }
-                DrawRectangleV(Vector2 {x, h_offset}, Vector2 {w, TEXT_INPUT_HEIGHT}, color);
-                DrawText(text_buf[i], (s32)x + 5, (s32)(h_offset) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
+                DrawRectangleV(Vector2 {p1.x, h_offset}, Vector2 {p1.w, TEXT_INPUT_HEIGHT}, color);
+                DrawText(text_buf[i], (s32)p1.x + 5, (s32)(h_offset) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
 
                 h_offset += TEXT_INPUT_HEIGHT;
             }
+        }
+        pane_id += 1;
+        h_offset = p2.y;
+        {
+            if (dragging && drag_id == pane_id && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                dragging = false;
+            }
+
+
+            if (dragging && drag_id == pane_id) {
+                p2.x = (f32)mx - drag_x_offset;
+                p2.y = (f32)my - drag_y_offset;
+            }
+
+            {
+                if (mouse_collides(p2.x, h_offset, p2.w, DRAG_BAR_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    dragging = true;
+                    drag_id = pane_id;
+                    drag_x_offset = (f32)mx - p2.x;
+                    drag_y_offset = (f32)my - p2.y;
+                }
+                DrawRectangleV(Vector2 {p2.x, h_offset}, Vector2 {p2.w, DRAG_BAR_HEIGHT}, GREEN);
+            }
+            h_offset += DRAG_BAR_HEIGHT;
+
+
+
         }
 
         ClearBackground(GRAY);
