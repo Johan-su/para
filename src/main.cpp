@@ -589,13 +589,16 @@ int main(void) {
     };
 
     Pane p2 = {
-        500, 0,
-        400, 400,
+        1366-800, 0,
+        800, 400,
     };
 
 
     char text_buf[5][64] = {};
     u64 text_count[5] = {};
+
+    bool text_cursor = false;
+    u64 cursor_pos = 0;
 
     bool active = false;
     u64 active_id = 0;
@@ -648,7 +651,6 @@ int main(void) {
                 dragging = false;
             }
 
-
             if (dragging && drag_id == pane_id) {
                 p1.x = (f32)mx - drag_x_offset;
                 p1.y = (f32)my - drag_y_offset;
@@ -665,12 +667,17 @@ int main(void) {
             }
             h_offset += DRAG_BAR_HEIGHT;
 
+
+            // text input
             for (u64 i = 0; i < 5; ++i) {
 
-
                 if (mouse_collides(p1.x, h_offset, p1.w, TEXT_INPUT_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    if (active && active_id == i) active = false;
+                    if (active && active_id == i) {
+                        // set text cursor relative to mouse cursor
+                        todo();
+                    }
                     else {
+                        // set text cursor relative to mouse cursor
                         active_id = i;
                         active = true;
                     }
@@ -724,12 +731,16 @@ int main(void) {
                 DrawRectangleV(Vector2 {p2.x, h_offset}, Vector2 {p2.w, DRAG_BAR_HEIGHT}, GREEN);
             }
             h_offset += DRAG_BAR_HEIGHT;
+            {
+                DrawRectangleV(Vector2 {p2.x, h_offset}, Vector2 {p2.w, p2.w}, BLACK);
 
 
 
+            }
+            h_offset += p2.w;
         }
 
-        ClearBackground(GRAY);
+        ClearBackground(DARKGRAY);
         EndDrawing();
     }
 
