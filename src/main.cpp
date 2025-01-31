@@ -558,6 +558,25 @@ struct Pane {
 };
 
 
+
+void shift_right_resize(char *buf, u64 *count, u64 start) {
+    *count += 1;
+    // end - 1 to skip last element remember i-- also decrements at first iteration
+    for (u64 i = *count - 1; i-- > start;) {
+        buf[i + 1] = buf[i];
+    } 
+}
+
+void shift_left_resize(char *buf, u64 *count, u64 start) {
+    // end - 1 to not go out of bounds
+    for (u64 i = start; i < *count - 1; ++i) {
+        buf[i] = buf[i + 1];
+    } 
+
+
+    *count -= 1;
+}
+
 int main(void) {
 
     Lexer lex = {};
@@ -630,7 +649,6 @@ int main(void) {
         while (true) {
             int tmp = GetKeyPressed();
             if (tmp == 0) break;
-            if (tmp != KEY_BACKSPACE) continue;
 
             keys_pressed[key_count++] = tmp;
         }
@@ -642,6 +660,8 @@ int main(void) {
 
 #define TEXT_INPUT_FONT_SIZE 20
 #define TEXT_INPUT_HEIGHT 35
+#define TEXT_INPUT_MARGIN 5
+#define TEXT_INPUT_CURSOR_COLOR BLACK
 #define DRAG_BAR_HEIGHT 15
 
         pane_id += 1;
@@ -672,27 +692,52 @@ int main(void) {
             for (u64 i = 0; i < 5; ++i) {
 
                 if (mouse_collides(p1.x, h_offset, p1.w, TEXT_INPUT_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    if (active && active_id == i) {
+                    if (active && active_id == i && text_cursor) {
                         // set text cursor relative to mouse cursor
                         todo();
-                    }
-                    else {
+                    } else {
                         // set text cursor relative to mouse cursor
+                        text_cursor = true;
+                        cursor_pos = 0;
                         active_id = i;
                         active = true;
                     }
                 }
 
 
-                if (active && active_id == i) {
+                if (active && active_id == i && text_cursor) {
 
-                    for (u64 j = 0; j < char_count && text_count[i] < ARRAY_SIZE(text_buf[i]) - 1; ++j) {
-                        text_buf[i][text_count[i]++] = (char)chars_pressed[j];
+                    for (u64 j = 0; j < key_count; ++j) {
+                        if (keys_pressed[j] == KEY_BACKSPACE && text_count[i] > 0) {
+                            if (cursor_pos > 0) {
+                                shift_left_resize(text_buf[i], text_count + i, cursor_pos - 1);
+                                cursor_pos -= 1;
+                            }
+
+                        } else if (keys_pressed[j] == KEY_DELETE && text_count[i] > 0) {
+
+                            if (cursor_pos > 0 && cursor_pos < text_count[i]) {
+                                shift_left_resize(text_buf[i], text_count + i, cursor_pos);
+                            }
+
+                        } else if (keys_pressed[j] == KEY_LEFT && text_count[i] > 0) {
+                            if (cursor_pos > 0)
+                                cursor_pos -= 1;
+                            
+                        } else if (keys_pressed[j] == KEY_RIGHT && text_count[i] > 0) {
+                            if (cursor_pos < text_count[i]) 
+                                cursor_pos += 1;
+                            
+                        }
                     }
 
-                    
-                    for (u64 j = 0; j < key_count && text_count[i] > 0; ++j) {
-                        text_buf[i][--text_count[i]] = '\0';
+
+
+                    for (u64 j = 0; j < char_count && text_count[i] < ARRAY_SIZE(text_buf[i]) - 1; ++j) {
+
+                        shift_right_resize(text_buf[i], text_count + i, cursor_pos);
+                        text_buf[i][cursor_pos] = (char)chars_pressed[j];
+                        cursor_pos += 1;
                     }
                 }
 
@@ -703,7 +748,19 @@ int main(void) {
                     color = LIME;
                 }
                 DrawRectangleV(Vector2 {p1.x, h_offset}, Vector2 {p1.w, TEXT_INPUT_HEIGHT}, color);
-                DrawText(text_buf[i], (s32)p1.x + 5, (s32)(h_offset) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
+                {
+                    char tmp_buf[96];
+                    snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)text_count[i], text_buf[i]);
+                    DrawText(tmp_buf, (s32)p1.x + TEXT_INPUT_MARGIN, (s32)(h_offset) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
+                }
+
+                if (active && active_id == i && text_cursor) {
+                    char tmp_buf[96];
+                    snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)cursor_pos, text_buf[i]);
+                    int sz = MeasureText(tmp_buf, TEXT_INPUT_FONT_SIZE);
+
+                    DrawRectangleV(Vector2 {p1.x + TEXT_INPUT_MARGIN + (f32)sz, h_offset + TEXT_INPUT_FONT_SIZE / 2}, Vector2 {1, TEXT_INPUT_FONT_SIZE}, TEXT_INPUT_CURSOR_COLOR);
+                }
 
                 h_offset += TEXT_INPUT_HEIGHT;
             }
