@@ -9,6 +9,27 @@
 #include "generated.cpp"
 
 
+
+/*
+
+TODO:
+add selection (holding shift and marking text to copy/delete) to text input
+add ability to actually run functions and expressions
+separate work thread from ui thread for more heavy tasks for example, running functions in the graph view. 
+
+
+
+add more math operators/functions like integrals, derivatives, sum.
+use arenas for memory allocation in the lexer/parser/compiler
+improve color theme for the ui
+add graph viewer similar to desmos
+add snapping for panes
+
+
+
+*/
+
+
 struct Token {
     TokenType type;
     u64 start;
@@ -728,7 +749,6 @@ int main(void) {
                             if (cursor_pos < text_count[i]) 
                                 cursor_pos += 1;
                             
-                        }
                     }
 
 
