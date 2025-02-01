@@ -17,14 +17,18 @@ add selection (holding shift and marking text to copy/delete) to text input
 add ability to actually run functions and expressions
 separate work thread from ui thread for more heavy tasks for example, running functions in the graph view. 
 
+make ui scale correctly according to window size
 
 
+make panes resizable
+add ability to snap with keyboard hotkeys instead of only mouse
 add more math operators/functions like integrals, derivatives, sum.
+
+
 use arenas for memory allocation in the lexer/parser/compiler
 improve color theme for the ui
 add graph viewer similar to desmos
 add snapping for panes
-
 
 
 */
@@ -748,6 +752,7 @@ int main(void) {
                         } else if (keys_pressed[j] == KEY_RIGHT && text_count[i] > 0) {
                             if (cursor_pos < text_count[i]) 
                                 cursor_pos += 1;
+                        }
                             
                     }
 
