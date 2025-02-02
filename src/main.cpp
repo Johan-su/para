@@ -18,7 +18,7 @@ add ability to actually run functions and expressions
 separate work thread from ui thread for more heavy tasks for example, running functions in the graph view. 
 
 make ui scale correctly according to window size
-
+chained equality (checking for equality at every step in some list of expressions)
 
 make panes resizable
 add ability to snap with keyboard hotkeys instead of only mouse
@@ -54,12 +54,6 @@ struct Lexer {
 
     u64 iter;
 };
-
-
-
-
-
-
 
 
 String str_from_cstr(const char *cstr) {
@@ -669,6 +663,7 @@ int main(void) {
             chars_pressed[char_count++] = tmp;
         }
 
+        bool ctrl_key_down = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
         int keys_pressed[16];
         u64 key_count = 0;
         while (true) {
@@ -729,35 +724,74 @@ int main(void) {
                     }
                 }
 
-
                 if (active && active_id == i && text_cursor) {
-
+                    // text cursor movement
                     for (u64 j = 0; j < key_count; ++j) {
-                        if (keys_pressed[j] == KEY_BACKSPACE && text_count[i] > 0) {
-                            if (cursor_pos > 0) {
-                                shift_left_resize(text_buf[i], text_count + i, cursor_pos - 1);
-                                cursor_pos -= 1;
+                        if (text_count[i] > 0) {
+
+                            if (keys_pressed[j] == KEY_BACKSPACE) {
+                                if (cursor_pos > 0) {
+                                    shift_left_resize(text_buf[i], text_count + i, cursor_pos - 1);
+                                    cursor_pos -= 1;
+                                }
+
+                            } else if (keys_pressed[j] == KEY_DELETE) {
+
+                                if (cursor_pos < text_count[i]) {
+                                    shift_left_resize(text_buf[i], text_count + i, cursor_pos);
+                                }
+                            } else if (keys_pressed[j] == KEY_HOME) {
+                                cursor_pos = 0;
+                            } else if (keys_pressed[j] == KEY_END) {
+                                cursor_pos = text_count[i];
+                            } else if (keys_pressed[j] == KEY_LEFT) {
+
+                                if (cursor_pos > 0) {
+
+                                    if (ctrl_key_down) {
+                                        if (is_whitespace(text_buf[i][cursor_pos - 1])) {
+                                            while (cursor_pos > 0 && is_whitespace(text_buf[i][cursor_pos - 1])) {
+                                                cursor_pos -= 1;
+                                            }
+                                            while (cursor_pos > 0 && !is_whitespace(text_buf[i][cursor_pos - 1])) {
+                                                cursor_pos -= 1;
+                                            }
+                                        } else {
+                                            while (cursor_pos > 0 && !is_whitespace(text_buf[i][cursor_pos - 1])) {
+                                                cursor_pos -= 1;
+                                            }
+                                        }
+                                    } else {
+                                        cursor_pos -= 1;
+                                    }
+                                }
+                                            
+                            } else if (keys_pressed[j] == KEY_RIGHT) {
+                                if (cursor_pos < text_count[i]) {
+
+                                    if (ctrl_key_down) {
+                                        if (is_whitespace(text_buf[i][cursor_pos])) {
+                                            while (cursor_pos < text_count[i] && is_whitespace(text_buf[i][cursor_pos])) {
+                                                cursor_pos += 1;
+                                            }
+                                            while (cursor_pos < text_count[i] && !is_whitespace(text_buf[i][cursor_pos])) {
+                                                cursor_pos += 1;
+                                            }
+                                        } else {
+                                            while (cursor_pos < text_count[i] && !is_whitespace(text_buf[i][cursor_pos])) {
+                                                cursor_pos += 1;
+                                            }
+                                        }
+                                    } else {
+                                        cursor_pos += 1;
+                                    }
+                                }
                             }
-
-                        } else if (keys_pressed[j] == KEY_DELETE && text_count[i] > 0) {
-
-                            if (cursor_pos > 0 && cursor_pos < text_count[i]) {
-                                shift_left_resize(text_buf[i], text_count + i, cursor_pos);
-                            }
-
-                        } else if (keys_pressed[j] == KEY_LEFT && text_count[i] > 0) {
-                            if (cursor_pos > 0)
-                                cursor_pos -= 1;
-                            
-                        } else if (keys_pressed[j] == KEY_RIGHT && text_count[i] > 0) {
-                            if (cursor_pos < text_count[i]) 
-                                cursor_pos += 1;
                         }
-                            
                     }
 
 
-
+                    // text cursor input
                     for (u64 j = 0; j < char_count && text_count[i] < ARRAY_SIZE(text_buf[i]) - 1; ++j) {
 
                         shift_right_resize(text_buf[i], text_count + i, cursor_pos);
