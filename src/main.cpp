@@ -748,7 +748,6 @@ int main(void) {
 
                 if (ui.active && ui.active_id == i && ui.text_cursor) {
                     
-                    bool creates_selection = false;
                     u64 prev_cursor_pos = ui.cursor_pos;
 
                     for (u64 j = 0; j < key_count; ++j) {
@@ -784,6 +783,20 @@ int main(void) {
                                 }
                             }
 
+                        } else if (keys_pressed[j] == KEY_A) {
+                            if (text_count[i] > 0 && ctrl_key_down) {
+                                ui.selecting = true;
+                                ui.cursor_pos = 0;
+                                ui.selection_anchor = text_count[i];
+                            }
+                        } else if (keys_pressed[j] == KEY_X) {
+                            if (ui.selecting && ctrl_key_down) {
+                                ui.selecting = false;
+                                char tmp_buf[96];
+                                snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)(ui.selection_end - ui.selection_start), ui.selection_start + text_buf[i]);
+                                SetClipboardText(tmp_buf);
+                                shift_left_resize(text_buf[i], text_count + i, ui.selection_start, ui.selection_end - ui.selection_start);
+                            }
                         } else if (keys_pressed[j] == KEY_C) {
                             if (ui.selecting && ctrl_key_down) {
                                 char tmp_buf[96];
@@ -812,18 +825,33 @@ int main(void) {
                             }
                         } else if (keys_pressed[j] == KEY_HOME) {
                             if (text_count[i] > 0) {
+                                if (!ui.selecting && shift_key_down) {
+                                    ui.selecting = true;
+                                    ui.selection_anchor = prev_cursor_pos;
+                                }
+                                if (ui.selecting && !shift_key_down) {
+                                    ui.selecting = false;
+                                }
                                 ui.cursor_pos = 0;
-                                creates_selection = true;
                             }
                         } else if (keys_pressed[j] == KEY_END) {
                             if (text_count[i] > 0) {
+                                if (!ui.selecting && shift_key_down) {
+                                    ui.selecting = true;
+                                    ui.selection_anchor = prev_cursor_pos;
+                                }
+                                if (ui.selecting && !shift_key_down) {
+                                    ui.selecting = false;
+                                }
                                 ui.cursor_pos = text_count[i];
-                                creates_selection = true;
                             }
                         } else if (keys_pressed[j] == KEY_LEFT) {
                             if (text_count[i] > 0 && ui.cursor_pos > 0) {
-                                creates_selection = true;
 
+                                if (!ui.selecting && shift_key_down) {
+                                    ui.selecting = true;
+                                    ui.selection_anchor = prev_cursor_pos;
+                                }
                                 if (ui.selecting && !shift_key_down) {
                                     ui.selecting = false;
                                 }
@@ -848,7 +876,11 @@ int main(void) {
                                         
                         } else if (keys_pressed[j] == KEY_RIGHT) {
                             if (text_count[i] > 0 && ui.cursor_pos < text_count[i]) {
-                                creates_selection = true; 
+
+                                if (!ui.selecting && shift_key_down) {
+                                    ui.selecting = true;
+                                    ui.selection_anchor = prev_cursor_pos;
+                                }
                                 if (ui.selecting && !shift_key_down) {
                                     ui.selecting = false;
                                 }
@@ -873,12 +905,6 @@ int main(void) {
                         }
                     }
 
-                    if (!ui.selecting && shift_key_down && creates_selection && prev_cursor_pos != ui.cursor_pos) {
-                        ui.selecting = true;
-                        ui.selection_anchor = prev_cursor_pos;
-                    }
-
-                    
                     if (ui.selecting) {
                         if (ui.selection_anchor < ui.cursor_pos) {
                             ui.selection_start = ui.selection_anchor;
