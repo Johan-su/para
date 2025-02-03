@@ -748,9 +748,9 @@ int main(void) {
 
                 if (ui.active && ui.active_id == i && ui.text_cursor) {
                     
-                    u64 prev_cursor_pos = ui.cursor_pos;
-
                     for (u64 j = 0; j < key_count; ++j) {
+
+                        u64 prev_cursor_pos = ui.cursor_pos;
 
                         if (keys_pressed[j] == KEY_BACKSPACE) {
 
