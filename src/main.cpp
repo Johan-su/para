@@ -181,6 +181,8 @@ struct Parse_Context {
 
     Lexer *lex;
     u64 iter;
+
+    Node *root;
 };
 
 bool is_token(Parse_Context *ctx, TokenType t, s64 offset) {
@@ -302,7 +304,7 @@ Node *make_node_from_stacks(Parse_Context *ctx) {
 }
 
 void make_all_nodes_from_operator_ctx(Parse_Context *ctx) {
-    while (ctx->op_count > 0) {
+    while (ctx->op_count > 0 && ctx->op_stack[ctx->op_count - 1]->type != NODE_OPENPAREN) {
         Node *n = make_node_from_stacks(ctx);
         push_node(ctx, n);
     }
@@ -521,26 +523,24 @@ void parse_statement(Parse_Context *ctx) {
 }
 
 
-Node *parse(Parse_Context *ctx) {
-
+void parse(Parse_Context *ctx) {
 
     while (ctx->iter < ctx->lex->token_count) {
         parse_statement(ctx);
     }
 
-
-    return ctx->node_stack[0];
+    ctx->root = ctx->node_stack[0]; 
 }
 
 
-void graphviz_out(Parse_Context *ctx, Node *tree) {
+void graphviz_out(Parse_Context *ctx) {
     FILE *f = fopen("./input.dot", "wb");
     fprintf(f, "graph G {\n");
 
     Node **stack = (Node **)calloc(4096, sizeof(*stack));
     u64 count = 0; 
 
-    stack[count++] = tree;
+    stack[count++] = ctx->root;
 
     while (count != 0) {
         Node *top = stack[--count];
@@ -560,8 +560,28 @@ void graphviz_out(Parse_Context *ctx, Node *tree) {
     fclose(f);
 }
 
+f32 execute_tree(Node *n) {
+    f32 r = 0;
+    switch (n->type) {
+        case NODE_INVALID: todo();
+        case NODE_NUMBER: r = n->num; break;
+        case NODE_FUNCTION: todo();
+        case NODE_VARIABLE: todo();
+        case NODE_ADD: r = execute_tree(n->nodes[0]) + execute_tree(n->nodes[1]); break;
+        case NODE_SUB: r = execute_tree(n->nodes[0]) - execute_tree(n->nodes[1]); break;
+        case NODE_MUL: r = execute_tree(n->nodes[0]) * execute_tree(n->nodes[1]); break;
+        case NODE_DIV: r = execute_tree(n->nodes[0]) / execute_tree(n->nodes[1]); break;
+        case NODE_UNARYADD: r = execute_tree(n->nodes[0]); break;
+        case NODE_UNARYSUB: r = -execute_tree(n->nodes[0]); break;
+        case NODE_OPENPAREN: todo();
+    }
+
+    return r;
+}
 
 
+
+// UI System
 bool mouse_collides(f32 x, f32 y, f32 w, f32 h) {
     f32 mx = (f32)GetMouseX();
     f32 my = (f32)GetMouseY();
@@ -605,23 +625,28 @@ void shift_left_resize(char *buf, u64 *count, u64 start, u64 amount) {
 
 
 struct UI_State {
-    bool text_cursor;
-    u64 cursor_pos;
 
     bool active;
     u64 active_id;
-    
+
+
     bool dragging;
     u64 drag_id;
     f32 drag_x_offset;
     f32 drag_y_offset;
 
 
+    bool text_cursor;
+    u64 cursor_pos;
+
+
     bool selecting;
     u64 selection_anchor;
     u64 selection_start;
     u64 selection_end;
+
 };
+
 
 
 
@@ -630,16 +655,18 @@ int main(void) {
 
     Lexer lex = {};
 
-    tokenize(&lex, str_from_cstr("f((2*(2 + 3)) * 2,2,(((5+4)*3)*3),4,5)"));
+    const char *src = "(6 * 5 + 4) * 4 * 3 * 2 * 1";
+
+    tokenize(&lex, str_from_cstr(src));
 
     Parse_Context context = {};
     context.lex = &lex;
 
-    Node *tree = parse(&context);
+    parse(&context);
 
-    graphviz_out(&context, tree);
+    graphviz_out(&context);
 
-
+    f32 r = execute_tree(context.root);
 
     int screen_w = 1366;
     int screen_h = 768;
