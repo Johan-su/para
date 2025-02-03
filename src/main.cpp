@@ -13,7 +13,6 @@
 /*
 
 TODO:
-add copy and paste
 add ability to actually run functions and expressions
 separate work thread from ui thread for more heavy tasks for example, running functions in the graph view. 
 
@@ -592,12 +591,13 @@ void shift_right_resize(char *buf, u64 *count, u64 start, u64 amount) {
 }
 
 void shift_left_resize(char *buf, u64 *count, u64 start, u64 amount) {
+    assert(*count >= amount);
     for (u64 k = 0; k < amount; ++k) {
         for (u64 i = start; i < *count - 1; ++i) {
             buf[i] = buf[i + 1];
         } 
-
         *count -= 1;
+
     }
     // end - 1 to not go out of bounds
 }
@@ -618,8 +618,13 @@ struct UI_State {
 
 
     bool selecting;
+    u64 selection_anchor;
     u64 selection_start;
+    u64 selection_end;
 };
+
+
+
 
 int main(void) {
 
@@ -733,6 +738,7 @@ int main(void) {
                         todo();
                     } else {
                         // TODO: set text cursor relative to mouse cursor
+                        ui.selecting = false;
                         ui.text_cursor = true;
                         ui.cursor_pos = 0;
                         ui.active_id = i;
@@ -741,138 +747,162 @@ int main(void) {
                 }
 
                 if (ui.active && ui.active_id == i && ui.text_cursor) {
-
+                    
+                    bool creates_selection = false;
                     u64 prev_cursor_pos = ui.cursor_pos;
-                    // text cursor movement
+
                     for (u64 j = 0; j < key_count; ++j) {
-                        if (text_count[i] > 0) {
 
-                            if (keys_pressed[j] == KEY_BACKSPACE) {
+                        if (keys_pressed[j] == KEY_BACKSPACE) {
 
+                            if (text_count[i] > 0) {
                                 if (ui.selecting) {
                                     ui.selecting = false;
-                                    u64 start;
-                                    u64 end;
-                                    if (ui.selection_start < ui.cursor_pos) {
-                                        start = ui.selection_start;
-                                        end = ui.cursor_pos;
-                                    } else {
-                                        start = ui.cursor_pos;
-                                        end = ui.selection_start;
-                                    }
-                                    shift_left_resize(text_buf[i], text_count + i, start, end - start);
-                                    ui.cursor_pos = start;
+
+                                    shift_left_resize(text_buf[i], text_count + i, ui.selection_start, ui.selection_end - ui.selection_start);
+                                    ui.cursor_pos = ui.selection_start;
                                 } else {
                                     if (ui.cursor_pos > 0) {
                                         shift_left_resize(text_buf[i], text_count + i, ui.cursor_pos - 1, 1);
                                         ui.cursor_pos -= 1;
                                     }
                                 }
+                            }
 
-                            } else if (keys_pressed[j] == KEY_DELETE) {
+                        } else if (keys_pressed[j] == KEY_DELETE) {
 
+                            if (text_count[i] > 0) {
                                 if (ui.selecting) {
                                     ui.selecting = false;
-                                    u64 start;
-                                    u64 end;
-                                    if (ui.selection_start < ui.cursor_pos) {
-                                        start = ui.selection_start;
-                                        end = ui.cursor_pos;
-                                    } else {
-                                        start = ui.cursor_pos;
-                                        end = ui.selection_start;
-                                    }
-                                    shift_left_resize(text_buf[i], text_count + i, start, end - start);
-                                    ui.cursor_pos = start;
+
+                                    shift_left_resize(text_buf[i], text_count + i, ui.selection_start, ui.selection_end - ui.selection_start);
+                                    ui.cursor_pos = ui.selection_start;
                                 } else {
                                     if (ui.cursor_pos < text_count[i]) {
                                         shift_left_resize(text_buf[i], text_count + i, ui.cursor_pos, 1);
                                     }
                                 }
+                            }
 
-                            } else if (keys_pressed[j] == KEY_HOME) {
-                                ui.cursor_pos = 0;
-                            } else if (keys_pressed[j] == KEY_END) {
-                                ui.cursor_pos = text_count[i];
-                            } else if (keys_pressed[j] == KEY_LEFT) {
+                        } else if (keys_pressed[j] == KEY_C) {
+                            if (ui.selecting && ctrl_key_down) {
+                                char tmp_buf[96];
+                                snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)(ui.selection_end - ui.selection_start), ui.selection_start + text_buf[i]);
+                                SetClipboardText(tmp_buf);
+                            }
+                        } else if (keys_pressed[j] == KEY_V) {
+                            if (ctrl_key_down) {
+                                const char *text = GetClipboardText();
+                                u64 len = strlen(text);
 
-                                if (ui.cursor_pos > 0) {
-
-                                    if (ui.selecting && !shift_key_down) {
+                                if (len + text_count[i] - (ui.selection_end - ui.selection_start) > ARRAY_SIZE(text_buf[i])) {
+                                    // pasting clipboard would overflow
+                                    todo();
+                                } else {
+                                    if (ui.selecting) {
                                         ui.selecting = false;
+                                        shift_left_resize(text_buf[i], text_count + i, ui.selection_start, ui.selection_end - ui.selection_start);
+                                        ui.cursor_pos = ui.selection_start;
                                     }
-
-                                    if (ctrl_key_down) {
-                                        if (is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
-                                            while (ui.cursor_pos > 0 && is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
-                                                ui.cursor_pos -= 1;
-                                            }
-                                            while (ui.cursor_pos > 0 && !is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
-                                                ui.cursor_pos -= 1;
-                                            }
-                                        } else {
-                                            while (ui.cursor_pos > 0 && !is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
-                                                ui.cursor_pos -= 1;
-                                            }
-                                        }
-                                    } else {
-                                        ui.cursor_pos -= 1;
-                                    }
+                                    shift_right_resize(text_buf[i], text_count + i, ui.cursor_pos, len);
+                                    memcpy(text_buf[i] + ui.cursor_pos, text, len);
+                                    ui.cursor_pos += len;
                                 }
-                                            
-                            } else if (keys_pressed[j] == KEY_RIGHT) {
-                                if (ui.cursor_pos < text_count[i]) {
-                                    
-                                    if (ui.selecting && !shift_key_down) {
-                                        ui.selecting = false;
-                                    }
+                                
+                            }
+                        } else if (keys_pressed[j] == KEY_HOME) {
+                            if (text_count[i] > 0) {
+                                ui.cursor_pos = 0;
+                                creates_selection = true;
+                            }
+                        } else if (keys_pressed[j] == KEY_END) {
+                            if (text_count[i] > 0) {
+                                ui.cursor_pos = text_count[i];
+                                creates_selection = true;
+                            }
+                        } else if (keys_pressed[j] == KEY_LEFT) {
+                            if (text_count[i] > 0 && ui.cursor_pos > 0) {
+                                creates_selection = true;
 
-                                    if (ctrl_key_down) {
-                                        if (is_whitespace(text_buf[i][ui.cursor_pos])) {
-                                            while (ui.cursor_pos < text_count[i] && is_whitespace(text_buf[i][ui.cursor_pos])) {
-                                                ui.cursor_pos += 1;
-                                            }
-                                            while (ui.cursor_pos < text_count[i] && !is_whitespace(text_buf[i][ui.cursor_pos])) {
-                                                ui.cursor_pos += 1;
-                                            }
-                                        } else {
-                                            while (ui.cursor_pos < text_count[i] && !is_whitespace(text_buf[i][ui.cursor_pos])) {
-                                                ui.cursor_pos += 1;
-                                            }
+                                if (ui.selecting && !shift_key_down) {
+                                    ui.selecting = false;
+                                }
+
+                                if (ctrl_key_down) {
+                                    if (is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
+                                        while (ui.cursor_pos > 0 && is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
+                                            ui.cursor_pos -= 1;
+                                        }
+                                        while (ui.cursor_pos > 0 && !is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
+                                            ui.cursor_pos -= 1;
                                         }
                                     } else {
-                                        ui.cursor_pos += 1;
+                                        while (ui.cursor_pos > 0 && !is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
+                                            ui.cursor_pos -= 1;
+                                        }
                                     }
+                                } else {
+                                    ui.cursor_pos -= 1;
+                                }
+                            }
+                                        
+                        } else if (keys_pressed[j] == KEY_RIGHT) {
+                            if (text_count[i] > 0 && ui.cursor_pos < text_count[i]) {
+                                creates_selection = true; 
+                                if (ui.selecting && !shift_key_down) {
+                                    ui.selecting = false;
+                                }
+
+                                if (ctrl_key_down) {
+                                    if (is_whitespace(text_buf[i][ui.cursor_pos])) {
+                                        while (ui.cursor_pos < text_count[i] && is_whitespace(text_buf[i][ui.cursor_pos])) {
+                                            ui.cursor_pos += 1;
+                                        }
+                                        while (ui.cursor_pos < text_count[i] && !is_whitespace(text_buf[i][ui.cursor_pos])) {
+                                            ui.cursor_pos += 1;
+                                        }
+                                    } else {
+                                        while (ui.cursor_pos < text_count[i] && !is_whitespace(text_buf[i][ui.cursor_pos])) {
+                                            ui.cursor_pos += 1;
+                                        }
+                                    }
+                                } else {
+                                    ui.cursor_pos += 1;
                                 }
                             }
                         }
                     }
 
-                    if (!ui.selecting && shift_key_down && prev_cursor_pos != ui.cursor_pos) {
+                    if (!ui.selecting && shift_key_down && creates_selection && prev_cursor_pos != ui.cursor_pos) {
                         ui.selecting = true;
-                        ui.selection_start = prev_cursor_pos;
+                        ui.selection_anchor = prev_cursor_pos;
                     }
 
-                    if (ui.selecting && ui.cursor_pos == ui.selection_start) {
+                    
+                    if (ui.selecting) {
+                        if (ui.selection_anchor < ui.cursor_pos) {
+                            ui.selection_start = ui.selection_anchor;
+                            ui.selection_end = ui.cursor_pos;
+                        } else {
+                            ui.selection_start = ui.cursor_pos;
+                            ui.selection_end = ui.selection_anchor;
+                        }
+                    }
+
+                    if (ui.selecting && ui.cursor_pos == ui.selection_anchor) {
                         ui.selecting = false;
                     }
+
+
 
                     // text cursor input
                     for (u64 j = 0; j < char_count && text_count[i] < ARRAY_SIZE(text_buf[i]) - 1; ++j) {
 
                         if (ui.selecting) {
                             ui.selecting = false;
-                            u64 start;
-                            u64 end;
-                            if (ui.selection_start < ui.cursor_pos) {
-                                start = ui.selection_start;
-                                end = ui.cursor_pos;
-                            } else {
-                                start = ui.cursor_pos;
-                                end = ui.selection_start;
-                            }
-                            shift_left_resize(text_buf[i], text_count + i, start, end - start);
-                            ui.cursor_pos = start;
+
+                            shift_left_resize(text_buf[i], text_count + i, ui.selection_start, ui.selection_end - ui.selection_start);
+                            ui.cursor_pos = ui.selection_start;
                         }
                         
                         shift_right_resize(text_buf[i], text_count + i, ui.cursor_pos, 1);
@@ -900,20 +930,11 @@ int main(void) {
                     DrawRectangleV(Vector2 {p1.x + TEXT_INPUT_MARGIN + (f32)sz, h_offset + TEXT_INPUT_FONT_SIZE / 2}, Vector2 {1, TEXT_INPUT_FONT_SIZE}, TEXT_INPUT_CURSOR_COLOR);
 
                     if (ui.selecting) {
-                        u64 start;
-                        u64 end;
-                        if (ui.selection_start < ui.cursor_pos) {
-                            start = ui.selection_start;
-                            end = ui.cursor_pos;
-                        } else {
-                            start = ui.cursor_pos;
-                            end = ui.selection_start;
-                        }
 
-                        snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)start, text_buf[i]);
+                        snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)ui.selection_start, text_buf[i]);
                         int sz = MeasureText(tmp_buf, TEXT_INPUT_FONT_SIZE);
                         
-                        snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)(end - start), start + text_buf[i]);
+                        snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)(ui.selection_end - ui.selection_start), text_buf[i] + ui.selection_start);
                         int selection_sz = MeasureText(tmp_buf, TEXT_INPUT_FONT_SIZE);
                         Color a = TEXT_INPUT_SELECTION_COLOR;
                         a.a = 100;
