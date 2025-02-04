@@ -20,6 +20,7 @@ make ui scale correctly according to window size
 chained equality (checking for equality at every step in some list of expressions)
 
 make panes resizable
+add snapping for panes
 add ability to snap with keyboard hotkeys instead of only mouse
 add more math operators/functions like integrals, derivatives, sum.
 
@@ -29,7 +30,6 @@ tooltips to evaluate expressions partially (maybe)
 use arenas for memory allocation in the lexer/parser/compiler
 improve color theme for the ui
 add graph viewer similar to desmos
-add snapping for panes
 
 
 */
@@ -647,7 +647,28 @@ struct UI_State {
 
 };
 
+#define TEXT_INPUT_FONT_SIZE 20
+#define TEXT_INPUT_HEIGHT 35
+#define TEXT_INPUT_MARGIN 5
+#define TEXT_INPUT_CURSOR_COLOR BLACK
+#define TEXT_INPUT_SELECTION_COLOR BLUE
+#define DRAG_BAR_HEIGHT 15
 
+
+u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, Pane *p, f32 mx) {
+
+    for (u64 j = 1; j <= *text_count; ++j) {
+        char tmp_buf[96];
+        snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)j, text_buf);
+        int sz = MeasureText(tmp_buf, TEXT_INPUT_FONT_SIZE);
+
+        if (mx - (p->x + TEXT_INPUT_MARGIN + sz) < TEXT_INPUT_FONT_SIZE / 2) {
+            return j;
+        }
+    }
+    if (*text_count > 0) return *text_count - 1;
+    else return 0; 
+}
 
 
 
@@ -725,12 +746,6 @@ int main(void) {
 
         BeginDrawing();
 
-#define TEXT_INPUT_FONT_SIZE 20
-#define TEXT_INPUT_HEIGHT 35
-#define TEXT_INPUT_MARGIN 5
-#define TEXT_INPUT_CURSOR_COLOR BLACK
-#define TEXT_INPUT_SELECTION_COLOR BLUE
-#define DRAG_BAR_HEIGHT 15
 
         pane_id += 1;
         h_offset = p1.y;
@@ -761,13 +776,19 @@ int main(void) {
 
                 if (mouse_collides(p1.x, h_offset, p1.w, TEXT_INPUT_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                     if (ui.active && ui.active_id == i && ui.text_cursor) {
-                        // TODO: set text cursor relative to mouse cursor
-                        todo();
+
+                        if (mx < p1.x) {
+                            ui.cursor_pos = 0;
+                        } else if (mx > p1.x + p1.w) {
+                            ui.cursor_pos = text_count[i] - 1;
+                        } else {
+                            ui.cursor_pos = get_text_cursor_pos_from_mouse((u8 *)text_buf[i], text_count + i, &p1, (f32)mx);
+                        }
+
                     } else {
-                        // TODO: set text cursor relative to mouse cursor
                         ui.selecting = false;
                         ui.text_cursor = true;
-                        ui.cursor_pos = 0;
+                        ui.cursor_pos = get_text_cursor_pos_from_mouse((u8 *)text_buf[i], text_count + i, &p1, (f32)mx);
                         ui.active_id = i;
                         ui.active = true;
                     }
@@ -823,6 +844,7 @@ int main(void) {
                                 snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)(ui.selection_end - ui.selection_start), ui.selection_start + text_buf[i]);
                                 SetClipboardText(tmp_buf);
                                 shift_left_resize(text_buf[i], text_count + i, ui.selection_start, ui.selection_end - ui.selection_start);
+                                ui.cursor_pos = ui.selection_start;
                             }
                         } else if (keys_pressed[j] == KEY_C) {
                             if (ui.selecting && ctrl_key_down) {
