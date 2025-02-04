@@ -34,6 +34,33 @@ add graph viewer similar to desmos
 
 */
 
+// String
+struct String {
+    u8 *dat;
+    u64 count;
+};
+
+#include <stdarg.h>
+#if GCC || CLANG
+__attribute__((__format__ (__printf__, 2, 3)))
+#endif
+String string_printf(Arena *arena, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int len_ = vsnprintf(nullptr, 0, fmt, args);   
+    assert(len_ >= 0);
+
+    String s = {};
+    s.count = (u64) len_;
+    
+    s.dat = (u8 *)arena_alloc(arena, s.count + 1);
+    vsnprintf((char *)s.dat, s.count + 1, fmt, args);   
+    va_end(args);
+
+    return s;
+}
+
+
 
 struct Token {
     TokenType type;
@@ -42,10 +69,6 @@ struct Token {
     u64 end;
 };
 
-struct String {
-    u8 *dat;
-    u64 count;
-};
 
 struct Lexer {
     Token *tokens;
@@ -560,8 +583,8 @@ void graphviz_out(Parse_Context *ctx) {
     fclose(f);
 }
 
-f32 execute_tree(Node *n) {
-    f32 r = 0;
+f64 execute_tree(Node *n) {
+    f64 r = 0;
     switch (n->type) {
         case NODE_INVALID: todo();
         case NODE_NUMBER: r = n->num; break;
@@ -581,47 +604,19 @@ f32 execute_tree(Node *n) {
 
 
 
+
+
+
 // UI System
-bool mouse_collides(f32 x, f32 y, f32 w, f32 h) {
-    f32 mx = (f32)GetMouseX();
-    f32 my = (f32)GetMouseY();
 
-    bool x_intercept = mx >= x && mx <= x + w;
-    bool y_intercept = my >= y && my <= y + h;
-
-    return x_intercept && y_intercept;
-}
-
-struct Pane {
-    f32 x, y;
-    f32 w, h;
-};
-
-
-
-void shift_right_resize(char *buf, u64 *count, u64 start, u64 amount) {
-
-    for (u64 k = 0; k < amount; ++k) {
-        *count += 1;
-        // end - 1 to skip last element remember i-- also decrements at first iteration
-        for (u64 i = *count - 1; i-- > start;) {
-            buf[i + 1] = buf[i];
-        } 
-    }
-}
-
-void shift_left_resize(char *buf, u64 *count, u64 start, u64 amount) {
-    assert(*count >= amount);
-    for (u64 k = 0; k < amount; ++k) {
-        for (u64 i = start; i < *count - 1; ++i) {
-            buf[i] = buf[i + 1];
-        } 
-        *count -= 1;
-
-    }
-    // end - 1 to not go out of bounds
-}
-
+#define TEXT_INPUT_FONT_SIZE 20
+#define TEXT_INPUT_HEIGHT 35
+#define TEXT_INPUT_MARGIN 5
+#define TEXT_INPUT_CURSOR_COLOR BLACK
+#define TEXT_INPUT_SELECTION_COLOR BLUE
+#define DISPLAY_STRING_HEIGHT 25
+#define DISPLAY_STRING_FONT_SIZE 10
+#define DRAG_BAR_HEIGHT 15
 
 
 struct UI_State {
@@ -647,20 +642,61 @@ struct UI_State {
 
 };
 
-#define TEXT_INPUT_FONT_SIZE 20
-#define TEXT_INPUT_HEIGHT 35
-#define TEXT_INPUT_MARGIN 5
-#define TEXT_INPUT_CURSOR_COLOR BLACK
-#define TEXT_INPUT_SELECTION_COLOR BLUE
-#define DRAG_BAR_HEIGHT 15
+
+bool mouse_collides(f32 x, f32 y, f32 w, f32 h) {
+    f32 mx = (f32)GetMouseX();
+    f32 my = (f32)GetMouseY();
+
+    bool x_intercept = mx >= x && mx <= x + w;
+    bool y_intercept = my >= y && my <= y + h;
+
+    return x_intercept && y_intercept;
+}
+
+struct Pane {
+    f32 x, y;
+    f32 w, h;
+};
+
+
+
+void shift_right_resize(u8 *buf, u64 *count, u64 start, u64 amount) {
+
+    for (u64 k = 0; k < amount; ++k) {
+        *count += 1;
+        // end - 1 to skip last element remember i-- also decrements at first iteration
+        for (u64 i = *count - 1; i-- > start;) {
+            buf[i + 1] = buf[i];
+        } 
+    }
+}
+
+void shift_left_resize(u8 *buf, u64 *count, u64 start, u64 amount) {
+    assert(*count >= amount);
+    for (u64 k = 0; k < amount; ++k) {
+        for (u64 i = start; i < *count - 1; ++i) {
+            buf[i] = buf[i + 1];
+        } 
+        *count -= 1;
+
+    }
+    // end - 1 to not go out of bounds
+}
+
+
+Arena *scratch = nullptr;
 
 
 u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, Pane *p, f32 mx) {
 
     for (u64 j = 1; j <= *text_count; ++j) {
-        char tmp_buf[96];
-        snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)j, text_buf);
-        int sz = MeasureText(tmp_buf, TEXT_INPUT_FONT_SIZE);
+
+        u64 tmp = arena_get_pos(scratch);
+
+        String s = string_printf(scratch, "%.*s", (int)j, text_buf);
+        f32 sz = (f32)MeasureText((char *)s.dat, TEXT_INPUT_FONT_SIZE);
+
+        arena_set_pos(scratch, tmp);
 
         if (mx - (p->x + TEXT_INPUT_MARGIN + sz) < TEXT_INPUT_FONT_SIZE / 2) {
             return j;
@@ -671,8 +707,11 @@ u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, Pane *p, f32 m
 }
 
 
-
 int main(void) {
+
+    Arena t; arena_init(&t, 1000000);
+    scratch = &t;
+
 
     Lexer lex = {};
 
@@ -687,7 +726,7 @@ int main(void) {
 
     graphviz_out(&context);
 
-    f32 r = execute_tree(context.root);
+    f64 r = execute_tree(context.root);
 
     int screen_w = 1366;
     int screen_h = 768;
@@ -710,15 +749,20 @@ int main(void) {
     };
 
 
-    char text_buf[5][64] = {};
+    u8 text_buf[5][64] = {};
     u64 text_count[5] = {};
+
+    u8 display_text_buf[5][64] = {};
+    u64 display_text_count[5] = {};
 
     UI_State ui = {};
 
 
     while (!WindowShouldClose()) {
-        int mx = GetMouseX();
-        int my = GetMouseY();
+        u64 tmp_pos = arena_get_pos(scratch);
+
+        f32 mx = (f32)GetMouseX();
+        f32 my = (f32)GetMouseY();
 
 
         int chars_pressed[16];
@@ -741,13 +785,13 @@ int main(void) {
             keys_pressed[key_count++] = tmp;
         }
 
-        u64 pane_id = -1;
+        u64 pane_count = 0;
         f32 h_offset;
 
         BeginDrawing();
 
 
-        pane_id += 1;
+        u64 pane_id = pane_count++;
         h_offset = p1.y;
         {
             if (ui.dragging && ui.drag_id == pane_id && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
@@ -771,7 +815,7 @@ int main(void) {
             h_offset += DRAG_BAR_HEIGHT;
 
 
-            // text input
+            // text input + display string
             for (u64 i = 0; i < 5; ++i) {
 
                 if (mouse_collides(p1.x, h_offset, p1.w, TEXT_INPUT_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -794,9 +838,11 @@ int main(void) {
                         ui.active = true;
                     }
                 }
-
+                bool text_input_changed = false;
                 if (ui.active && ui.active_id == i && ui.text_cursor) {
-                    
+
+                    text_input_changed = key_count > 0 || char_count > 0;
+
                     for (u64 j = 0; j < key_count; ++j) {
 
                         u64 prev_cursor_pos = ui.cursor_pos;
@@ -811,8 +857,27 @@ int main(void) {
                                     ui.cursor_pos = ui.selection_start;
                                 } else {
                                     if (ui.cursor_pos > 0) {
-                                        shift_left_resize(text_buf[i], text_count + i, ui.cursor_pos - 1, 1);
-                                        ui.cursor_pos -= 1;
+                                        
+                                        if (ctrl_key_down) {
+
+                                            if (is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
+                                                while (ui.cursor_pos > 0 && is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
+                                                    ui.cursor_pos -= 1;
+                                                }
+                                                while (ui.cursor_pos > 0 && !is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
+                                                    ui.cursor_pos -= 1;
+                                                }
+                                            } else {
+                                                while (ui.cursor_pos > 0 && !is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
+                                                    ui.cursor_pos -= 1;
+                                                }
+                                            }
+
+                                            shift_left_resize(text_buf[i], text_count + i, ui.cursor_pos, prev_cursor_pos - ui.cursor_pos);
+                                        } else {
+                                            shift_left_resize(text_buf[i], text_count + i, ui.cursor_pos - 1, 1);
+                                            ui.cursor_pos -= 1;
+                                        }
                                     }
                                 }
                             }
@@ -841,17 +906,15 @@ int main(void) {
                         } else if (keys_pressed[j] == KEY_X) {
                             if (ui.selecting && ctrl_key_down) {
                                 ui.selecting = false;
-                                char tmp_buf[96];
-                                snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)(ui.selection_end - ui.selection_start), ui.selection_start + text_buf[i]);
-                                SetClipboardText(tmp_buf);
+                                String s = string_printf(scratch, "%.*s", (int)(ui.selection_end - ui.selection_start), ui.selection_start + text_buf[i]);
+                                SetClipboardText((char *)s.dat);
                                 shift_left_resize(text_buf[i], text_count + i, ui.selection_start, ui.selection_end - ui.selection_start);
                                 ui.cursor_pos = ui.selection_start;
                             }
                         } else if (keys_pressed[j] == KEY_C) {
                             if (ui.selecting && ctrl_key_down) {
-                                char tmp_buf[96];
-                                snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)(ui.selection_end - ui.selection_start), ui.selection_start + text_buf[i]);
-                                SetClipboardText(tmp_buf);
+                                String s = string_printf(scratch, "%.*s", (int)(ui.selection_end - ui.selection_start), ui.selection_start + text_buf[i]);
+                                SetClipboardText((char *)s.dat);
                             }
                         } else if (keys_pressed[j] == KEY_V) {
                             if (ctrl_key_down) {
@@ -922,6 +985,7 @@ int main(void) {
                                 } else {
                                     ui.cursor_pos -= 1;
                                 }
+
                             }
                                         
                         } else if (keys_pressed[j] == KEY_RIGHT) {
@@ -982,47 +1046,64 @@ int main(void) {
                         }
                         
                         shift_right_resize(text_buf[i], text_count + i, ui.cursor_pos, 1);
-                        text_buf[i][ui.cursor_pos] = (char)chars_pressed[j];
+                        text_buf[i][ui.cursor_pos] = (u8)chars_pressed[j];
                         ui.cursor_pos += 1;
                     }
                 }
 
-                Color color;
-                if (i % 2 == 0) color = DARKGREEN;
-                else color = LIME;
+                Color color = DARKGREEN;
                 
                 DrawRectangleV(Vector2 {p1.x, h_offset}, Vector2 {p1.w, TEXT_INPUT_HEIGHT}, color);
                 {
-                    char tmp_buf[96];
-                    snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)text_count[i], text_buf[i]);
-                    DrawText(tmp_buf, (s32)p1.x + TEXT_INPUT_MARGIN, (s32)(h_offset) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
+                    String s = string_printf(scratch, "%.*s", (int)text_count[i], text_buf[i]);
+                    DrawText((char *)s.dat, (s32)p1.x + TEXT_INPUT_MARGIN, (s32)(h_offset) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
                 }
 
                 if (ui.active && ui.active_id == i && ui.text_cursor) {
-                    char tmp_buf[96];
-                    snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)ui.cursor_pos, text_buf[i]);
-                    int sz = MeasureText(tmp_buf, TEXT_INPUT_FONT_SIZE);
+                    String s = string_printf(scratch, "%.*s", (int)ui.cursor_pos, text_buf[i]);
+                    int sz = MeasureText((char *)s.dat, TEXT_INPUT_FONT_SIZE);
 
                     DrawRectangleV(Vector2 {p1.x + TEXT_INPUT_MARGIN + (f32)sz, h_offset + TEXT_INPUT_FONT_SIZE / 2}, Vector2 {1, TEXT_INPUT_FONT_SIZE}, TEXT_INPUT_CURSOR_COLOR);
 
                     if (ui.selecting) {
 
-                        snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)ui.selection_start, text_buf[i]);
-                        int sz = MeasureText(tmp_buf, TEXT_INPUT_FONT_SIZE);
+                        String s1 = string_printf(scratch, "%.*s", (int)ui.selection_start, text_buf[i]);
+                        int sz2 = MeasureText((char *)s1.dat, TEXT_INPUT_FONT_SIZE);
                         
-                        snprintf(tmp_buf, sizeof(tmp_buf), "%.*s", (int)(ui.selection_end - ui.selection_start), text_buf[i] + ui.selection_start);
-                        int selection_sz = MeasureText(tmp_buf, TEXT_INPUT_FONT_SIZE);
+                        String s2 = string_printf(scratch, "%.*s", (int)(ui.selection_end - ui.selection_start), text_buf[i] + ui.selection_start);
+                        int selection_sz = MeasureText((char *)s2.dat, TEXT_INPUT_FONT_SIZE);
                         Color a = TEXT_INPUT_SELECTION_COLOR;
                         a.a = 100;
-                        DrawRectangleV(Vector2 {p1.x + TEXT_INPUT_MARGIN + (f32)sz, h_offset + TEXT_INPUT_FONT_SIZE / 2}, Vector2 {(f32)selection_sz, TEXT_INPUT_FONT_SIZE}, a);
+                        DrawRectangleV(Vector2 {p1.x + TEXT_INPUT_MARGIN + (f32)sz2, h_offset + TEXT_INPUT_FONT_SIZE / 2}, Vector2 {(f32)selection_sz, TEXT_INPUT_FONT_SIZE}, a);
 
                     }
                 }
 
                 h_offset += TEXT_INPUT_HEIGHT;
+
+                if (false && text_input_changed) {
+
+                    Lexer l = {};
+                    Parse_Context p = {};
+                    p.lex = &l;
+                    tokenize(&l, String {text_buf[i], text_count[i]});
+                    parse(&p);
+
+                    String s = string_printf(scratch, "%g", execute_tree(p.root));
+                    memcpy(display_text_buf[i], s.dat, s.count + 1);
+                    display_text_count[i] = s.count;
+                }
+                DrawText((char *)display_text_buf[i], (s32)p1.x + TEXT_INPUT_MARGIN, (s32)(h_offset) + DISPLAY_STRING_FONT_SIZE / 2, DISPLAY_STRING_FONT_SIZE, LIGHTGRAY);
+                
+
+                DrawRectangleV(Vector2 {p1.x, h_offset}, Vector2 {p1.w, DISPLAY_STRING_HEIGHT}, ColorBrightness(color, 0.2f));
+
+
+
+                h_offset += DISPLAY_STRING_HEIGHT;
             }
         }
-        pane_id += 1;
+        pane_id = pane_count++;
         h_offset = p2.y;
         {
             if (ui.dragging && ui.drag_id == pane_id && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
@@ -1056,7 +1137,11 @@ int main(void) {
 
         ClearBackground(DARKGRAY);
         EndDrawing();
+        arena_set_pos(scratch, tmp_pos);
     }
+    arena_clean(&t);
+    scratch = nullptr;
+
 
     CloseWindow();        // Close window and OpenGL context
 
