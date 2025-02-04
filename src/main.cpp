@@ -777,6 +777,7 @@ int main(void) {
                 if (mouse_collides(p1.x, h_offset, p1.w, TEXT_INPUT_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                     if (ui.active && ui.active_id == i && ui.text_cursor) {
 
+                        ui.selecting = false;
                         if (mx < p1.x) {
                             ui.cursor_pos = 0;
                         } else if (mx > p1.x + p1.w) {
