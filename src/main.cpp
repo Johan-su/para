@@ -60,6 +60,16 @@ String string_printf(Arena *arena, const char *fmt, ...) {
     return s;
 }
 
+bool string_equal(String a, String b) {
+    if (a.count != b.count) return false;
+
+    for (u64 i = 0; i < a.count; ++i) {
+        if (a.dat[i] != b.dat[i]) return false;
+    }
+
+    return true;
+}
+
 
 
 struct Token {
@@ -202,7 +212,7 @@ struct Parse_Context {
     Node *op_stack[32];
     u64 op_count;
 
-    Lexer *lex;
+    Lexer lex;
     u64 iter;
 
     Node *root;
@@ -210,13 +220,13 @@ struct Parse_Context {
 
 bool is_token(Parse_Context *ctx, TokenType t, s64 offset) {
     if ((s64)ctx->iter + offset < 0) return false;
-    if ((s64)ctx->iter + offset > (s64)ctx->lex->token_count) return false;
+    if ((s64)ctx->iter + offset > (s64)ctx->lex.token_count) return false;
 
-    return ctx->lex->tokens[(s64)ctx->iter + offset].type == t; 
+    return ctx->lex.tokens[(s64)ctx->iter + offset].type == t; 
 }
 
 u64 consume(Parse_Context *ctx) {
-    assert(ctx->iter < ctx->lex->token_count);
+    assert(ctx->iter < ctx->lex.token_count);
     u64 token_index = ctx->iter;
     ctx->iter += 1;
     return token_index;
@@ -245,11 +255,11 @@ Node *pop_op(Parse_Context *ctx) {
 Node *make_number(Parse_Context *ctx, u64 token_index) {
     Node *n = (Node *)calloc(1, sizeof(*n));
 
-    Token t = ctx->lex->tokens[token_index];
+    Token t = ctx->lex.tokens[token_index];
 
     n->type = NODE_NUMBER;
     n->token_index = token_index;
-    n->num = atof((const char *)ctx->lex->src.dat + t.start);
+    n->num = atof((const char *)ctx->lex.src.dat + t.start);
     return n;
 }
 
@@ -269,6 +279,7 @@ s64 get_precedence(NodeType t) {
         case NODE_NUMBER:
         case NODE_FUNCTION:
         case NODE_VARIABLE:
+        case NODE_VARIABLEDEF:
             assert(false && "cannot get precedence of non operator");
         case NODE_ADD: return 1;
         case NODE_SUB: return 1;
@@ -288,6 +299,7 @@ bool is_left_associative(NodeType t) {
         case NODE_NUMBER:
         case NODE_FUNCTION:
         case NODE_VARIABLE:
+        case NODE_VARIABLEDEF:
             assert(false && "cannot get associativity of non operator");
         case NODE_ADD: return true;
         case NODE_SUB: return true;
@@ -310,6 +322,7 @@ Node *make_node_from_stacks(Parse_Context *ctx) {
         case NODE_OPENPAREN:
         case NODE_FUNCTION:
         case NODE_VARIABLE:
+        case NODE_VARIABLEDEF:
             assert(false);
         case NODE_ADD:
         case NODE_SUB:
@@ -352,9 +365,9 @@ Node *make_function_call(Parse_Context *ctx, u64 token_index, u64 arg_count) {
 
 void parse_expr(Parse_Context *ctx, u64 stop_token_types) {
 
-    while (ctx->iter < ctx->lex->token_count) {
+    while (ctx->iter < ctx->lex.token_count) {
 
-        if (ctx->lex->tokens[ctx->iter].type & stop_token_types) {
+        if (ctx->lex.tokens[ctx->iter].type & stop_token_types) {
             break;
         }
 
@@ -388,11 +401,11 @@ void parse_expr(Parse_Context *ctx, u64 stop_token_types) {
                 u64 func_close_index = 0;
                 {
                     u64 unclosed_paren_count = 1;
-                    for (u64 i = ctx->iter; i < ctx->lex->token_count; ++i) {
+                    for (u64 i = ctx->iter; i < ctx->lex.token_count; ++i) {
 
-                        if (ctx->lex->tokens[i].type == TOKEN_OPENPAREN) unclosed_paren_count += 1;
+                        if (ctx->lex.tokens[i].type == TOKEN_OPENPAREN) unclosed_paren_count += 1;
 
-                        if (ctx->lex->tokens[i].type == TOKEN_CLOSEPAREN) {
+                        if (ctx->lex.tokens[i].type == TOKEN_CLOSEPAREN) {
                             if (unclosed_paren_count == 1) {
                                 func_close_index = i;
                                 goto skip;
@@ -409,10 +422,10 @@ void parse_expr(Parse_Context *ctx, u64 stop_token_types) {
 
                 u64 arg_count = 0;
                 {
-                    u64 before_count = ctx->lex->token_count;
+                    u64 before_count = ctx->lex.token_count;
                     while (!is_token(ctx, TOKEN_CLOSEPAREN, 0)) {
                         
-                        ctx->lex->token_count = func_close_index;
+                        ctx->lex.token_count = func_close_index;
                         parse_expr(ctx, TOKEN_COMMA);
 
                         arg_count += 1;
@@ -425,7 +438,7 @@ void parse_expr(Parse_Context *ctx, u64 stop_token_types) {
                             todo();
                         }
                     }
-                    ctx->lex->token_count = before_count;
+                    ctx->lex.token_count = before_count;
                     consume(ctx);
                 }
 
@@ -434,8 +447,11 @@ void parse_expr(Parse_Context *ctx, u64 stop_token_types) {
                 Node *function_call = make_function_call(ctx, id_index, arg_count); 
                 push_node(ctx, function_call);
             } else {
-                // var
-                todo();
+
+                Node *var = (Node *)calloc(1, sizeof(*var));
+                var->type = NODE_VARIABLE;
+                var->token_index = id_index;
+                push_node(ctx, var);
             }
         } else if (is_token(ctx, TOKEN_NUMBER, 0)) {
             u64 token_index = consume(ctx);
@@ -548,7 +564,7 @@ void parse_statement(Parse_Context *ctx) {
 
 void parse(Parse_Context *ctx) {
 
-    while (ctx->iter < ctx->lex->token_count) {
+    while (ctx->iter < ctx->lex.token_count) {
         parse_statement(ctx);
     }
 
@@ -567,9 +583,9 @@ void graphviz_out(Parse_Context *ctx) {
 
     while (count != 0) {
         Node *top = stack[--count];
-        Token t = ctx->lex->tokens[top->token_index];
+        Token t = ctx->lex.tokens[top->token_index];
         u64 len = t.end - t.start;
-        fprintf(f, "n%llu [label=\"%.*s\"]\n", (u64)top, (int)len, ctx->lex->src.dat + t.start);
+        fprintf(f, "n%llu [label=\"%.*s\"]\n", (u64)top, (int)len, ctx->lex.src.dat + t.start);
 
         for (u64 i = 0; i < top->node_count; ++i) {
             fprintf(f, "n%llu -- n%llu\n", (u64)top, (u64)top->nodes[i]);
@@ -583,25 +599,91 @@ void graphviz_out(Parse_Context *ctx) {
     fclose(f);
 }
 
-f64 execute_tree(Node *n) {
+struct Var_Env {
+    String ids[256];
+    f64 vals[256];
+    u64 var_count;
+};
+
+
+struct Interpreter {
+    Var_Env envs[256];
+    u64 env_count;
+
+    Parse_Context ctx;
+};
+
+void push_var_env(Interpreter *inter) {
+    assert(inter->env_count < ARRAY_SIZE(inter->envs));
+    inter->env_count += 1;
+}
+
+void pop_var_env(Interpreter *inter) {
+    assert(inter->env_count > 0);
+    inter->env_count -= 1;
+}
+
+void push_top_var(Interpreter *inter, String name, f64 val) {
+    Var_Env *top = inter->envs + inter->env_count - 1;
+    assert(top->var_count > ARRAY_SIZE(top->vals));
+
+    top->ids[top->var_count] = name;
+    top->vals[top->var_count] = val;
+
+    top->var_count += 1;
+}
+
+f64 get_top_var(Interpreter *inter, String name) {
+
+    Var_Env *top = inter->envs + inter->env_count - 1;
+
+    for (u64 i = 0; i < top->var_count; ++i) {
+        if (string_equal(top->ids[i], name)) {
+            return top->vals[i];
+        }
+    }
+    assert(false && "should always find a variable");
+    return -INFINITY;
+}
+
+f64 execute(Interpreter *env, Node *n) {
+    push_var_env(env);
     f64 r = 0;
     switch (n->type) {
         case NODE_INVALID: todo();
         case NODE_NUMBER: r = n->num; break;
         case NODE_FUNCTION: todo();
-        case NODE_VARIABLE: todo();
-        case NODE_ADD: r = execute_tree(n->nodes[0]) + execute_tree(n->nodes[1]); break;
-        case NODE_SUB: r = execute_tree(n->nodes[0]) - execute_tree(n->nodes[1]); break;
-        case NODE_MUL: r = execute_tree(n->nodes[0]) * execute_tree(n->nodes[1]); break;
-        case NODE_DIV: r = execute_tree(n->nodes[0]) / execute_tree(n->nodes[1]); break;
-        case NODE_UNARYADD: r = execute_tree(n->nodes[0]); break;
-        case NODE_UNARYSUB: r = -execute_tree(n->nodes[0]); break;
+        case NODE_VARIABLE: {
+
+            Token t = env->ctx.lex.tokens[n->token_index];
+            String s = {env->ctx.lex.src.dat + t.start, t.end - t.start};
+
+            r = get_top_var(env, s);
+        } break;
+        case NODE_VARIABLEDEF: {
+
+            Node *rhs = n->nodes[0];
+            Token t = env->ctx.lex.tokens[rhs->token_index]; 
+            String s = {env->ctx.lex.src.dat + t.start, t.end - t.start};
+
+            Node *lhs = n->nodes[1];
+
+            f64 r_val = execute(env, lhs);
+
+            push_top_var(env, s, r_val);
+
+        } break;
+        case NODE_ADD: r = execute(env, n->nodes[0]) + execute(env, n->nodes[1]); break;
+        case NODE_SUB: r = execute(env, n->nodes[0]) - execute(env, n->nodes[1]); break;
+        case NODE_MUL: r = execute(env, n->nodes[0]) * execute(env, n->nodes[1]); break;
+        case NODE_DIV: r = execute(env, n->nodes[0]) / execute(env, n->nodes[1]); break;
+        case NODE_UNARYADD: r = execute(env, n->nodes[0]); break;
+        case NODE_UNARYSUB: r = -execute(env, n->nodes[0]); break;
         case NODE_OPENPAREN: todo();
     }
 
     return r;
 }
-
 
 
 
@@ -713,20 +795,9 @@ int main(void) {
     scratch = &t;
 
 
-    Lexer lex = {};
+    // Interpreter *e = (Interpreter *)arena_alloc(scratch, sizeof(*e));
+    Interpreter *e = (Interpreter *)calloc(1, sizeof(*e));
 
-    const char *src = "(6 * 5 + 4) * 4 * 3 * 2 * 1";
-
-    tokenize(&lex, str_from_cstr(src));
-
-    Parse_Context context = {};
-    context.lex = &lex;
-
-    parse(&context);
-
-    graphviz_out(&context);
-
-    f64 r = execute_tree(context.root);
 
     int screen_w = 1366;
     int screen_h = 768;
@@ -1081,15 +1152,12 @@ int main(void) {
 
                 h_offset += TEXT_INPUT_HEIGHT;
 
-                if (false && text_input_changed) {
+                if (text_input_changed) {
 
-                    Lexer l = {};
-                    Parse_Context p = {};
-                    p.lex = &l;
-                    tokenize(&l, String {text_buf[i], text_count[i]});
-                    parse(&p);
+                    tokenize(&e->ctx.lex, String {text_buf[i], text_count[i]});
+                    parse(&e->ctx);
 
-                    String s = string_printf(scratch, "%g", execute_tree(p.root));
+                    String s = string_printf(scratch, "%g", execute(e, e->ctx.root));
                     memcpy(display_text_buf[i], s.dat, s.count + 1);
                     display_text_count[i] = s.count;
                 }
