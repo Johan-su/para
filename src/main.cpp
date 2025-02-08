@@ -827,123 +827,148 @@ Item get_first_item(Interpreter *inter, String name, ItemType type) {
     return Item {};
 }
 
+
+
+
+void dfs_to_postorder_list(Stack_Nodep *stack, Node *n) {
+
+    for (u64 i = 0; i < n->node_count; ++i) {
+        dfs_to_postorder_list(stack, n->nodes[i]);
+    }
+
+    stack_Nodep_push(stack, n);
+}
+
+void dfs_to_preorder_list(Stack_Nodep *stack, Node *n) {
+
+    stack_Nodep_push(stack, n);
+    for (u64 i = 0; i < n->node_count; ++i) {
+        dfs_to_preorder_list(stack, n->nodes[i]);
+    }
+
+}
+
+void execute2(Interpreter *inter) {
+    Node *n = stack_Nodep_pop(&inter->node_stack);
+
+    Stack_Nodep postorder = {};
+    dfs_to_postorder_list(&postorder, n);
+
+    Stack_Nodep preorder = {};
+    dfs_to_preorder_list(&preorder, n);
+
+    // switch (n->type) {
+    //     case NODE_INVALID: todo();
+    //     case NODE_PROGRAM: {
+    //         push_item_env(inter);
+
+    //         for (u64 i = 0; i < n->node_count; ++i) {
+    //             execute2(inter, n->nodes[i]);
+    //         }
+
+    //         pop_item_env(inter);
+    //     } break;
+    //     case NODE_STATEMENT: {
+    //         execute2(inter, n->nodes[0]);
+    //     } break;
+    //     case NODE_NUMBER: stack_f64_push(&inter->val_stack, n->num); break;
+    //     case NODE_FUNCTION: todo();
+    //     case NODE_FUNCTIONDEF: todo();
+    //     case NODE_VARIABLE: {
+
+    //         Token t = inter->lex.tokens[n->token_index];
+    //         String s = {inter->src.dat + t.start, t.end - t.start};
+
+    //         Item v = get_first_item(inter, s, ITEM_VARIABLE);
+    //         if (v.type == ITEM_INVALID) {
+
+
+    //             // report var not defined
+    //             todo();
+    //         }
+    //         stack_f64_push(&inter->val_stack, v.val);
+    //     } break;
+    //     case NODE_VARIABLEDEF: {
+
+    //         Node *rhs = n->nodes[0];
+    //         Token t = inter->lex.tokens[rhs->token_index]; 
+    //         String s = {inter->src.dat + t.start, t.end - t.start};
+
+    //         Node *lhs = n->nodes[1];
+
+    //         execute2(inter, lhs);
+    //         f64 r_val = stack_f64_pop(&inter->val_stack);
+    //         Item i = {};
+    //         i.type = ITEM_VARIABLE;
+    //         i.val = r_val;
+    //         push_top_item(inter, s, i);
+
+    //     } break;
+    //     case NODE_ADD: {
+    //         for (u64 i = 0; i < n->node_count; ++i) {
+    //             execute2(inter, n->nodes[i]);
+    //         }
+
+    //         f64 rhs = stack_f64_pop(&inter->val_stack);
+    //         f64 lhs = stack_f64_pop(&inter->val_stack);
+    //         f64 val = rhs + lhs;
+    //         stack_f64_push(&inter->val_stack, val);
+
+    //     } break;
+    //     case NODE_SUB: {
+    //         for (u64 i = 0; i < n->node_count; ++i) {
+    //             execute2(inter, n->nodes[i]);
+    //         }
+
+    //         f64 rhs = stack_f64_pop(&inter->val_stack);
+    //         f64 lhs = stack_f64_pop(&inter->val_stack);
+    //         f64 val = rhs - lhs;
+    //         stack_f64_push(&inter->val_stack, val);
+
+    //     } break;
+    //     case NODE_MUL: {
+    //         for (u64 i = 0; i < n->node_count; ++i) {
+    //             execute2(inter, n->nodes[i]);
+    //         }
+            
+    //         f64 rhs = stack_f64_pop(&inter->val_stack);
+    //         f64 lhs = stack_f64_pop(&inter->val_stack);
+    //         f64 val = rhs * lhs;
+    //         stack_f64_push(&inter->val_stack, val);
+
+    //     } break;
+    //     case NODE_DIV: {
+    //         for (u64 i = 0; i < n->node_count; ++i) {
+    //             execute2(inter, n->nodes[i]);
+    //         }
+
+    //         f64 rhs = stack_f64_pop(&inter->val_stack);
+    //         f64 lhs = stack_f64_pop(&inter->val_stack);
+    //         f64 val = rhs / lhs;
+    //         stack_f64_push(&inter->val_stack, val);
+
+    //     } break;
+    //     case NODE_UNARYADD: {
+    //         for (u64 i = 0; i < n->node_count; ++i) {
+    //             execute2(inter, n->nodes[i]);
+    //         }
+    //     } break;
+    //     case NODE_UNARYSUB: {
+    //         for (u64 i = 0; i < n->node_count; ++i) {
+    //             execute2(inter, n->nodes[i]);
+    //         }
+    //         f64 val = -stack_f64_pop(&inter->val_stack);
+    //         stack_f64_push(&inter->val_stack, val);
+    //     } break;
+ 
+    //     case NODE_OPENPAREN: todo();
+    // }
+}
+
 void execute(Interpreter *inter, Node *n) {
     stack_Nodep_push(&inter->node_stack, n);
     execute2(inter);
 }
-
-void execute2(Interpreter *inter) {
-
-    Node *n = stack_Nodep_pop(&inter->node_stack);
-
-    switch (n->type) {
-        case NODE_INVALID: todo();
-        case NODE_PROGRAM: {
-            push_item_env(inter);
-
-            for (u64 i = 0; i < n->node_count; ++i) {
-                execute2(inter, n->nodes[i]);
-            }
-
-            pop_item_env(inter);
-        } break;
-        case NODE_STATEMENT: {
-            execute2(inter, n->nodes[0]);
-        } break;
-        case NODE_NUMBER: stack_f64_push(&inter->val_stack, n->num); break;
-        case NODE_FUNCTION: todo();
-        case NODE_FUNCTIONDEF: todo();
-        case NODE_VARIABLE: {
-
-            Token t = inter->lex.tokens[n->token_index];
-            String s = {inter->src.dat + t.start, t.end - t.start};
-
-            Item v = get_first_item(inter, s, ITEM_VARIABLE);
-            if (v.type == ITEM_INVALID) {
-
-
-                // report var not defined
-                todo();
-            }
-            stack_f64_push(&inter->val_stack, v.val);
-        } break;
-        case NODE_VARIABLEDEF: {
-
-            Node *rhs = n->nodes[0];
-            Token t = inter->lex.tokens[rhs->token_index]; 
-            String s = {inter->src.dat + t.start, t.end - t.start};
-
-            Node *lhs = n->nodes[1];
-
-            execute2(inter, lhs);
-            f64 r_val = stack_f64_pop(&inter->val_stack);
-            Item i = {};
-            i.type = ITEM_VARIABLE;
-            i.val = r_val;
-            push_top_item(inter, s, i);
-
-        } break;
-        case NODE_ADD: {
-            for (u64 i = 0; i < n->node_count; ++i) {
-                execute2(inter, n->nodes[i]);
-            }
-
-            f64 rhs = stack_f64_pop(&inter->val_stack);
-            f64 lhs = stack_f64_pop(&inter->val_stack);
-            f64 val = rhs + lhs;
-            stack_f64_push(&inter->val_stack, val);
-
-        } break;
-        case NODE_SUB: {
-            for (u64 i = 0; i < n->node_count; ++i) {
-                execute2(inter, n->nodes[i]);
-            }
-
-            f64 rhs = stack_f64_pop(&inter->val_stack);
-            f64 lhs = stack_f64_pop(&inter->val_stack);
-            f64 val = rhs - lhs;
-            stack_f64_push(&inter->val_stack, val);
-
-        } break;
-        case NODE_MUL: {
-            for (u64 i = 0; i < n->node_count; ++i) {
-                execute2(inter, n->nodes[i]);
-            }
-            
-            f64 rhs = stack_f64_pop(&inter->val_stack);
-            f64 lhs = stack_f64_pop(&inter->val_stack);
-            f64 val = rhs * lhs;
-            stack_f64_push(&inter->val_stack, val);
-
-        } break;
-        case NODE_DIV: {
-            for (u64 i = 0; i < n->node_count; ++i) {
-                execute2(inter, n->nodes[i]);
-            }
-
-            f64 rhs = stack_f64_pop(&inter->val_stack);
-            f64 lhs = stack_f64_pop(&inter->val_stack);
-            f64 val = rhs / lhs;
-            stack_f64_push(&inter->val_stack, val);
-
-        } break;
-        case NODE_UNARYADD: {
-            for (u64 i = 0; i < n->node_count; ++i) {
-                execute2(inter, n->nodes[i]);
-            }
-        } break;
-        case NODE_UNARYSUB: {
-            for (u64 i = 0; i < n->node_count; ++i) {
-                execute2(inter, n->nodes[i]);
-            }
-            f64 val = -stack_f64_pop(&inter->val_stack);
-            stack_f64_push(&inter->val_stack, val);
-        } break;
- 
-        case NODE_OPENPAREN: todo();
-    }
-}
-
 
 
 
