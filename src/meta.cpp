@@ -7,6 +7,7 @@ Y(TokenType) \
 
 #define enumTable \
 Y(NodeType) \
+Y(ItemType) \
 
 
 #define TokenTypeTable \
@@ -44,6 +45,11 @@ X(NODE_UNARYADD) \
 X(NODE_UNARYSUB) \
 X(NODE_OPENPAREN) \
 
+
+#define ItemTypeTable \
+X(ITEM_INVALID) \
+X(ITEM_VARIABLE) \
+X(ITEM_FUNCTION) \
 
 
 #define X(field) field,

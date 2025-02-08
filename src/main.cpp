@@ -138,20 +138,43 @@ struct Parser {
     Node *root;
 };
 
-struct Var_Env {
-    String ids[256];
-    f64 vals[256];
-    u64 var_count;
+
+struct Item {
+    ItemType type;
+    union {
+        f64 val;
+        Node *func;
+    };
 };
 
 
+struct Item_Env {
+    String ids[256];
+    Item items[256];
+    u64 item_count;
+};
+
+struct Error {
+    u64 statement_id;
+
+    u64 char_id;
+    u64 token_id;
+};
+
 struct Interpreter {
-    Var_Env envs[256];
+    Item_Env envs[256];
     u64 env_count;
 
     String src;
     Lexer lex;
     Parser ctx;
+
+    f64 stack[256];
+    u64 stack_count;
+
+
+    Error errors[256];
+    u64 error_count;
 };
 
 String str_from_cstr(const char *cstr) {
@@ -714,7 +737,6 @@ void parse_statement(Interpreter *inter) {
 
 
 void parse(Interpreter *inter) {
-
     Node *prog = (Node *)calloc(1, sizeof(*prog));
     prog->type = NODE_PROGRAM;
     prog->token_index = inter->ctx.iter;
@@ -767,47 +789,67 @@ void graphviz_out(Interpreter *inter) {
 
 
 
-void push_var_env(Interpreter *inter) {
+void push_item_env(Interpreter *inter) {
     assert(inter->env_count < ARRAY_SIZE(inter->envs));
+    memset(inter->envs + inter->env_count, 0, sizeof(inter->envs[0]));
     inter->env_count += 1;
 }
 
-void pop_var_env(Interpreter *inter) {
+void pop_item_env(Interpreter *inter) {
     assert(inter->env_count > 0);
     inter->env_count -= 1;
 }
 
-void push_top_var(Interpreter *inter, String name, f64 val) {
-    Var_Env *top = inter->envs + inter->env_count - 1;
-    assert(top->var_count > ARRAY_SIZE(top->vals));
+void push_top_item(Interpreter *inter, String name, Item item) {
+    Item_Env *top = inter->envs + inter->env_count - 1;
+    assert(top->item_count > ARRAY_SIZE(top->items));
 
-    top->ids[top->var_count] = name;
-    top->vals[top->var_count] = val;
+    top->ids[top->item_count] = name;
+    top->items[top->item_count] = item;
 
-    top->var_count += 1;
+    top->item_count += 1;
 }
 
-f64 get_top_var(Interpreter *inter, String name) {
+Item get_first_item(Interpreter *inter, String name, ItemType type) {
 
-    Var_Env *top = inter->envs + inter->env_count - 1;
-
-    for (u64 i = 0; i < top->var_count; ++i) {
-        if (string_equal(top->ids[i], name)) {
-            return top->vals[i];
+    for (u64 i = inter->env_count; i-- > 0;) {
+        Item_Env *env = inter->envs + i;
+        for (u64 j = 0; j < env->item_count; ++j) {
+            if (string_equal(env->ids[j], name) && env->items[j].type == type) {
+                return env->items[j];
+            }
         }
     }
-    assert(false && "should always find a variable");
-    return -INFINITY;
+
+    return Item {};
 }
 
-f64 execute(Interpreter *inter, Node *n) {
-    push_var_env(inter);
-    f64 r = 0;
+void push_val(Interpreter *inter, f64 val) {
+    assert(inter->stack_count < ARRAY_SIZE(inter->stack));
+    inter->stack[inter->stack_count++] = val;
+}
+
+f64 pop_val(Interpreter *inter) {
+    assert(inter->stack_count > 0);
+    return inter->stack[--inter->stack_count];
+}
+
+void execute(Interpreter *inter, Node *n) {
     switch (n->type) {
         case NODE_INVALID: todo();
-        case NODE_PROGRAM: todo();
-        case NODE_STATEMENT: todo();
-        case NODE_NUMBER: r = n->num; break;
+        case NODE_PROGRAM: {
+            push_item_env(inter);
+
+            for (u64 i = 0; i < n->node_count; ++i) {
+                execute(inter, n->nodes[i]);
+            }
+
+            pop_item_env(inter);
+        } break;
+        case NODE_STATEMENT: {
+            execute(inter, n->nodes[0]);
+        } break;
+        case NODE_NUMBER: push_val(inter, n->num); break;
         case NODE_FUNCTION: todo();
         case NODE_FUNCTIONDEF: todo();
         case NODE_VARIABLE: {
@@ -815,7 +857,12 @@ f64 execute(Interpreter *inter, Node *n) {
             Token t = inter->lex.tokens[n->token_index];
             String s = {inter->src.dat + t.start, t.end - t.start};
 
-            r = get_top_var(inter, s);
+            Item v = get_first_item(inter, s, ITEM_VARIABLE);
+            if (v.type == ITEM_INVALID) {
+                // report var not defined
+                todo();
+            }
+            push_val(inter, v.val);
         } break;
         case NODE_VARIABLEDEF: {
 
@@ -825,23 +872,74 @@ f64 execute(Interpreter *inter, Node *n) {
 
             Node *lhs = n->nodes[1];
 
-            f64 r_val = execute(inter, lhs);
-
-            push_top_var(inter, s, r_val);
+            execute(inter, lhs);
+            f64 r_val = pop_val(inter);
+            Item i = {};
+            i.type = ITEM_VARIABLE;
+            i.val = r_val;
+            push_top_item(inter, s, i);
 
         } break;
-        case NODE_ADD: r = execute(inter, n->nodes[0]) + execute(inter, n->nodes[1]); break;
-        case NODE_SUB: r = execute(inter, n->nodes[0]) - execute(inter, n->nodes[1]); break;
-        case NODE_MUL: r = execute(inter, n->nodes[0]) * execute(inter, n->nodes[1]); break;
-        case NODE_DIV: r = execute(inter, n->nodes[0]) / execute(inter, n->nodes[1]); break;
-        case NODE_UNARYADD: r = execute(inter, n->nodes[0]); break;
-        case NODE_UNARYSUB: r = -execute(inter, n->nodes[0]); break;
+        case NODE_ADD: {
+            for (u64 i = 0; i < n->node_count; ++i) {
+                execute(inter, n->nodes[i]);
+            }
+
+            f64 rhs = pop_val(inter);
+            f64 lhs = pop_val(inter);
+            f64 val = rhs + lhs;
+            push_val(inter, val);
+
+        } break;
+        case NODE_SUB: {
+            for (u64 i = 0; i < n->node_count; ++i) {
+                execute(inter, n->nodes[i]);
+            }
+
+            f64 rhs = pop_val(inter);
+            f64 lhs = pop_val(inter);
+            f64 val = rhs - lhs;
+            push_val(inter, val);
+
+        } break;
+        case NODE_MUL: {
+            for (u64 i = 0; i < n->node_count; ++i) {
+                execute(inter, n->nodes[i]);
+            }
+            
+            f64 rhs = pop_val(inter);
+            f64 lhs = pop_val(inter);
+            f64 val = rhs * lhs;
+            push_val(inter, val);
+
+        } break;
+        case NODE_DIV: {
+            for (u64 i = 0; i < n->node_count; ++i) {
+                execute(inter, n->nodes[i]);
+            }
+
+            f64 rhs = pop_val(inter);
+            f64 lhs = pop_val(inter);
+            f64 val = rhs / lhs;
+            push_val(inter, val);
+
+        } break;
+        case NODE_UNARYADD: {
+            for (u64 i = 0; i < n->node_count; ++i) {
+                execute(inter, n->nodes[i]);
+            }
+        } break;
+        case NODE_UNARYSUB: {
+            for (u64 i = 0; i < n->node_count; ++i) {
+                execute(inter, n->nodes[i]);
+            }
+            f64 val = -pop_val(inter);
+            push_val(inter, val);
+        } break;
+ 
         case NODE_OPENPAREN: todo();
     }
-
-    return r;
 }
-
 
 
 
@@ -854,7 +952,7 @@ f64 execute(Interpreter *inter, Node *n) {
 #define TEXT_INPUT_CURSOR_COLOR BLACK
 #define TEXT_INPUT_SELECTION_COLOR BLUE
 #define DISPLAY_STRING_HEIGHT 25
-#define DISPLAY_STRING_FONT_SIZE 10
+#define DISPLAY_STRING_FONT_SIZE 15
 #define DRAG_BAR_HEIGHT 15
 
 
@@ -878,7 +976,6 @@ struct UI_State {
     u64 selection_anchor;
     u64 selection_start;
     u64 selection_end;
-
 };
 
 
@@ -951,7 +1048,7 @@ int main(void) {
     Arena t; arena_init(&t, 1000000);
     scratch = &t;
 
-    String_Builder sb; string_builder_init(&sb, 1000000);
+    String_Builder sb; string_builder_init(&sb, 65000);
 
     // Interpreter *e = (Interpreter *)arena_alloc(scratch, sizeof(*e));
     Interpreter *inter = (Interpreter *)calloc(1, sizeof(*inter));
@@ -1326,19 +1423,51 @@ int main(void) {
                     }
                     String src = string_builder_to_string(&sb);
 
+                    for (u64 j = 0; j < ARRAY_SIZE(display_text_buf); ++j) {
+                        display_text_count[j] = 0;
+                    }
 
+                    memset(inter, 0, sizeof(*inter));
                     tokenize(inter, src);
                     parse(inter);
                     graphviz_out(inter);
+                    execute(inter, inter->ctx.root);
 
-                    String s = string_printf(scratch, "%g", execute(inter, inter->ctx.root));
-                    memcpy(display_text_buf[i], s.dat, s.count + 1);
-                    display_text_count[i] = s.count;
+
+                    
+                    u64 non_empty_id = 0;
+                    for (u64 j = 0; j < ARRAY_SIZE(text_count); ++j) {
+                        if (text_count[j] == 0) continue;
+
+                        if () {
+                            
+                        }
+
+                        Node *prog = inter->ctx.root;
+                        Node *stmt = prog->nodes[non_empty_id];
+
+                        bool is_definition = false;
+                        assert(stmt->node_count == 1);
+                        if (stmt->nodes[0]->type == NODE_FUNCTIONDEF || stmt->nodes[0]->type == NODE_VARIABLEDEF) {
+                            is_definition = true;
+                        }
+
+
+                        if (is_definition) {
+                            todo();
+                        } else {
+                            String s = string_printf(scratch, "%lg", pop_val(inter));
+                            memcpy(display_text_buf[j], s.dat, s.count + 1);
+                            display_text_count[j] = s.count;
+                        }
+                        non_empty_id += 1;
+                    }
+                    
                 }
+                DrawRectangleV(Vector2 {p1.x, h_offset}, Vector2 {p1.w, DISPLAY_STRING_HEIGHT}, ColorBrightness(color, 0.2f));
                 DrawText((char *)display_text_buf[i], (s32)p1.x + TEXT_INPUT_MARGIN, (s32)(h_offset) + DISPLAY_STRING_FONT_SIZE / 2, DISPLAY_STRING_FONT_SIZE, LIGHTGRAY);
                 
 
-                DrawRectangleV(Vector2 {p1.x, h_offset}, Vector2 {p1.w, DISPLAY_STRING_HEIGHT}, ColorBrightness(color, 0.2f));
 
 
 
