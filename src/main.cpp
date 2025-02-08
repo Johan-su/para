@@ -70,6 +70,33 @@ bool string_equal(String a, String b) {
     return true;
 }
 
+struct String_Builder {
+    u64 count;
+    u64 max_capacity;
+    u8 *data;
+};
+
+void string_builder_init(String_Builder *sb, u64 cap) {
+    sb->count = 0;
+    sb->max_capacity = cap;
+    sb->data = (u8 *)calloc(1, sb->max_capacity);
+}
+
+void string_builder_append(String_Builder *sb, u8 b) {
+    assert(sb->count < sb->max_capacity);
+    sb->data[sb->count++] = b;
+}
+
+void string_builder_concat(String_Builder *sb, String s) {
+    assert(sb->count + s.count < sb->max_capacity);
+    for (u64 i = 0; i < s.count; ++i) {
+        sb->data[sb->count++] = s.dat[i];
+    }
+}
+
+String string_builder_to_string(String_Builder *sb) {
+    return String {sb->data, sb->count};
+}
 
 struct Token {
     TokenType type;
@@ -83,11 +110,49 @@ struct Lexer {
     Token *tokens;
     u64 token_count;
 
-    String src;
-
     u64 iter;
 };
 
+
+struct Node {
+    NodeType type;
+    union {
+        f64 num;
+    };
+
+    u64 token_index;
+
+    u64 node_count;
+    Node **nodes;
+};
+
+struct Parser {
+    Node *node_stack[128];
+    u64 stack_count;
+
+    Node *op_stack[128];
+    u64 op_count;
+
+    u64 iter;
+
+    Node *root;
+};
+
+struct Var_Env {
+    String ids[256];
+    f64 vals[256];
+    u64 var_count;
+};
+
+
+struct Interpreter {
+    Var_Env envs[256];
+    u64 env_count;
+
+    String src;
+    Lexer lex;
+    Parser ctx;
+};
 
 String str_from_cstr(const char *cstr) {
 
@@ -125,9 +190,10 @@ bool is_alpha(u8 c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
-void tokenize(Lexer *lex, String src) {
+void tokenize(Interpreter *inter, String src) {
+    inter->src = src;
+    Lexer *lex = &inter->lex;
     lex->tokens = (Token *)calloc(4096, sizeof(*lex->tokens));
-    lex->src = src;
 
     while (lex->iter < src.count) {
         if (is_whitespace(src.dat[lex->iter])) {
@@ -173,6 +239,17 @@ void tokenize(Lexer *lex, String src) {
             insert_token(lex, Token {TOKEN_COMMA, lex->iter, lex->iter + 1}); 
             lex->iter += 1; 
 
+        } else if (src.dat[lex->iter] == ';') {
+            insert_token(lex, Token {TOKEN_SEMICOLON, lex->iter, lex->iter + 1}); 
+            lex->iter += 1; 
+        } else if (src.dat[lex->iter] == ':') {
+            insert_token(lex, Token {TOKEN_COLON, lex->iter, lex->iter + 1}); 
+            lex->iter += 1; 
+
+        } else if (src.dat[lex->iter] == '=') {
+            insert_token(lex, Token {TOKEN_EQUAL, lex->iter, lex->iter + 1}); 
+            lex->iter += 1; 
+
         } else if (is_alpha(src.dat[lex->iter])) {
 
             u64 index_start = lex->iter;
@@ -192,44 +269,7 @@ void tokenize(Lexer *lex, String src) {
 }
 
 
-struct Node {
-    NodeType type;
-    union {
-        f64 num;
-    };
 
-    u64 token_index;
-
-    Node **nodes;
-    u64 node_count;
-};
-
-struct Parser {
-    Node *node_stack[32];
-    u64 stack_count;
-
-    Node *op_stack[32];
-    u64 op_count;
-
-    u64 iter;
-
-    Node *root;
-};
-
-struct Var_Env {
-    String ids[256];
-    f64 vals[256];
-    u64 var_count;
-};
-
-
-struct Interpreter {
-    Var_Env envs[256];
-    u64 env_count;
-
-    Lexer lex;
-    Parser ctx;
-};
 
 bool is_token(Interpreter *inter, TokenType t, s64 offset) {
     if ((s64)inter->ctx.iter + offset < 0) return false;
@@ -265,14 +305,14 @@ Node *pop_op(Parser *ctx) {
     return ctx->op_stack[--ctx->op_count];
 }
 
-Node *make_number(Lexer *lex, u64 token_index) {
+Node *make_number(Interpreter *inter, u64 token_index) {
     Node *n = (Node *)calloc(1, sizeof(*n));
 
-    Token t = lex->tokens[token_index];
+    Token t = inter->lex.tokens[token_index];
 
     n->type = NODE_NUMBER;
     n->token_index = token_index;
-    n->num = atof((const char *)lex->src.dat + t.start);
+    n->num = atof((const char *)inter->src.dat + t.start);
     return n;
 }
 
@@ -289,8 +329,11 @@ bool is_binop(Interpreter *inter, s64 offset) {
 s64 get_precedence(NodeType t) {
     switch (t) {
         case NODE_INVALID:
+        case NODE_PROGRAM:
+        case NODE_STATEMENT:
         case NODE_NUMBER:
         case NODE_FUNCTION:
+        case NODE_FUNCTIONDEF:
         case NODE_VARIABLE:
         case NODE_VARIABLEDEF:
             assert(false && "cannot get precedence of non operator");
@@ -309,8 +352,11 @@ s64 get_precedence(NodeType t) {
 bool is_left_associative(NodeType t) {
     switch (t) {
         case NODE_INVALID:
+        case NODE_PROGRAM:
+        case NODE_STATEMENT:
         case NODE_NUMBER:
         case NODE_FUNCTION:
+        case NODE_FUNCTIONDEF:
         case NODE_VARIABLE:
         case NODE_VARIABLEDEF:
             assert(false && "cannot get associativity of non operator");
@@ -331,9 +377,12 @@ Node *make_node_from_stacks(Parser *ctx) {
 
     switch (top->type) {
         case NODE_INVALID:
+        case NODE_PROGRAM:
+        case NODE_STATEMENT:
         case NODE_NUMBER: 
         case NODE_OPENPAREN:
         case NODE_FUNCTION:
+        case NODE_FUNCTIONDEF:
         case NODE_VARIABLE:
         case NODE_VARIABLEDEF:
             assert(false);
@@ -468,7 +517,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
             }
         } else if (is_token(inter, TOKEN_NUMBER, 0)) {
             u64 token_index = consume(inter);
-            Node *n = make_number(&inter->lex, token_index);
+            Node *n = make_number(inter, token_index);
             
             push_node(&inter->ctx, n);
         } else if (is_token(inter, TOKEN_PLUS, 0)) {
@@ -570,18 +619,122 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
     make_all_nodes_from_operator_ctx(&inter->ctx);
 }
 
+
+void parse_function_definition(Interpreter *inter) {
+
+    if (!is_token(inter, TOKEN_IDENTIFIER, 0)) {
+        todo();
+    }
+    u64 func_id = consume(inter);
+
+    Node *func = (Node * )calloc(1, sizeof(*func));
+    func->type = NODE_FUNCTIONDEF;
+    func->token_index = func_id;
+
+
+    if (!is_token(inter, TOKEN_OPENPAREN, 0)) {
+        todo();
+    }
+    consume(inter);
+
+
+    u64 stack_start = inter->ctx.stack_count;
+
+    while (is_token(inter, TOKEN_IDENTIFIER, 0)) {
+        u64 id = consume(inter);
+
+        Node *iden = (Node *)calloc(1, sizeof(*iden));
+        iden->type = NODE_VARIABLE;
+        iden->token_index = id;
+        push_node(&inter->ctx, iden);
+
+        if (is_token(inter, TOKEN_COMMA, 0)) {
+            consume(inter);
+        } else if (is_token(inter, TOKEN_CLOSEPAREN, 0)) {
+            break;
+        } else {
+            todo();
+        }
+    }
+    consume(inter);
+
+
+    if (!is_token(inter, TOKEN_COLON, 0)) {
+        todo();
+    }
+    consume(inter);
+    if (!is_token(inter, TOKEN_EQUAL, 0)) {
+        todo();
+    }
+    consume(inter);
+
+    parse_expr(inter, TOKEN_SEMICOLON);
+
+    u64 nodes_to_pop_count = inter->ctx.stack_count - stack_start;
+
+    func->node_count = nodes_to_pop_count;
+    func->nodes = (Node **)calloc(func->node_count, sizeof(*func->nodes));
+
+    for (u64 i = func->node_count; i-- > 0;) {
+        func->nodes[i] = pop_node(&inter->ctx);
+    }
+    push_node(&inter->ctx, func);
+}
+
 void parse_statement(Interpreter *inter) {
-    parse_expr(inter, TOKEN_INVALID);
+
+    Node *stmt = (Node *)calloc(1, sizeof(*stmt));
+    stmt->type = NODE_STATEMENT;
+    stmt->token_index = inter->ctx.iter;
+    stmt->node_count = 1;
+    stmt->nodes = (Node **)calloc(stmt->node_count, sizeof(*stmt->nodes));
+
+    bool is_definition = false;
+
+    for (u64 i = inter->ctx.iter; i < inter->lex.token_count; ++i) {
+        s64 j = (s64)i;
+        if (is_token(inter, TOKEN_SEMICOLON, j)) break;
+
+        if (is_token(inter, TOKEN_COLON, j) && is_token(inter, TOKEN_EQUAL, j + 1)) {
+            is_definition = true;
+            break;
+        }
+    }
+
+    if (is_definition) {
+        parse_function_definition(inter);
+    } else {
+        parse_expr(inter, TOKEN_SEMICOLON);
+    }
+
+
+    stmt->nodes[0] = pop_node(&inter->ctx);
+    push_node(&inter->ctx, stmt);
 }
 
 
 void parse(Interpreter *inter) {
 
+    Node *prog = (Node *)calloc(1, sizeof(*prog));
+    prog->type = NODE_PROGRAM;
+    prog->token_index = inter->ctx.iter;
+
     while (inter->ctx.iter < inter->lex.token_count) {
         parse_statement(inter);
+        if (!is_token(inter, TOKEN_SEMICOLON, 0)) {
+            todo();
+        }
+        consume(inter);
     }
 
-    inter->ctx.root = inter->ctx.node_stack[0]; 
+    prog->node_count = inter->ctx.stack_count;
+    prog->nodes = (Node **)calloc(prog->node_count, sizeof(*prog->nodes));
+
+    for (u64 i = prog->node_count; i-- > 0;) {
+        prog->nodes[i] = pop_node(&inter->ctx);
+    }
+
+    inter->ctx.root = prog; 
 }
 
 
@@ -598,7 +751,7 @@ void graphviz_out(Interpreter *inter) {
         Node *top = stack[--count];
         Token t = inter->lex.tokens[top->token_index];
         u64 len = t.end - t.start;
-        fprintf(f, "n%llu [label=\"%.*s\"]\n", (u64)top, (int)len, inter->lex.src.dat + t.start);
+        fprintf(f, "n%llu [label=\"%s: %.*s\"]\n", (u64)top, str_NodeType[top->type], (int)len, inter->src.dat + t.start);
 
         for (u64 i = 0; i < top->node_count; ++i) {
             fprintf(f, "n%llu -- n%llu\n", (u64)top, (u64)top->nodes[i]);
@@ -652,12 +805,15 @@ f64 execute(Interpreter *inter, Node *n) {
     f64 r = 0;
     switch (n->type) {
         case NODE_INVALID: todo();
+        case NODE_PROGRAM: todo();
+        case NODE_STATEMENT: todo();
         case NODE_NUMBER: r = n->num; break;
         case NODE_FUNCTION: todo();
+        case NODE_FUNCTIONDEF: todo();
         case NODE_VARIABLE: {
 
             Token t = inter->lex.tokens[n->token_index];
-            String s = {inter->lex.src.dat + t.start, t.end - t.start};
+            String s = {inter->src.dat + t.start, t.end - t.start};
 
             r = get_top_var(inter, s);
         } break;
@@ -665,7 +821,7 @@ f64 execute(Interpreter *inter, Node *n) {
 
             Node *rhs = n->nodes[0];
             Token t = inter->lex.tokens[rhs->token_index]; 
-            String s = {inter->lex.src.dat + t.start, t.end - t.start};
+            String s = {inter->src.dat + t.start, t.end - t.start};
 
             Node *lhs = n->nodes[1];
 
@@ -795,9 +951,10 @@ int main(void) {
     Arena t; arena_init(&t, 1000000);
     scratch = &t;
 
+    String_Builder sb; string_builder_init(&sb, 1000000);
 
     // Interpreter *e = (Interpreter *)arena_alloc(scratch, sizeof(*e));
-    Interpreter *e = (Interpreter *)calloc(1, sizeof(*e));
+    Interpreter *inter = (Interpreter *)calloc(1, sizeof(*inter));
 
 
     int screen_w = 1366;
@@ -853,6 +1010,10 @@ int main(void) {
         while (true) {
             int tmp = GetKeyPressed();
             if (tmp == 0) break;
+            if (tmp == KEY_LEFT_CONTROL) continue;
+            if (tmp == KEY_RIGHT_CONTROL) continue;
+            if (tmp == KEY_LEFT_SHIFT) continue;
+            if (tmp == KEY_RIGHT_SHIFT) continue;
 
             keys_pressed[key_count++] = tmp;
         }
@@ -1155,10 +1316,22 @@ int main(void) {
 
                 if (text_input_changed) {
 
-                    tokenize(&e->lex, String {text_buf[i], text_count[i]});
-                    parse(e);
+                    sb.count = 0;
 
-                    String s = string_printf(scratch, "%g", execute(e, e->ctx.root));
+                    for (u64 j = 0; j < ARRAY_SIZE(text_buf); ++j) {
+                        if (text_count[j] > 0) {
+                            string_builder_concat(&sb, String {(u8 *)text_buf[j], text_count[j]});
+                            string_builder_append(&sb, ';');
+                        }
+                    }
+                    String src = string_builder_to_string(&sb);
+
+
+                    tokenize(inter, src);
+                    parse(inter);
+                    graphviz_out(inter);
+
+                    String s = string_printf(scratch, "%g", execute(inter, inter->ctx.root));
                     memcpy(display_text_buf[i], s.dat, s.count + 1);
                     display_text_count[i] = s.count;
                 }
