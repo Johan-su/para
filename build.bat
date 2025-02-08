@@ -10,7 +10,8 @@ if not exist build mkdir build
 
 pushd build
 
-%CLANG% -E -Wno-macro-redefined ../src/meta.cpp > ../src/generated.cpp
+%CLANG% -E -P -Wno-macro-redefined -DHEADER ../src/meta.cpp > ../src//generated/generated.hpp
+%CLANG% -E -P -Wno-macro-redefined -DSOURCE ../src/meta.cpp > ../src/generated/generated.cpp
 %CLANG% %FLAGS% -l ../lib/raylib.lib %WINLIB% -I ../lib/include  ../src/main.cpp -o para.exe
 
 popd build

@@ -6,97 +6,18 @@
 #include "common.cpp"
 #include "arena.cpp"
 
-#include "generated.cpp"
+#include "generated/generated.hpp"
 
-
-
-/*
-
-TODO:
-add ability to actually run functions and expressions
-separate work thread from ui thread for more heavy tasks for example, running functions in the graph view. 
-
-make ui scale correctly according to window size
-chained equality (checking for equality at every step in some list of expressions)
-
-make panes resizable
-add snapping for panes
-add ability to snap with keyboard hotkeys instead of only mouse
-add more math operators/functions like integrals, derivatives, sum.
-
-add undo system
-tooltips to evaluate expressions partially (maybe)
-
-use arenas for memory allocation in the lexer/parser/compiler
-improve color theme for the ui
-add graph viewer similar to desmos
-
-
-*/
-
-// String
 struct String {
     u8 *dat;
     u64 count;
 };
-
-#include <stdarg.h>
-#if GCC || CLANG
-__attribute__((__format__ (__printf__, 2, 3)))
-#endif
-String string_printf(Arena *arena, const char *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    int len_ = vsnprintf(nullptr, 0, fmt, args);   
-    assert(len_ >= 0);
-
-    String s = {};
-    s.count = (u64) len_;
-    
-    s.dat = (u8 *)arena_alloc(arena, s.count + 1);
-    vsnprintf((char *)s.dat, s.count + 1, fmt, args);   
-    va_end(args);
-
-    return s;
-}
-
-bool string_equal(String a, String b) {
-    if (a.count != b.count) return false;
-
-    for (u64 i = 0; i < a.count; ++i) {
-        if (a.dat[i] != b.dat[i]) return false;
-    }
-
-    return true;
-}
 
 struct String_Builder {
     u64 count;
     u64 max_capacity;
     u8 *data;
 };
-
-void string_builder_init(String_Builder *sb, u64 cap) {
-    sb->count = 0;
-    sb->max_capacity = cap;
-    sb->data = (u8 *)calloc(1, sb->max_capacity);
-}
-
-void string_builder_append(String_Builder *sb, u8 b) {
-    assert(sb->count < sb->max_capacity);
-    sb->data[sb->count++] = b;
-}
-
-void string_builder_concat(String_Builder *sb, String s) {
-    assert(sb->count + s.count < sb->max_capacity);
-    for (u64 i = 0; i < s.count; ++i) {
-        sb->data[sb->count++] = s.dat[i];
-    }
-}
-
-String string_builder_to_string(String_Builder *sb) {
-    return String {sb->data, sb->count};
-}
 
 struct Token {
     TokenType type;
@@ -161,6 +82,8 @@ struct Error {
     u64 token_id;
 };
 
+#include "generated/generated.cpp"
+
 struct Interpreter {
     Item_Env envs[256];
     u64 env_count;
@@ -169,13 +92,93 @@ struct Interpreter {
     Lexer lex;
     Parser ctx;
 
-    f64 stack[256];
-    u64 stack_count;
 
+    Stack_Nodep node_stack;
+    Stack_f64 val_stack;
 
-    Error errors[256];
-    u64 error_count;
+    Stack_Error error_stack;
 };
+
+
+/*
+
+TODO:
+add ability to actually run functions and expressions
+separate work thread from ui thread for more heavy tasks for example, running functions in the graph view. 
+
+make ui scale correctly according to window size
+chained equality (checking for equality at every step in some list of expressions)
+
+make panes resizable
+add snapping for panes
+add ability to snap with keyboard hotkeys instead of only mouse
+add more math operators/functions like integrals, derivatives, sum.
+
+add undo system
+tooltips to evaluate expressions partially (maybe)
+
+use arenas for memory allocation in the lexer/parser/compiler
+improve color theme for the ui
+add graph viewer similar to desmos
+
+
+*/
+
+// String
+
+#include <stdarg.h>
+#if GCC || CLANG
+__attribute__((__format__ (__printf__, 2, 3)))
+#endif
+String string_printf(Arena *arena, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int len_ = vsnprintf(nullptr, 0, fmt, args);   
+    assert(len_ >= 0);
+
+    String s = {};
+    s.count = (u64) len_;
+    
+    s.dat = (u8 *)arena_alloc(arena, s.count + 1);
+    vsnprintf((char *)s.dat, s.count + 1, fmt, args);   
+    va_end(args);
+
+    return s;
+}
+
+bool string_equal(String a, String b) {
+    if (a.count != b.count) return false;
+
+    for (u64 i = 0; i < a.count; ++i) {
+        if (a.dat[i] != b.dat[i]) return false;
+    }
+
+    return true;
+}
+
+
+void string_builder_init(String_Builder *sb, u64 cap) {
+    sb->count = 0;
+    sb->max_capacity = cap;
+    sb->data = (u8 *)calloc(1, sb->max_capacity);
+}
+
+void string_builder_append(String_Builder *sb, u8 b) {
+    assert(sb->count < sb->max_capacity);
+    sb->data[sb->count++] = b;
+}
+
+void string_builder_concat(String_Builder *sb, String s) {
+    assert(sb->count + s.count < sb->max_capacity);
+    for (u64 i = 0; i < s.count; ++i) {
+        sb->data[sb->count++] = s.dat[i];
+    }
+}
+
+String string_builder_to_string(String_Builder *sb) {
+    return String {sb->data, sb->count};
+}
+
 
 String str_from_cstr(const char *cstr) {
 
@@ -824,32 +827,30 @@ Item get_first_item(Interpreter *inter, String name, ItemType type) {
     return Item {};
 }
 
-void push_val(Interpreter *inter, f64 val) {
-    assert(inter->stack_count < ARRAY_SIZE(inter->stack));
-    inter->stack[inter->stack_count++] = val;
-}
-
-f64 pop_val(Interpreter *inter) {
-    assert(inter->stack_count > 0);
-    return inter->stack[--inter->stack_count];
-}
-
 void execute(Interpreter *inter, Node *n) {
+    stack_Nodep_push(&inter->node_stack, n);
+    execute2(inter);
+}
+
+void execute2(Interpreter *inter) {
+
+    Node *n = stack_Nodep_pop(&inter->node_stack);
+
     switch (n->type) {
         case NODE_INVALID: todo();
         case NODE_PROGRAM: {
             push_item_env(inter);
 
             for (u64 i = 0; i < n->node_count; ++i) {
-                execute(inter, n->nodes[i]);
+                execute2(inter, n->nodes[i]);
             }
 
             pop_item_env(inter);
         } break;
         case NODE_STATEMENT: {
-            execute(inter, n->nodes[0]);
+            execute2(inter, n->nodes[0]);
         } break;
-        case NODE_NUMBER: push_val(inter, n->num); break;
+        case NODE_NUMBER: stack_f64_push(&inter->val_stack, n->num); break;
         case NODE_FUNCTION: todo();
         case NODE_FUNCTIONDEF: todo();
         case NODE_VARIABLE: {
@@ -859,10 +860,12 @@ void execute(Interpreter *inter, Node *n) {
 
             Item v = get_first_item(inter, s, ITEM_VARIABLE);
             if (v.type == ITEM_INVALID) {
+
+
                 // report var not defined
                 todo();
             }
-            push_val(inter, v.val);
+            stack_f64_push(&inter->val_stack, v.val);
         } break;
         case NODE_VARIABLEDEF: {
 
@@ -872,8 +875,8 @@ void execute(Interpreter *inter, Node *n) {
 
             Node *lhs = n->nodes[1];
 
-            execute(inter, lhs);
-            f64 r_val = pop_val(inter);
+            execute2(inter, lhs);
+            f64 r_val = stack_f64_pop(&inter->val_stack);
             Item i = {};
             i.type = ITEM_VARIABLE;
             i.val = r_val;
@@ -882,59 +885,59 @@ void execute(Interpreter *inter, Node *n) {
         } break;
         case NODE_ADD: {
             for (u64 i = 0; i < n->node_count; ++i) {
-                execute(inter, n->nodes[i]);
+                execute2(inter, n->nodes[i]);
             }
 
-            f64 rhs = pop_val(inter);
-            f64 lhs = pop_val(inter);
+            f64 rhs = stack_f64_pop(&inter->val_stack);
+            f64 lhs = stack_f64_pop(&inter->val_stack);
             f64 val = rhs + lhs;
-            push_val(inter, val);
+            stack_f64_push(&inter->val_stack, val);
 
         } break;
         case NODE_SUB: {
             for (u64 i = 0; i < n->node_count; ++i) {
-                execute(inter, n->nodes[i]);
+                execute2(inter, n->nodes[i]);
             }
 
-            f64 rhs = pop_val(inter);
-            f64 lhs = pop_val(inter);
+            f64 rhs = stack_f64_pop(&inter->val_stack);
+            f64 lhs = stack_f64_pop(&inter->val_stack);
             f64 val = rhs - lhs;
-            push_val(inter, val);
+            stack_f64_push(&inter->val_stack, val);
 
         } break;
         case NODE_MUL: {
             for (u64 i = 0; i < n->node_count; ++i) {
-                execute(inter, n->nodes[i]);
+                execute2(inter, n->nodes[i]);
             }
             
-            f64 rhs = pop_val(inter);
-            f64 lhs = pop_val(inter);
+            f64 rhs = stack_f64_pop(&inter->val_stack);
+            f64 lhs = stack_f64_pop(&inter->val_stack);
             f64 val = rhs * lhs;
-            push_val(inter, val);
+            stack_f64_push(&inter->val_stack, val);
 
         } break;
         case NODE_DIV: {
             for (u64 i = 0; i < n->node_count; ++i) {
-                execute(inter, n->nodes[i]);
+                execute2(inter, n->nodes[i]);
             }
 
-            f64 rhs = pop_val(inter);
-            f64 lhs = pop_val(inter);
+            f64 rhs = stack_f64_pop(&inter->val_stack);
+            f64 lhs = stack_f64_pop(&inter->val_stack);
             f64 val = rhs / lhs;
-            push_val(inter, val);
+            stack_f64_push(&inter->val_stack, val);
 
         } break;
         case NODE_UNARYADD: {
             for (u64 i = 0; i < n->node_count; ++i) {
-                execute(inter, n->nodes[i]);
+                execute2(inter, n->nodes[i]);
             }
         } break;
         case NODE_UNARYSUB: {
             for (u64 i = 0; i < n->node_count; ++i) {
-                execute(inter, n->nodes[i]);
+                execute2(inter, n->nodes[i]);
             }
-            f64 val = -pop_val(inter);
-            push_val(inter, val);
+            f64 val = -stack_f64_pop(&inter->val_stack);
+            stack_f64_push(&inter->val_stack, val);
         } break;
  
         case NODE_OPENPAREN: todo();
@@ -1439,26 +1442,29 @@ int main(void) {
                     for (u64 j = 0; j < ARRAY_SIZE(text_count); ++j) {
                         if (text_count[j] == 0) continue;
 
-                        if () {
-                            
-                        }
-
-                        Node *prog = inter->ctx.root;
-                        Node *stmt = prog->nodes[non_empty_id];
-
-                        bool is_definition = false;
-                        assert(stmt->node_count == 1);
-                        if (stmt->nodes[0]->type == NODE_FUNCTIONDEF || stmt->nodes[0]->type == NODE_VARIABLEDEF) {
-                            is_definition = true;
-                        }
-
-
-                        if (is_definition) {
+                        bool skip = false;
+                        while (inter->error_stack.count > 0) {
+                            Error *e = inter->error_stack.dat + inter->error_stack.count - 1;
                             todo();
-                        } else {
-                            String s = string_printf(scratch, "%lg", pop_val(inter));
-                            memcpy(display_text_buf[j], s.dat, s.count + 1);
-                            display_text_count[j] = s.count;
+                        }
+                        if (!skip) {
+                            Node *prog = inter->ctx.root;
+                            Node *stmt = prog->nodes[non_empty_id];
+
+                            bool is_definition = false;
+                            assert(stmt->node_count == 1);
+                            if (stmt->nodes[0]->type == NODE_FUNCTIONDEF || stmt->nodes[0]->type == NODE_VARIABLEDEF) {
+                                is_definition = true;
+                            }
+
+
+                            if (is_definition) {
+                                todo();
+                            } else {
+                                String s = string_printf(scratch, "%lg", stack_f64_pop(&inter->val_stack));
+                                memcpy(display_text_buf[j], s.dat, s.count + 1);
+                                display_text_count[j] = s.count;
+                            }
                         }
                         non_empty_id += 1;
                     }
@@ -1518,6 +1524,5 @@ int main(void) {
 
     return 0;
 }
-
 
 

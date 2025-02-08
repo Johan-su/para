@@ -10,6 +10,12 @@ Y(NodeType) \
 Y(ItemType) \
 
 
+#define StackTable \
+Y(f64, f64) \
+Y(Nodep, Node *) \
+Y(Error, Error) \
+
+
 #define TokenTypeTable \
 X(TOKEN_INVALID) \
 X(TOKEN_NUMBER) \
@@ -51,7 +57,7 @@ X(ITEM_INVALID) \
 X(ITEM_VARIABLE) \
 X(ITEM_FUNCTION) \
 
-
+#ifdef HEADER
 #define X(field) field,
 #define Y(name) \
 enum name { \
@@ -87,3 +93,34 @@ enum name { \
 }; \
 
 enumFlagTable
+
+#endif
+
+
+#ifdef SOURCE
+#define Y(type_simple, type) \
+struct Stack_##type_simple { \
+    u64 count; \
+    u64 cap; \
+    type *dat; \
+}; \
+void stack_##type_simple##_init(Stack_##type_simple *stack, u64 cap) { \
+    stack->count = 0; \
+    stack->cap = cap; \
+    stack->dat = (type *)calloc(stack->cap, sizeof(type)); \
+} \
+void stack_##type_simple##_push(Stack_##type_simple *stack, type v) { \
+    if (stack->cap == 0) stack_##type_simple##_init(stack, 1 << 14); \
+    assert(stack->count < stack->cap); \
+    stack->dat[stack->count++] = v; \
+} \
+type stack_##type_simple##_pop(Stack_##type_simple *stack) { \
+    assert(stack->count > 0); \
+    return stack->dat[--stack->count]; \
+} \
+
+
+StackTable
+
+
+#endif
