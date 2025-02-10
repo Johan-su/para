@@ -64,15 +64,22 @@ struct Item {
     ItemType type;
     union {
         f64 val;
-        Node *func;
+        u64 id;
     };
 };
 
 
-struct Item_Env {
-    String ids[256];
-    Item items[256];
-    u64 item_count;
+
+
+struct Bytecode {
+    BytecodeType type;
+
+};
+
+
+struct Bytecode_Generator {
+    Bytecode code[1 << 14];
+    u64 code_count;
 };
 
 struct Error {
@@ -85,17 +92,20 @@ struct Error {
 #include "generated/generated.cpp"
 
 struct Interpreter {
-    Item_Env envs[256];
-    u64 env_count;
+
 
     String src;
     Lexer lex;
     Parser ctx;
+    Bytecode_Generator gen;
 
 
-    Stack_Nodep node_stack;
+    Stack_Item items;
+
+
+
+
     Stack_f64 val_stack;
-
     Stack_Error error_stack;
 };
 
@@ -790,186 +800,49 @@ void graphviz_out(Interpreter *inter) {
     fclose(f);
 }
 
+void bytecode_from_tree2(Interpreter *inter, Node *n) {
 
-
-void push_item_env(Interpreter *inter) {
-    assert(inter->env_count < ARRAY_SIZE(inter->envs));
-    memset(inter->envs + inter->env_count, 0, sizeof(inter->envs[0]));
-    inter->env_count += 1;
-}
-
-void pop_item_env(Interpreter *inter) {
-    assert(inter->env_count > 0);
-    inter->env_count -= 1;
-}
-
-void push_top_item(Interpreter *inter, String name, Item item) {
-    Item_Env *top = inter->envs + inter->env_count - 1;
-    assert(top->item_count > ARRAY_SIZE(top->items));
-
-    top->ids[top->item_count] = name;
-    top->items[top->item_count] = item;
-
-    top->item_count += 1;
-}
-
-Item get_first_item(Interpreter *inter, String name, ItemType type) {
-
-    for (u64 i = inter->env_count; i-- > 0;) {
-        Item_Env *env = inter->envs + i;
-        for (u64 j = 0; j < env->item_count; ++j) {
-            if (string_equal(env->ids[j], name) && env->items[j].type == type) {
-                return env->items[j];
+    switch (n->type) {
+        case NODE_INVALID: todo();
+        case NODE_PROGRAM: {
+            for (u64 i = 0; i < n->node_count; ++i) {
+                bytecode_from_tree2(inter, n->nodes[i]);
             }
-        }
-    }
 
-    return Item {};
-}
-
-
-
-
-void dfs_to_postorder_list(Stack_Nodep *stack, Node *n) {
-
-    for (u64 i = 0; i < n->node_count; ++i) {
-        dfs_to_postorder_list(stack, n->nodes[i]);
-    }
-
-    stack_Nodep_push(stack, n);
-}
-
-void dfs_to_preorder_list(Stack_Nodep *stack, Node *n) {
-
-    stack_Nodep_push(stack, n);
-    for (u64 i = 0; i < n->node_count; ++i) {
-        dfs_to_preorder_list(stack, n->nodes[i]);
-    }
-
-}
-
-void execute2(Interpreter *inter) {
-    Node *n = stack_Nodep_pop(&inter->node_stack);
-
-    Stack_Nodep postorder = {};
-    dfs_to_postorder_list(&postorder, n);
-
-    Stack_Nodep preorder = {};
-    dfs_to_preorder_list(&preorder, n);
-
-    // switch (n->type) {
-    //     case NODE_INVALID: todo();
-    //     case NODE_PROGRAM: {
-    //         push_item_env(inter);
-
-    //         for (u64 i = 0; i < n->node_count; ++i) {
-    //             execute2(inter, n->nodes[i]);
-    //         }
-
-    //         pop_item_env(inter);
-    //     } break;
-    //     case NODE_STATEMENT: {
-    //         execute2(inter, n->nodes[0]);
-    //     } break;
-    //     case NODE_NUMBER: stack_f64_push(&inter->val_stack, n->num); break;
-    //     case NODE_FUNCTION: todo();
-    //     case NODE_FUNCTIONDEF: todo();
-    //     case NODE_VARIABLE: {
-
-    //         Token t = inter->lex.tokens[n->token_index];
-    //         String s = {inter->src.dat + t.start, t.end - t.start};
-
-    //         Item v = get_first_item(inter, s, ITEM_VARIABLE);
-    //         if (v.type == ITEM_INVALID) {
-
-
-    //             // report var not defined
-    //             todo();
-    //         }
-    //         stack_f64_push(&inter->val_stack, v.val);
-    //     } break;
-    //     case NODE_VARIABLEDEF: {
-
-    //         Node *rhs = n->nodes[0];
-    //         Token t = inter->lex.tokens[rhs->token_index]; 
-    //         String s = {inter->src.dat + t.start, t.end - t.start};
-
-    //         Node *lhs = n->nodes[1];
-
-    //         execute2(inter, lhs);
-    //         f64 r_val = stack_f64_pop(&inter->val_stack);
-    //         Item i = {};
-    //         i.type = ITEM_VARIABLE;
-    //         i.val = r_val;
-    //         push_top_item(inter, s, i);
-
-    //     } break;
-    //     case NODE_ADD: {
-    //         for (u64 i = 0; i < n->node_count; ++i) {
-    //             execute2(inter, n->nodes[i]);
-    //         }
-
-    //         f64 rhs = stack_f64_pop(&inter->val_stack);
-    //         f64 lhs = stack_f64_pop(&inter->val_stack);
-    //         f64 val = rhs + lhs;
-    //         stack_f64_push(&inter->val_stack, val);
-
-    //     } break;
-    //     case NODE_SUB: {
-    //         for (u64 i = 0; i < n->node_count; ++i) {
-    //             execute2(inter, n->nodes[i]);
-    //         }
-
-    //         f64 rhs = stack_f64_pop(&inter->val_stack);
-    //         f64 lhs = stack_f64_pop(&inter->val_stack);
-    //         f64 val = rhs - lhs;
-    //         stack_f64_push(&inter->val_stack, val);
-
-    //     } break;
-    //     case NODE_MUL: {
-    //         for (u64 i = 0; i < n->node_count; ++i) {
-    //             execute2(inter, n->nodes[i]);
-    //         }
+        } break;
+        case NODE_STATEMENT: {
+            assert(n->node_count == 1);
+            bytecode_from_tree2(inter, n->nodes[0]);
             
-    //         f64 rhs = stack_f64_pop(&inter->val_stack);
-    //         f64 lhs = stack_f64_pop(&inter->val_stack);
-    //         f64 val = rhs * lhs;
-    //         stack_f64_push(&inter->val_stack, val);
+        } break;
+        case NODE_NUMBER: todo();
+        case NODE_FUNCTION: todo();
+        case NODE_FUNCTIONDEF: {
+            
+            
 
-    //     } break;
-    //     case NODE_DIV: {
-    //         for (u64 i = 0; i < n->node_count; ++i) {
-    //             execute2(inter, n->nodes[i]);
-    //         }
-
-    //         f64 rhs = stack_f64_pop(&inter->val_stack);
-    //         f64 lhs = stack_f64_pop(&inter->val_stack);
-    //         f64 val = rhs / lhs;
-    //         stack_f64_push(&inter->val_stack, val);
-
-    //     } break;
-    //     case NODE_UNARYADD: {
-    //         for (u64 i = 0; i < n->node_count; ++i) {
-    //             execute2(inter, n->nodes[i]);
-    //         }
-    //     } break;
-    //     case NODE_UNARYSUB: {
-    //         for (u64 i = 0; i < n->node_count; ++i) {
-    //             execute2(inter, n->nodes[i]);
-    //         }
-    //         f64 val = -stack_f64_pop(&inter->val_stack);
-    //         stack_f64_push(&inter->val_stack, val);
-    //     } break;
- 
-    //     case NODE_OPENPAREN: todo();
-    // }
+        } break;
+        case NODE_VARIABLE: todo();
+        case NODE_VARIABLEDEF: todo();
+        case NODE_ADD: todo();
+        case NODE_SUB: todo();
+        case NODE_MUL: todo();
+        case NODE_DIV: todo();
+        case NODE_UNARYADD: todo();
+        case NODE_UNARYSUB: todo();
+        case NODE_OPENPAREN: todo();
+    }
 }
 
-void execute(Interpreter *inter, Node *n) {
-    stack_Nodep_push(&inter->node_stack, n);
-    execute2(inter);
+void bytecode_from_tree(Interpreter *inter) {
+    bytecode_from_tree2(inter, inter->ctx.root);
 }
 
+
+
+void execute(Interpreter *inter, String func) {
+    todo();
+}
 
 
 // UI System
@@ -1081,7 +954,18 @@ int main(void) {
     // Interpreter *e = (Interpreter *)arena_alloc(scratch, sizeof(*e));
     Interpreter *inter = (Interpreter *)calloc(1, sizeof(*inter));
 
+    String src = str_from_cstr("f(x):=x*x;f(15);");
 
+    memset(inter, 0, sizeof(*inter));
+    tokenize(inter, src);
+    parse(inter);
+    graphviz_out(inter);
+    bytecode_from_tree(inter);
+    execute(inter, str_from_cstr("e2"));
+
+
+
+    return 0;
     int screen_w = 1366;
     int screen_h = 768;
 
@@ -1459,7 +1343,9 @@ int main(void) {
                     tokenize(inter, src);
                     parse(inter);
                     graphviz_out(inter);
-                    execute(inter, inter->ctx.root);
+                    bytecode_from_tree(inter);
+                    todo();
+                    // execute(inter);
 
 
                     
@@ -1486,7 +1372,7 @@ int main(void) {
                             if (is_definition) {
                                 todo();
                             } else {
-                                String s = string_printf(scratch, "%lg", stack_f64_pop(&inter->val_stack));
+                                String s = string_printf(scratch, "%lg", stack_pop(&inter->val_stack));
                                 memcpy(display_text_buf[j], s.dat, s.count + 1);
                                 display_text_count[j] = s.count;
                             }
