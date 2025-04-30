@@ -100,6 +100,7 @@ struct Parser {
 
 struct Item {
     ItemType type;
+    String name;
     union {
         f64 val;
         u64 id;
@@ -111,9 +112,7 @@ struct Item {
 
 struct Bytecode {
     BytecodeType type;
-
 };
-
 
 struct Bytecode_Generator {
     Bytecode code[1 << 14];
@@ -127,8 +126,11 @@ struct Error {
     u64 token_id;
 };
 
-struct Interpreter {
+struct Scope {
+    Stack<Item> items;
+};
 
+struct Interpreter {
 
     String src;
     Lexer lex;
@@ -136,7 +138,7 @@ struct Interpreter {
     Bytecode_Generator gen;
 
 
-    Stack<Item> items;
+    Stack<Scope> scopes;
 
 
 
@@ -771,24 +773,23 @@ void graphviz_out(Interpreter *inter) {
     FILE *f = fopen("./input.dot", "wb");
     fprintf(f, "graph G {\n");
 
-    Node **stack = (Node **)calloc(4096, sizeof(*stack));
-    u64 count = 0; 
 
-    stack[count++] = inter->ctx.root;
+    Stack<Node *> stack = {};
 
-    while (count != 0) {
-        Node *top = stack[--count];
+    stack_push(&stack, inter->ctx.root);
+
+    while (stack.count != 0) {
+        Node *top = stack_pop(&stack);
         Token t = inter->lex.tokens[top->token_index];
         u64 len = t.end - t.start;
         fprintf(f, "n%llu [label=\"%s: %.*s\"]\n", (u64)top, str_NodeType[top->type], (int)len, inter->src.dat + t.start);
 
         for (u64 i = 0; i < top->node_count; ++i) {
             fprintf(f, "n%llu -- n%llu\n", (u64)top, (u64)top->nodes[i]);
-            stack[count++] = top->nodes[i];
+            stack_push(&stack, top->nodes[i]);
         }
 
     }
-
 
     fprintf(f, "}");
     fclose(f);
@@ -799,6 +800,7 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
     switch (n->type) {
         case NODE_INVALID: todo(); break;
         case NODE_PROGRAM: {
+            stack_push(&inter->scopes, Scope {});
             for (u64 i = 0; i < n->node_count; ++i) {
                 bytecode_from_tree2(inter, n->nodes[i]);
             }
@@ -812,12 +814,14 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
         case NODE_NUMBER: todo(); break;
         case NODE_FUNCTION: todo(); break;
         case NODE_FUNCTIONDEF: {
-           todo(); 
+           todo();
         } break;
         case NODE_VARIABLE: todo(); break;
         case NODE_VARIABLEDEF: todo(); break;
         case NODE_ADD: todo(); break;
-        case NODE_SUB: todo(); break;
+        case NODE_SUB: {
+            todo();
+        } break;
         case NODE_MUL: todo(); break;
         case NODE_DIV: todo(); break;
         case NODE_UNARYADD: todo(); break;
