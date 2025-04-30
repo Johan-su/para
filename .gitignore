@@ -1,9 +1,10 @@
 /.vscode
+.cache
 *.exe
 *.ilk
 *.pdb
 *.png
 *.dot
 *.svg
-
+compile_commands.json
 /build

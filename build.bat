@@ -1,17 +1,25 @@
 @echo off
-set CLANG=clang++
-set WARNINGS=-Wall -Wpedantic -Wextra -Wconversion -Wshadow -Wno-c++20-designator -Wno-c++17-extensions -Wno-gnu-anonymous-struct -Wno-nested-anon-types
-set FLAGS=-O0 -D _CRT_SECURE_NO_WARNINGS -fwrapv -fno-strict-aliasing  -g %WARNINGS%
+set WARNINGS=-Wall -Wpedantic -Wextra -Wconversion -Wshadow -Wimplicit-fallthrough -Wno-language-extension-token -Wno-nested-anon-types -Wno-gnu-anonymous-struct -Wno-gnu-zero-variadic-macro-arguments 
+set FLAGS=-O0 -D _CRT_SECURE_NO_WARNINGS -fwrapv -fno-strict-aliasing  -g
 
 set SANITIZE=-fsanitize=address -fsanitize=undefined
-set WINLIB= -l User32.lib -l Gdi32.lib -l Shell32.lib -l Winmm.lib
+set WINLIBS= -l User32.lib -l Gdi32.lib -l Shell32.lib -l Winmm.lib
+
+set LIBS=-l opengl32 -l lib/raylib.lib
+set INCLUDES=-I lib/include
 
 if not exist build mkdir build
 
-pushd build
 
-%CLANG% -E -P -Wno-macro-redefined -DHEADER ../src/meta.cpp > ../src//generated/generated.hpp
-%CLANG% -E -P -Wno-macro-redefined -DSOURCE ../src/meta.cpp > ../src/generated/generated.cpp
-%CLANG% %FLAGS% -l ../lib/raylib.lib %WINLIB% -I ../lib/include  ../src/main.cpp -o para.exe
 
-popd build
+if not exist build mkdir build
+git rev-parse --short HEAD > build\version.txt
+SET /P GIT_HASH= < build\version.txt
+
+
+echo Building src...
+clang++ -MJ build/build.json src/build.cpp -o build/main.exe -DGIT_HASH=0x%GIT_HASH% %FLAGS% %INCLUDES% %WARNINGS% %WINLIBS% %LIBS%
+
+echo [ > compile_commands.json
+type build\build.json >> compile_commands.json
+echo ] >> compile_commands.json

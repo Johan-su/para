@@ -1,17 +1,55 @@
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <raylib.h>
-#include <string>
+#include <string.h>
 
-#include "common.cpp"
-#include "arena.cpp"
+#include "common.h"
+#include "arena.h"
+#include "meta.h"
+#include "string.h"
 
-#include "generated/generated.hpp"
+template <typename T>
+struct Stack { 
+    u64 count; 
+    u64 cap; 
+    T *dat; 
+}; 
+template <typename T>
+void stack_init(Stack<T> *stack, u64 cap) { 
+    stack->count = 0; 
+    stack->cap = cap; 
+    stack->dat = (T *)calloc(stack->cap, sizeof(T)); 
+} 
+template <typename T>
+void stack_push(Stack<T> *stack, T v) { 
+    if (stack->cap == 0) stack_init(stack, 1 << 14); 
+    assert(stack->count < stack->cap); 
+    stack->dat[stack->count++] = v; 
+} 
+template <typename T>
+T stack_pop(Stack<T> *stack) { 
+    assert(stack->count > 0); 
+    return stack->dat[--stack->count]; 
+} 
 
-struct String {
-    u8 *dat;
-    u64 count;
+
+
+
+struct NodeTableData {
+    s64 precedence;
+    bool left_associative;
 };
+
+NodeTableData node_table_data[] = {
+    #define X(type, precedence, is_left_associative) {precedence, is_left_associative},
+    NodeDataTable(X)
+    #undef X
+};
+
+
+
+
 
 struct String_Builder {
     u64 count;
@@ -89,8 +127,6 @@ struct Error {
     u64 token_id;
 };
 
-#include "generated/generated.cpp"
-
 struct Interpreter {
 
 
@@ -100,13 +136,13 @@ struct Interpreter {
     Bytecode_Generator gen;
 
 
-    Stack_Item items;
+    Stack<Item> items;
 
 
 
 
-    Stack_f64 val_stack;
-    Stack_Error error_stack;
+    Stack<f64> val_stack;
+    Stack<Error> error_stack;
 };
 
 
@@ -362,50 +398,6 @@ bool is_binop(Interpreter *inter, s64 offset) {
     return false;
 }
 
-s64 get_precedence(NodeType t) {
-    switch (t) {
-        case NODE_INVALID:
-        case NODE_PROGRAM:
-        case NODE_STATEMENT:
-        case NODE_NUMBER:
-        case NODE_FUNCTION:
-        case NODE_FUNCTIONDEF:
-        case NODE_VARIABLE:
-        case NODE_VARIABLEDEF:
-            assert(false && "cannot get precedence of non operator");
-        case NODE_ADD: return 1;
-        case NODE_SUB: return 1;
-        case NODE_MUL: return 2;
-        case NODE_DIV: return 2;
-        case NODE_UNARYADD: return 100;
-        case NODE_UNARYSUB: return 101;
-        case NODE_OPENPAREN: return 0;
-    }
-    assert(false && "cannot get precedence of non operator");
-    return 0;
-}
-
-bool is_left_associative(NodeType t) {
-    switch (t) {
-        case NODE_INVALID:
-        case NODE_PROGRAM:
-        case NODE_STATEMENT:
-        case NODE_NUMBER:
-        case NODE_FUNCTION:
-        case NODE_FUNCTIONDEF:
-        case NODE_VARIABLE:
-        case NODE_VARIABLEDEF:
-            assert(false && "cannot get associativity of non operator");
-        case NODE_ADD: return true;
-        case NODE_SUB: return true;
-        case NODE_MUL: return true;
-        case NODE_DIV: return true;
-        case NODE_UNARYADD: return false;
-        case NODE_UNARYSUB: return false;
-        case NODE_OPENPAREN: return true;
-    }
-    return false;
-}
 
 Node *make_node_from_stacks(Parser *ctx) {
     Node *top = pop_op(ctx);
@@ -413,6 +405,7 @@ Node *make_node_from_stacks(Parser *ctx) {
 
     switch (top->type) {
         case NODE_INVALID:
+        case NodeType_COUNT:
         case NODE_PROGRAM:
         case NODE_STATEMENT:
         case NODE_NUMBER: 
@@ -420,8 +413,9 @@ Node *make_node_from_stacks(Parser *ctx) {
         case NODE_FUNCTION:
         case NODE_FUNCTIONDEF:
         case NODE_VARIABLE:
-        case NODE_VARIABLEDEF:
+        case NODE_VARIABLEDEF: {
             assert(false);
+        } break;
         case NODE_ADD:
         case NODE_SUB:
         case NODE_MUL:
@@ -471,10 +465,10 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
 
 
         if (inter->ctx.op_count >= 2 && inter->ctx.op_stack[inter->ctx.op_count - 1]->type != NODE_OPENPAREN) {
-            s64 p_top = get_precedence(inter->ctx.op_stack[inter->ctx.op_count - 1]->type);
-            bool left_associative_top = is_left_associative(inter->ctx.op_stack[inter->ctx.op_count - 1]->type);
+            s64 p_top = node_table_data[inter->ctx.op_stack[inter->ctx.op_count - 1]->type].precedence;
+            bool left_associative_top = node_table_data[inter->ctx.op_stack[inter->ctx.op_count - 1]->type].left_associative;
 
-            s64 p_prev = get_precedence(inter->ctx.op_stack[inter->ctx.op_count - 2]->type);
+            s64 p_prev = node_table_data[inter->ctx.op_stack[inter->ctx.op_count - 2]->type].precedence;
 
             if (p_top < p_prev || (p_top == p_prev && left_associative_top)) {
 
@@ -803,7 +797,7 @@ void graphviz_out(Interpreter *inter) {
 void bytecode_from_tree2(Interpreter *inter, Node *n) {
 
     switch (n->type) {
-        case NODE_INVALID: todo();
+        case NODE_INVALID: todo(); break;
         case NODE_PROGRAM: {
             for (u64 i = 0; i < n->node_count; ++i) {
                 bytecode_from_tree2(inter, n->nodes[i]);
@@ -815,22 +809,21 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
             bytecode_from_tree2(inter, n->nodes[0]);
             
         } break;
-        case NODE_NUMBER: todo();
-        case NODE_FUNCTION: todo();
+        case NODE_NUMBER: todo(); break;
+        case NODE_FUNCTION: todo(); break;
         case NODE_FUNCTIONDEF: {
-            
-            
-
+           todo(); 
         } break;
-        case NODE_VARIABLE: todo();
-        case NODE_VARIABLEDEF: todo();
-        case NODE_ADD: todo();
-        case NODE_SUB: todo();
-        case NODE_MUL: todo();
-        case NODE_DIV: todo();
-        case NODE_UNARYADD: todo();
-        case NODE_UNARYSUB: todo();
-        case NODE_OPENPAREN: todo();
+        case NODE_VARIABLE: todo(); break;
+        case NODE_VARIABLEDEF: todo(); break;
+        case NODE_ADD: todo(); break;
+        case NODE_SUB: todo(); break;
+        case NODE_MUL: todo(); break;
+        case NODE_DIV: todo(); break;
+        case NODE_UNARYADD: todo(); break;
+        case NODE_UNARYSUB: todo(); break;
+        case NODE_OPENPAREN: todo(); break;
+        case NodeType_COUNT: todo(); break;
     }
 }
 
@@ -1333,14 +1326,14 @@ int main(void) {
                             string_builder_append(&sb, ';');
                         }
                     }
-                    String src = string_builder_to_string(&sb);
+                    String src_ = string_builder_to_string(&sb);
 
                     for (u64 j = 0; j < ARRAY_SIZE(display_text_buf); ++j) {
                         display_text_count[j] = 0;
                     }
 
                     memset(inter, 0, sizeof(*inter));
-                    tokenize(inter, src);
+                    tokenize(inter, src_);
                     parse(inter);
                     graphviz_out(inter);
                     bytecode_from_tree(inter);

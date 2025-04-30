@@ -1,8 +1,7 @@
-struct Arena {
-    u64 pos;
-    u64 max_capacity;
-    u8 *data;
-};
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include "arena.h"
 
 
 void arena_init(Arena *arena, u64 max_capacity) {
