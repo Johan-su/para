@@ -10,27 +10,27 @@
 #include "string.h"
 
 template <typename T>
-struct Stack { 
+struct DynArray { 
     u64 count; 
     u64 cap; 
     T *dat; 
 }; 
 template <typename T>
-void stack_init(Stack<T> *stack, u64 cap) { 
-    stack->count = 0; 
-    stack->cap = cap; 
-    stack->dat = (T *)calloc(stack->cap, sizeof(T)); 
+void dynarray_init(DynArray<T> *dynarray, u64 cap) { 
+    dynarray->count = 0; 
+    dynarray->cap = cap; 
+    dynarray->dat = (T *)calloc(dynarray->cap, sizeof(T)); 
 } 
 template <typename T>
-void stack_push(Stack<T> *stack, T v) { 
-    if (stack->cap == 0) stack_init(stack, 1 << 14); 
-    assert(stack->count < stack->cap); 
-    stack->dat[stack->count++] = v; 
+void dynarray_append(DynArray<T> *dynarray, T v) { 
+    if (dynarray->cap == 0) dynarray_init(dynarray, 1 << 14); 
+    assert(dynarray->count < dynarray->cap); 
+    dynarray->dat[dynarray->count++] = v; 
 } 
 template <typename T>
-T stack_pop(Stack<T> *stack) { 
-    assert(stack->count > 0); 
-    return stack->dat[--stack->count]; 
+T dynarray_pop(DynArray<T> *dynarray) { 
+    assert(dynarray->count > 0); 
+    return dynarray->dat[--dynarray->count]; 
 } 
 
 
@@ -80,7 +80,7 @@ struct Item {
 };
 
 struct Scope {
-    Stack<Item> items;
+    DynArray<Item> items;
 };
 
 struct Node {
@@ -108,11 +108,7 @@ struct Parser {
 
 struct Bytecode {
     BytecodeType type;
-};
-
-struct Bytecode_Generator {
-    Bytecode code[1 << 14];
-    u64 code_count;
+    u64 imm;
 };
 
 struct Error {
@@ -128,16 +124,15 @@ struct Interpreter {
     String src;
     Lexer lex;
     Parser ctx;
-    Bytecode_Generator gen;
-
-
-    Stack<Scope> scopes;
+    DynArray<Bytecode> bytecode;
 
 
 
 
-    Stack<f64> val_stack;
-    Stack<Error> error_stack;
+
+
+    DynArray<u64> stack;
+    DynArray<Error> error_stack;
 };
 
 
@@ -772,19 +767,19 @@ void graphviz_out(Interpreter *inter) {
     fprintf(f, "digraph G {\n");
 
 
-    Stack<Node *> stack = {};
+    DynArray<Node *> stack = {};
 
-    stack_push(&stack, inter->ctx.root);
+    dynarray_append(&stack, inter->ctx.root);
 
     while (stack.count != 0) {
-        Node *top = stack_pop(&stack);
+        Node *top = dynarray_pop(&stack);
         Token t = inter->lex.tokens[top->token_index];
         u64 len = t.end - t.start;
         fprintf(f, "n%llu [label=\"%s: %.*s\"]\n", (u64)top, str_NodeType[top->type], (int)len, inter->src.dat + t.start);
 
         for (u64 i = 0; i < top->node_count; ++i) {
             fprintf(f, "n%llu -> n%llu\n", (u64)top, (u64)top->nodes[i]);
-            stack_push(&stack, top->nodes[i]);
+            dynarray_append(&stack, top->nodes[i]);
         }
 
     }
@@ -808,7 +803,7 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
     if (prev_scope) {
         for (u64 i = 0; i < prev_scope->items.count; ++i) {
             Item *item = prev_scope->items.dat + i;
-            stack_push(&n->scope.items, *item);
+            dynarray_append(&n->scope.items, *item);
         }
     } 
     switch (n->type) {
@@ -825,10 +820,10 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
                         item.name = string_from_token(inter, inner->token_index);
                         item.func_args = inner->node_count - 1;
                     } else if (inner->type == NODE_VARIABLEDEF) {
-                        item.type = ITEM_VARIABLE;
+                        item.type = ITEM_GLOBALVARIABLE;
                         item.name = string_from_token(inter, inner->token_index);
                     }
-                    stack_push(&n->scope.items, item);
+                    dynarray_append(&n->scope.items, item);
                 }
             }
             for (u64 i = 0; i < n->node_count; ++i) {
@@ -874,7 +869,7 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
                 Item item = {};
                 item.type = ITEM_VARIABLE;
                 item.name = string_from_token(inter, var->token_index);
-                stack_push(&n->scope.items, item);
+                dynarray_append(&n->scope.items, item);
             }
             typecheck_tree2(inter, n->nodes[n->node_count - 1], &n->scope);
         } break;
@@ -915,7 +910,7 @@ void typecheck_tree(Interpreter *inter) {
 
 void bytecode_from_tree2(Interpreter *inter, Node *n) {
     switch (n->type) {
-        case NODE_INVALID: todo(); break;
+        case NODE_INVALID: assert(false && "unreachable"); break;
         case NODE_PROGRAM: {
             for (u64 i = 0; i < n->node_count; ++i) {
                 bytecode_from_tree2(inter, n->nodes[i]);
@@ -925,25 +920,68 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
         case NODE_STATEMENT: {
             assert(n->node_count == 1);
             bytecode_from_tree2(inter, n->nodes[0]);
-            
         } break;
-        case NODE_NUMBER: todo(); break;
-        case NODE_FUNCTION: todo(); break;
+        case NODE_NUMBER: {
+            String num = string_from_token(inter, n->token_index);
+            char buf[32] = {};
+            snprintf(buf, sizeof(buf), "%.*s", (s32)num.count, num.dat);
+            s64 v = atoll(buf);
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_PUSH, *(u64 *)&v});
+        } break;
+        case NODE_FUNCTION: {
+            for (u64 i = 0; i < n->node_count; ++i) {
+                bytecode_from_tree2(inter, n->nodes[i]);
+            }
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_CALL, 0});
+        } break;
         case NODE_FUNCTIONDEF: {
-           todo();
+            bytecode_from_tree2(inter, n->nodes[n->node_count - 1]);
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_RETURN, 0});
         } break;
-        case NODE_VARIABLE: todo(); break;
+        case NODE_VARIABLE: {
+            String var_name = string_from_token(inter, n->token_index);
+            Item *item = find_item_in_scope(var_name, &n->scope);
+            assert(item);
+
+            if (item->type == ITEM_GLOBALVARIABLE) {
+                todo();
+            } else if (item->type == ITEM_VARIABLE) {
+                dynarray_append(&inter->bytecode, Bytecode {BYTECODE_PUSH_ARG, });
+            } else {
+                assert(false && "unreachable");
+            }
+
+        } break;
         case NODE_VARIABLEDEF: todo(); break;
-        case NODE_ADD: todo(); break;
-        case NODE_SUB: {
-            todo();
+        case NODE_ADD: {
+            bytecode_from_tree2(inter, n->nodes[1]);
+            bytecode_from_tree2(inter, n->nodes[0]);
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_ADD, 0});
         } break;
-        case NODE_MUL: todo(); break;
-        case NODE_DIV: todo(); break;
-        case NODE_UNARYADD: todo(); break;
-        case NODE_UNARYSUB: todo(); break;
-        case NODE_OPENPAREN: todo(); break;
-        case NodeType_COUNT: todo(); break;
+        case NODE_SUB: {
+            bytecode_from_tree2(inter, n->nodes[1]);
+            bytecode_from_tree2(inter, n->nodes[0]);
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_SUB, 0});
+        } break;
+        case NODE_MUL: {
+            bytecode_from_tree2(inter, n->nodes[1]);
+            bytecode_from_tree2(inter, n->nodes[0]);
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_MUL, 0});
+        } break;
+        case NODE_DIV: {
+            bytecode_from_tree2(inter, n->nodes[1]);
+            bytecode_from_tree2(inter, n->nodes[0]);
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_DIV, 0});
+        } break;
+        case NODE_UNARYADD: {
+            // do nothing
+        } break;
+        case NODE_UNARYSUB: {
+            bytecode_from_tree2(inter, n->nodes[0]);
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_NEG, 0});
+        } break;
+        case NODE_OPENPAREN: assert(false && "unreachable"); break;
+        case NodeType_COUNT: assert(false && "unreachable"); break;
     }
 }
 
@@ -1486,7 +1524,7 @@ int main(void) {
                             if (is_definition) {
                                 todo();
                             } else {
-                                String s = string_printf(scratch, "%lg", stack_pop(&inter->val_stack));
+                                String s = string_printf(scratch, "%lg", dynarray_pop(&inter->val_stack));
                                 memcpy(display_text_buf[j], s.dat, s.count + 1);
                                 display_text_count[j] = s.count;
                             }

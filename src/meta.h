@@ -18,6 +18,15 @@ X(TOKEN_CLOSEPAREN) \
 
 #define BytecodeTypeTable(X) \
 X(BYTECODE_INVALID) \
+X(BYTECODE_CALL) \
+X(BYTECODE_RETURN) \
+X(BYTECODE_PUSH_ARG) \
+X(BYTECODE_PUSH) \
+X(BYTECODE_NEG) \
+X(BYTECODE_ADD) \
+X(BYTECODE_SUB) \
+X(BYTECODE_MUL) \
+X(BYTECODE_DIV) \
 
 
 // type, precedence, is_left_associative, is_expr,
@@ -42,6 +51,7 @@ X(NODE_OPENPAREN  , 0  , true, false) \
 #define ItemTypeTable(X) \
 X(ITEM_INVALID) \
 X(ITEM_VARIABLE) \
+X(ITEM_GLOBALVARIABLE) \
 X(ITEM_FUNCTION) \
 
 
