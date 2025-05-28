@@ -20,23 +20,23 @@ X(TOKEN_CLOSEPAREN) \
 X(BYTECODE_INVALID) \
 
 
-// type, precedence, is_left_associative,
+// type, precedence, is_left_associative, is_expr,
 #define NodeDataTable(X) \
-X(NODE_INVALID    , -1 , false) \
-X(NODE_PROGRAM    , -1 , false) \
-X(NODE_STATEMENT  , -1 , false) \
-X(NODE_NUMBER     , -1 , false) \
-X(NODE_FUNCTION   , -1 , false) \
-X(NODE_FUNCTIONDEF, -1 , false) \
-X(NODE_VARIABLE   , -1 , false) \
-X(NODE_VARIABLEDEF, -1 , false) \
-X(NODE_ADD        , 1  , true) \
-X(NODE_SUB        , 1  , true) \
-X(NODE_MUL        , 2  , true) \
-X(NODE_DIV        , 2  , true) \
-X(NODE_UNARYADD   , 100, false) \
-X(NODE_UNARYSUB   , 101, false) \
-X(NODE_OPENPAREN  , 0  , true) \
+X(NODE_INVALID    , -1 , false, false) \
+X(NODE_PROGRAM    , -1 , false, false) \
+X(NODE_STATEMENT  , -1 , false, false) \
+X(NODE_NUMBER     , -1 , false, true) \
+X(NODE_FUNCTION   , -1 , false, true) \
+X(NODE_FUNCTIONDEF, -1 , false, false) \
+X(NODE_VARIABLE   , -1 , false, true) \
+X(NODE_VARIABLEDEF, -1 , false, false) \
+X(NODE_ADD        , 1  , true, true) \
+X(NODE_SUB        , 1  , true, true) \
+X(NODE_MUL        , 2  , true, true) \
+X(NODE_DIV        , 2  , true, true) \
+X(NODE_UNARYADD   , 100, false, true) \
+X(NODE_UNARYSUB   , 101, false, true) \
+X(NODE_OPENPAREN  , 0  , true, false) \
 
 
 #define ItemTypeTable(X) \

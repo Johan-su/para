@@ -39,10 +39,11 @@ T stack_pop(Stack<T> *stack) {
 struct NodeTableData {
     s64 precedence;
     bool left_associative;
+    bool is_expr;
 };
 
 NodeTableData node_table_data[] = {
-    #define X(type, precedence, is_left_associative) {precedence, is_left_associative},
+    #define X(type, precedence, is_left_associative, is_expr) {precedence, is_left_associative, is_expr},
     NodeDataTable(X)
     #undef X
 };
@@ -72,14 +73,21 @@ struct Lexer {
     u64 iter;
 };
 
+struct Item {
+    ItemType type;
+    String name;
+    u64 func_args;
+};
+
+struct Scope {
+    Stack<Item> items;
+};
 
 struct Node {
     NodeType type;
-    union {
-        f64 num;
-    };
-
     u64 token_index;
+
+    Scope scope;
 
     u64 node_count;
     Node **nodes;
@@ -98,18 +106,6 @@ struct Parser {
 };
 
 
-struct Item {
-    ItemType type;
-    String name;
-    union {
-        f64 val;
-        u64 id;
-    };
-};
-
-
-
-
 struct Bytecode {
     BytecodeType type;
 };
@@ -126,9 +122,6 @@ struct Error {
     u64 token_id;
 };
 
-struct Scope {
-    Stack<Item> items;
-};
 
 struct Interpreter {
 
@@ -352,6 +345,15 @@ bool is_token(Interpreter *inter, TokenType t, s64 offset) {
     return inter->lex.tokens[(s64)inter->ctx.iter + offset].type == t; 
 }
 
+String string_from_token(Interpreter *inter, u64 token_index) {
+    String s = {};
+    Token *t = inter->lex.tokens + token_index;
+    s.count = t->end - t->start;
+    s.dat = inter->src.dat + t->start;
+
+    return s;
+};
+
 u64 consume(Interpreter *inter) {
     assert(inter->ctx.iter < inter->lex.token_count);
     u64 token_index = inter->ctx.iter;
@@ -379,14 +381,11 @@ Node *pop_op(Parser *ctx) {
     return ctx->op_stack[--ctx->op_count];
 }
 
-Node *make_number(Interpreter *inter, u64 token_index) {
+Node *make_number(u64 token_index) {
     Node *n = (Node *)calloc(1, sizeof(*n));
-
-    Token t = inter->lex.tokens[token_index];
 
     n->type = NODE_NUMBER;
     n->token_index = token_index;
-    n->num = atof((const char *)inter->src.dat + t.start);
     return n;
 }
 
@@ -549,7 +548,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
             }
         } else if (is_token(inter, TOKEN_NUMBER, 0)) {
             u64 token_index = consume(inter);
-            Node *n = make_number(inter, token_index);
+            Node *n = make_number(token_index);
             
             push_node(&inter->ctx, n);
         } else if (is_token(inter, TOKEN_PLUS, 0)) {
@@ -650,7 +649,6 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
     }
     make_all_nodes_from_operator_ctx(&inter->ctx);
 }
-
 
 void parse_function_definition(Interpreter *inter) {
 
@@ -771,7 +769,7 @@ void parse(Interpreter *inter) {
 
 void graphviz_out(Interpreter *inter) {
     FILE *f = fopen("./input.dot", "wb");
-    fprintf(f, "graph G {\n");
+    fprintf(f, "digraph G {\n");
 
 
     Stack<Node *> stack = {};
@@ -785,7 +783,7 @@ void graphviz_out(Interpreter *inter) {
         fprintf(f, "n%llu [label=\"%s: %.*s\"]\n", (u64)top, str_NodeType[top->type], (int)len, inter->src.dat + t.start);
 
         for (u64 i = 0; i < top->node_count; ++i) {
-            fprintf(f, "n%llu -- n%llu\n", (u64)top, (u64)top->nodes[i]);
+            fprintf(f, "n%llu -> n%llu\n", (u64)top, (u64)top->nodes[i]);
             stack_push(&stack, top->nodes[i]);
         }
 
@@ -795,12 +793,130 @@ void graphviz_out(Interpreter *inter) {
     fclose(f);
 }
 
-void bytecode_from_tree2(Interpreter *inter, Node *n) {
 
+Item *find_item_in_scope(String name, Scope *s) {
+    for (u64 i = 0; i < s->items.count; ++i) {
+        Item *active = s->items.dat + i;
+        if (string_equal(name, active->name)) {
+            return active;
+        }
+    }
+    return nullptr;
+}
+
+void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
+    if (prev_scope) {
+        for (u64 i = 0; i < prev_scope->items.count; ++i) {
+            Item *item = prev_scope->items.dat + i;
+            stack_push(&n->scope.items, *item);
+        }
+    } 
     switch (n->type) {
         case NODE_INVALID: todo(); break;
         case NODE_PROGRAM: {
-            stack_push(&inter->scopes, Scope {});
+            for (u64 i = 0; i < n->node_count; ++i) {
+                Node *node = n->nodes[i];
+                if (node->type == NODE_STATEMENT) {
+                    assert(node->node_count == 1);
+                    Node *inner = node->nodes[0];
+                    Item item = {};
+                    if (inner->type == NODE_FUNCTIONDEF) {
+                        item.type = ITEM_FUNCTION;
+                        item.name = string_from_token(inter, inner->token_index);
+                        item.func_args = inner->node_count - 1;
+                    } else if (inner->type == NODE_VARIABLEDEF) {
+                        item.type = ITEM_VARIABLE;
+                        item.name = string_from_token(inter, inner->token_index);
+                    }
+                    stack_push(&n->scope.items, item);
+                }
+            }
+            for (u64 i = 0; i < n->node_count; ++i) {
+                typecheck_tree2(inter, n->nodes[i], &n->scope);
+            }
+        } break;
+        case NODE_STATEMENT: {
+            assert(n->node_count == 1);
+            typecheck_tree2(inter, n->nodes[0], &n->scope);
+        } break;
+        case NODE_NUMBER: {
+            // do nothing
+        } break;
+        case NODE_FUNCTION: {
+            String name = string_from_token(inter, n->token_index);
+
+            Item *item = find_item_in_scope(name, &n->scope);
+            if (!item) {
+                // not found
+                todo();
+            }
+            if (string_equal(name, item->name)) {
+                if (item->type != ITEM_FUNCTION) {
+                    // wrong type
+                    todo();
+                }
+                if (n->node_count > item->func_args) {
+                    // too many args
+                    todo();
+                }
+                if (n->node_count < item->func_args) {
+                    // too few args
+                    todo();
+                }
+            }
+            for (u64 i = 0; i < n->node_count; ++i) {
+                typecheck_tree2(inter, n->nodes[i], &n->scope);
+            }
+        } break;
+        case NODE_FUNCTIONDEF: {
+            for (u64 i = 0; i < n->node_count - 1; ++i) {
+                Node *var = n->nodes[i];
+                Item item = {};
+                item.type = ITEM_VARIABLE;
+                item.name = string_from_token(inter, var->token_index);
+                stack_push(&n->scope.items, item);
+            }
+            typecheck_tree2(inter, n->nodes[n->node_count - 1], &n->scope);
+        } break;
+        case NODE_VARIABLE: {
+            String name = string_from_token(inter, n->token_index);
+            Item *item = find_item_in_scope(name, &n->scope);
+            if (!item) {
+                // not found
+                todo();
+            }
+            if (string_equal(name, item->name)) {
+                if (item->type != ITEM_VARIABLE) {
+                    // wrong type
+                    todo();
+                }
+            }
+        } break;
+        case NODE_VARIABLEDEF: todo(); break;
+        case NODE_ADD:
+        case NODE_SUB:
+        case NODE_MUL:
+        case NODE_DIV: {
+            assert(n->node_count == 2);
+            typecheck_tree2(inter, n->nodes[0], &n->scope);
+            typecheck_tree2(inter, n->nodes[1], &n->scope);
+        } break;
+        case NODE_UNARYADD: todo(); break;
+        case NODE_UNARYSUB: todo(); break;
+        case NODE_OPENPAREN: todo(); break;
+        case NodeType_COUNT: todo(); break;
+    }
+}
+
+
+void typecheck_tree(Interpreter *inter) {
+    typecheck_tree2(inter, inter->ctx.root, nullptr);
+}
+
+void bytecode_from_tree2(Interpreter *inter, Node *n) {
+    switch (n->type) {
+        case NODE_INVALID: todo(); break;
+        case NODE_PROGRAM: {
             for (u64 i = 0; i < n->node_count; ++i) {
                 bytecode_from_tree2(inter, n->nodes[i]);
             }
@@ -951,11 +1067,12 @@ int main(void) {
     // Interpreter *e = (Interpreter *)arena_alloc(scratch, sizeof(*e));
     Interpreter *inter = (Interpreter *)calloc(1, sizeof(*inter));
 
-    String src = str_from_cstr("f(x):=x*x;f(15);");
+    String src = str_from_cstr("f(x, y):=x*y;f(1,2);");
 
     memset(inter, 0, sizeof(*inter));
     tokenize(inter, src);
     parse(inter);
+    typecheck_tree(inter);
     graphviz_out(inter);
     bytecode_from_tree(inter);
     execute(inter, str_from_cstr("e2"));
