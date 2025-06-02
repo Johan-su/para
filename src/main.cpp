@@ -118,10 +118,16 @@ struct Bytecode {
 };
 
 struct Error {
+    bool has_statement;
     u64 statement_id;
 
+    bool has_char;
     u64 char_id;
+
+    bool has_token;
     u64 token_id;
+
+    String err_string;
 };
 
 
@@ -142,7 +148,7 @@ struct Interpreter {
     u64 base_stackframe_index;
 
     DynArray<StackData> stack;
-    DynArray<Error> error_stack;
+    DynArray<Error> errors;
 };
 
 
@@ -609,66 +615,82 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
     make_all_nodes_from_operator_ctx(&inter->ctx);
 }
 
-void parse_function_definition(Interpreter *inter) {
+void parse_definition(Interpreter *inter) {
 
     if (!is_token(inter, TOKEN_IDENTIFIER, 0)) {
         todo();
     }
-    u64 func_id = consume(inter);
+    u64 id = consume(inter);
 
-    Node *func = (Node * )calloc(1, sizeof(*func));
-    func->type = NODE_FUNCTIONDEF;
-    func->token_index = func_id;
-
-
-    if (!is_token(inter, TOKEN_OPENPAREN, 0)) {
-        todo();
-    }
-    consume(inter);
+    Node *def = (Node *)calloc(1, sizeof(*def));
+    def->token_index = id;
 
 
-    u64 stack_start = inter->ctx.stack_count;
+    if (is_token(inter, TOKEN_OPENPAREN, 0)) {
+        consume(inter);
+        def->type = NODE_FUNCTIONDEF;
+        u64 stack_start = inter->ctx.stack_count;
 
-    while (is_token(inter, TOKEN_IDENTIFIER, 0)) {
-        u64 id = consume(inter);
+        while (is_token(inter, TOKEN_IDENTIFIER, 0)) {
+            u64 arg_id = consume(inter);
 
-        Node *iden = (Node *)calloc(1, sizeof(*iden));
-        iden->type = NODE_VARIABLE;
-        iden->token_index = id;
-        push_node(&inter->ctx, iden);
+            Node *iden = (Node *)calloc(1, sizeof(*iden));
+            iden->type = NODE_VARIABLE;
+            iden->token_index = arg_id;
+            push_node(&inter->ctx, iden);
 
-        if (is_token(inter, TOKEN_COMMA, 0)) {
-            consume(inter);
-        } else if (is_token(inter, TOKEN_CLOSEPAREN, 0)) {
-            break;
-        } else {
+            if (is_token(inter, TOKEN_COMMA, 0)) {
+                consume(inter);
+            } else if (is_token(inter, TOKEN_CLOSEPAREN, 0)) {
+                break;
+            } else {
+                todo();
+            }
+        }
+        consume(inter);
+
+
+        if (!is_token(inter, TOKEN_COLON, 0)) {
             todo();
         }
+        consume(inter);
+        if (!is_token(inter, TOKEN_EQUAL, 0)) {
+            todo();
+        }
+        consume(inter);
+
+        parse_expr(inter, TOKEN_SEMICOLON);
+
+        u64 nodes_to_pop_count = inter->ctx.stack_count - stack_start;
+
+        def->node_count = nodes_to_pop_count;
+        def->nodes = (Node **)calloc(def->node_count, sizeof(*def->nodes));
+
+        for (u64 i = def->node_count; i-- > 0;) {
+            def->nodes[i] = pop_node(&inter->ctx);
+        }
+    } else {
+        def->type = NODE_VARIABLEDEF;
+        if (!is_token(inter, TOKEN_COLON, 0)) {
+            todo();
+        }
+        consume(inter);
+        if (!is_token(inter, TOKEN_EQUAL, 0)) {
+            todo();
+        }
+        consume(inter);
+        parse_expr(inter, TOKEN_SEMICOLON);
+
+        def->node_count = 1;
+        def->nodes = (Node **)calloc(1, sizeof(*def->nodes));
+
+        def->nodes[0] = pop_node(&inter->ctx);
+
     }
-    consume(inter);
 
-
-    if (!is_token(inter, TOKEN_COLON, 0)) {
-        todo();
-    }
-    consume(inter);
-    if (!is_token(inter, TOKEN_EQUAL, 0)) {
-        todo();
-    }
-    consume(inter);
-
-    parse_expr(inter, TOKEN_SEMICOLON);
-
-    u64 nodes_to_pop_count = inter->ctx.stack_count - stack_start;
-
-    func->node_count = nodes_to_pop_count;
-    func->nodes = (Node **)calloc(func->node_count, sizeof(*func->nodes));
-
-    for (u64 i = func->node_count; i-- > 0;) {
-        func->nodes[i] = pop_node(&inter->ctx);
-    }
-    push_node(&inter->ctx, func);
+    push_node(&inter->ctx, def);
 }
+
 
 void parse_statement(Interpreter *inter) {
 
@@ -691,7 +713,7 @@ void parse_statement(Interpreter *inter) {
     }
 
     if (is_definition) {
-        parse_function_definition(inter);
+        parse_definition(inter);
     } else {
         parse_expr(inter, TOKEN_SEMICOLON);
     }
@@ -842,10 +864,12 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
             String name = string_from_token(inter, n->token_index);
             Item *item = find_item_in_scope(name, &n->scope);
             if (!item) {
-                // not found
                 Error err = {};
+                err.err_string = str_lit("Undeclared variable");
                 err.token_id = n->token_index;
-                dynarray_append(&inter->error_stack, err);
+                err.has_token = true;
+                dynarray_append(&inter->errors, err);
+                return;
             }
             if (string_equal(name, item->name)) {
                 if (item->type != ITEM_VARIABLE) {
@@ -854,7 +878,9 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
                 }
             }
         } break;
-        case NODE_VARIABLEDEF: todo(); break;
+        case NODE_VARIABLEDEF: {
+            typecheck_tree2(inter, n->nodes[0], &n->scope);
+        } break;
         case NODE_ADD:
         case NODE_SUB:
         case NODE_MUL:
@@ -871,6 +897,7 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
 }
 
 void typecheck_tree(Interpreter *inter) {
+    if (inter->errors.count > 0) return;
     typecheck_tree2(inter, inter->ctx.root, nullptr);
 }
 
@@ -987,6 +1014,7 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
 }
 
 void bytecode_from_tree(Interpreter *inter) {
+    if (inter->errors.count > 0) return;
     bytecode_from_tree2(inter, inter->ctx.root);
 }
 
@@ -999,6 +1027,7 @@ void print_bytecode(DynArray<Bytecode> *dynarray) {
 
 
 bool execute(Interpreter *inter, String func, f64 *args, u64 func_args_count) {    
+    if (inter->errors.count > 0) return false;
     u64 func_id = 0;
     if (!get_func_id_from_name(inter, func, &func_id)) {
         return false;
@@ -1234,9 +1263,17 @@ void clear_interpreter(Interpreter *inter) {
     inter->return_address = 0;
     inter->base_stackframe_index = 0;
     inter->stack.count = 0;
-    inter->error_stack.count = 0;
+    inter->errors.count = 0;
 }
 
+
+void compile(Interpreter *inter, String src) {
+    tokenize(inter, src);
+    parse(inter);
+    graphviz_out(inter);
+    typecheck_tree(inter);
+    bytecode_from_tree(inter);
+}
 
 int main(void) {
 
@@ -1248,21 +1285,30 @@ int main(void) {
     // Interpreter *e = (Interpreter *)arena_alloc(scratch, sizeof(*e));
     Interpreter *inter = (Interpreter *)calloc(1, sizeof(*inter));
 
-    String src = str_lit("f(x, y):=x*y;f(1,2);");
+    // String src = str_lit("f(x, y):=x*y;f(1,2);");
+    String src = str_lit("a:=5;a;");
 
     memset(inter, 0, sizeof(*inter));
     arena_init(&inter->func_arena, 100000);
+    compile(inter, src);
+    for (u64 i = 0; i < inter->errors.count; ++i) {
+        Error *err = inter->errors.dat + i;
+        String s = err->err_string;
+        printf("ERROR: %.*s ", (s32)s.count, s.dat);
+        
+        if (err->has_token) {
+            String tok = string_from_token(inter, err->token_id);
+            printf("`%.*s`", (s32)tok.count, tok.dat);
+        }
 
-    tokenize(inter, src);
-    parse(inter);
-    typecheck_tree(inter);
-    graphviz_out(inter);
-    bytecode_from_tree(inter);
+
+        printf("\n");
+    }
     print_bytecode(&inter->bytecode);
     bool r = execute(inter, str_lit("_s1"), nullptr, 0);
-    printf("r = %d\n", r);
+    printf("r = %s\n", r ? "true" : "false");
 
-
+    return 0;
     int screen_w = 1366;
     int screen_h = 768;
 
@@ -1651,8 +1697,8 @@ int main(void) {
                         if (text_count[j] == 0) continue;
 
                         bool skip = false;
-                        while (inter->error_stack.count > 0) {
-                            Error *e = inter->error_stack.dat + inter->error_stack.count - 1;
+                        while (inter->errors.count > 0) {
+                            Error *e = inter->errors.dat + inter->errors.count - 1;
                             todo();
                         }
                         if (!skip) {
