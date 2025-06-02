@@ -77,6 +77,7 @@ struct Item {
     ItemType type;
     String name;
     u64 func_args;
+    u64 id;
 };
 
 struct Scope {
@@ -105,10 +106,15 @@ struct Parser {
     Node *root;
 };
 
+union StackData {
+    u64 u;
+    f64 f;
+};
+
 
 struct Bytecode {
     BytecodeType type;
-    u64 imm;
+    StackData imm;
 };
 
 struct Error {
@@ -123,15 +129,19 @@ struct Interpreter {
 
     String src;
     Lexer lex;
-    Parser ctx;
+    Parser ctx;   
     DynArray<Bytecode> bytecode;
 
+    DynArray<u64> func_ids;
+    DynArray<String> funcs;
 
+    Arena func_arena;
 
+    u64 program_counter;
+    u64 return_address;
+    u64 base_stackframe_index;
 
-
-
-    DynArray<u64> stack;
+    DynArray<StackData> stack;
     DynArray<Error> error_stack;
 };
 
@@ -160,39 +170,6 @@ add graph viewer similar to desmos
 
 */
 
-// String
-
-#include <stdarg.h>
-#if GCC || CLANG
-__attribute__((__format__ (__printf__, 2, 3)))
-#endif
-String string_printf(Arena *arena, const char *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    int len_ = vsnprintf(nullptr, 0, fmt, args);   
-    assert(len_ >= 0);
-
-    String s = {};
-    s.count = (u64) len_;
-    
-    s.dat = (u8 *)arena_alloc(arena, s.count + 1);
-    vsnprintf((char *)s.dat, s.count + 1, fmt, args);   
-    va_end(args);
-
-    return s;
-}
-
-bool string_equal(String a, String b) {
-    if (a.count != b.count) return false;
-
-    for (u64 i = 0; i < a.count; ++i) {
-        if (a.dat[i] != b.dat[i]) return false;
-    }
-
-    return true;
-}
-
-
 void string_builder_init(String_Builder *sb, u64 cap) {
     sb->count = 0;
     sb->max_capacity = cap;
@@ -214,19 +191,6 @@ void string_builder_concat(String_Builder *sb, String s) {
 String string_builder_to_string(String_Builder *sb) {
     return String {sb->data, sb->count};
 }
-
-
-String str_from_cstr(const char *cstr) {
-
-    u64 len = strlen(cstr); 
-
-    u8 *dat = (u8 *)malloc(len);
-
-    memcpy(dat, cstr, len);
-
-    return String {dat, len};
-}
-
 
 void insert_token(Lexer *lex, Token t) {
     lex->tokens[lex->token_count++] = t;
@@ -775,7 +739,7 @@ void graphviz_out(Interpreter *inter) {
         Node *top = dynarray_pop(&stack);
         Token t = inter->lex.tokens[top->token_index];
         u64 len = t.end - t.start;
-        fprintf(f, "n%llu [label=\"%s: %.*s\"]\n", (u64)top, str_NodeType[top->type], (int)len, inter->src.dat + t.start);
+        fprintf(f, "n%llu [label=\"%s: %.*s\"]\n", (u64)top, str_NodeType[top->type].dat, (int)len, inter->src.dat + t.start);
 
         for (u64 i = 0; i < top->node_count; ++i) {
             fprintf(f, "n%llu -> n%llu\n", (u64)top, (u64)top->nodes[i]);
@@ -869,6 +833,7 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
                 Item item = {};
                 item.type = ITEM_VARIABLE;
                 item.name = string_from_token(inter, var->token_index);
+                item.id = i;
                 dynarray_append(&n->scope.items, item);
             }
             typecheck_tree2(inter, n->nodes[n->node_count - 1], &n->scope);
@@ -878,7 +843,9 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
             Item *item = find_item_in_scope(name, &n->scope);
             if (!item) {
                 // not found
-                todo();
+                Error err = {};
+                err.token_id = n->token_index;
+                dynarray_append(&inter->error_stack, err);
             }
             if (string_equal(name, item->name)) {
                 if (item->type != ITEM_VARIABLE) {
@@ -903,9 +870,18 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
     }
 }
 
-
 void typecheck_tree(Interpreter *inter) {
     typecheck_tree2(inter, inter->ctx.root, nullptr);
+}
+
+bool get_func_id_from_name(Interpreter *inter, String func, u64 *func_id_out) {
+    for (u64 i = 0; i < inter->funcs.count; ++i) {
+        if (string_equal(inter->funcs.dat[i], func)) {
+            *func_id_out = inter->func_ids.dat[i];
+            return true;
+        }
+    }
+    return false;
 }
 
 void bytecode_from_tree2(Interpreter *inter, Node *n) {
@@ -919,24 +895,47 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
         } break;
         case NODE_STATEMENT: {
             assert(n->node_count == 1);
+            bool funcdef = n->nodes[0]->type == NODE_FUNCTIONDEF; 
+            if (!funcdef) {
+                String s = string_printf(&inter->func_arena, "_s%llu", inter->funcs.count);
+                dynarray_append(&inter->funcs, s);
+                dynarray_append(&inter->func_ids, inter->bytecode.count);
+            }
             bytecode_from_tree2(inter, n->nodes[0]);
+            if (!funcdef) {
+                StackData sd = {};
+                sd.u = 0;
+                dynarray_append(&inter->bytecode, {BYTECODE_RETURN, sd});
+            }
         } break;
         case NODE_NUMBER: {
             String num = string_from_token(inter, n->token_index);
             char buf[32] = {};
             snprintf(buf, sizeof(buf), "%.*s", (s32)num.count, num.dat);
-            s64 v = atoll(buf);
-            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_PUSH, *(u64 *)&v});
+            StackData sd = {};
+            sd.f = atof(buf);
+
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_PUSH, sd});
         } break;
         case NODE_FUNCTION: {
-            for (u64 i = 0; i < n->node_count; ++i) {
+            for (u64 i = n->node_count; i-- > 0;) {
                 bytecode_from_tree2(inter, n->nodes[i]);
             }
-            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_CALL, 0});
+            String name = string_from_token(inter, n->token_index);
+            StackData func_id = {};
+            assert(get_func_id_from_name(inter, name, &func_id.u));
+
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_CALL, func_id});
         } break;
         case NODE_FUNCTIONDEF: {
+            String name = string_from_token(inter, n->token_index);
+            dynarray_append(&inter->funcs, name);
+            dynarray_append(&inter->func_ids, inter->bytecode.count);
+
             bytecode_from_tree2(inter, n->nodes[n->node_count - 1]);
-            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_RETURN, 0});
+            StackData num_args = {};
+            num_args.u = n->node_count - 1;
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_RETURN, num_args});
         } break;
         case NODE_VARIABLE: {
             String var_name = string_from_token(inter, n->token_index);
@@ -946,7 +945,9 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
             if (item->type == ITEM_GLOBALVARIABLE) {
                 todo();
             } else if (item->type == ITEM_VARIABLE) {
-                dynarray_append(&inter->bytecode, Bytecode {BYTECODE_PUSH_ARG, });
+                StackData sd = {};
+                sd.u = item->id;
+                dynarray_append(&inter->bytecode, Bytecode {BYTECODE_PUSH_ARG, sd});
             } else {
                 assert(false && "unreachable");
             }
@@ -956,29 +957,29 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
         case NODE_ADD: {
             bytecode_from_tree2(inter, n->nodes[1]);
             bytecode_from_tree2(inter, n->nodes[0]);
-            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_ADD, 0});
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_ADD, {}});
         } break;
         case NODE_SUB: {
             bytecode_from_tree2(inter, n->nodes[1]);
             bytecode_from_tree2(inter, n->nodes[0]);
-            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_SUB, 0});
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_SUB, {}});
         } break;
         case NODE_MUL: {
             bytecode_from_tree2(inter, n->nodes[1]);
             bytecode_from_tree2(inter, n->nodes[0]);
-            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_MUL, 0});
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_MUL, {}});
         } break;
         case NODE_DIV: {
             bytecode_from_tree2(inter, n->nodes[1]);
             bytecode_from_tree2(inter, n->nodes[0]);
-            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_DIV, 0});
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_DIV, {}});
         } break;
         case NODE_UNARYADD: {
             // do nothing
         } break;
         case NODE_UNARYSUB: {
             bytecode_from_tree2(inter, n->nodes[0]);
-            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_NEG, 0});
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_NEG, {}});
         } break;
         case NODE_OPENPAREN: assert(false && "unreachable"); break;
         case NodeType_COUNT: assert(false && "unreachable"); break;
@@ -989,10 +990,137 @@ void bytecode_from_tree(Interpreter *inter) {
     bytecode_from_tree2(inter, inter->ctx.root);
 }
 
+void print_bytecode(DynArray<Bytecode> *dynarray) {
+    for (u64 i = 0; i < dynarray->count; ++i) {
+        Bytecode *curr = dynarray->dat + i; 
+        printf("%.*s, %f, %llu\n", (s32)str_BytecodeType[curr->type].count, str_BytecodeType[curr->type].dat, curr->imm.f, curr->imm.u);
+    }
+}
 
 
-void execute(Interpreter *inter, String func) {
-    todo();
+bool execute(Interpreter *inter, String func, f64 *args, u64 func_args_count) {    
+    u64 func_id = 0;
+    if (!get_func_id_from_name(inter, func, &func_id)) {
+        return false;
+    }
+
+    Item *item = find_item_in_scope(func, &inter->ctx.root->scope);
+    if (item) {
+        if (item->func_args != func_args_count) return false;
+    } else {
+        if (func_args_count != 0) return false;
+    }
+
+    for (u64 j = func_args_count; j-- > 0;) {
+        StackData sd = {};
+        sd.f = args[j]; 
+        dynarray_append(&inter->stack, sd);
+    }
+
+
+    inter->program_counter = func_id;
+    inter->base_stackframe_index = inter->stack.count;
+    // arg n - 1
+    // arg 1
+    // arg 0
+    // return address
+    // base pointer
+    // stuff
+    while (true) {
+
+        Bytecode *curr = inter->bytecode.dat + inter->program_counter; 
+
+        switch (curr->type) {
+
+            case BYTECODE_INVALID: assert(false && "unreachable"); break;
+            case BYTECODE_CALL: {
+                inter->return_address = inter->program_counter + 1;
+                inter->program_counter = curr->imm.u;
+
+                StackData return_addr = {};
+                return_addr.u = inter->return_address;
+                dynarray_append(&inter->stack, return_addr);
+                
+                StackData base = {};
+                base.u = inter->base_stackframe_index;
+                inter->base_stackframe_index = inter->stack.count;
+                dynarray_append(&inter->stack, base);
+            } break;
+            case BYTECODE_RETURN: {
+                if (inter->base_stackframe_index == 0) {
+                    return true;
+                }
+                // save result then cleanup
+                StackData result = dynarray_pop(&inter->stack);
+
+                inter->stack.count = inter->base_stackframe_index + 1;
+                inter->base_stackframe_index = dynarray_pop(&inter->stack).u;
+                inter->return_address = dynarray_pop(&inter->stack).u;
+                inter->program_counter = inter->return_address;
+
+                for (u64 i = 0; i < curr->imm.u; ++i) {
+                    dynarray_pop(&inter->stack);
+                }
+                dynarray_append(&inter->stack, result);
+            } break;
+            case BYTECODE_PUSH_ARG: {
+                StackData sd = inter->stack.dat[inter->base_stackframe_index - 2 - curr->imm.u];
+                dynarray_append(&inter->stack, sd);
+                inter->program_counter += 1;
+            } break;
+            case BYTECODE_PUSH: {
+                dynarray_append(&inter->stack, curr->imm);
+                inter->program_counter += 1;
+            } break;
+            case BYTECODE_NEG: {
+                StackData sd = dynarray_pop(&inter->stack);
+                sd.f = -sd.f;
+                dynarray_append(&inter->stack, sd);
+                inter->program_counter += 1;
+            } break;
+            case BYTECODE_ADD: {
+                StackData sd1 = dynarray_pop(&inter->stack);
+                StackData sd2 = dynarray_pop(&inter->stack);
+                StackData sd3 = {};
+
+                sd3.f = sd1.f + sd2.f;
+                dynarray_append(&inter->stack, sd3);
+                inter->program_counter += 1;
+            } break;
+            case BYTECODE_SUB: {
+                StackData sd1 = dynarray_pop(&inter->stack);
+                StackData sd2 = dynarray_pop(&inter->stack);
+                StackData sd3 = {};
+
+                sd3.f = sd1.f - sd2.f;
+                dynarray_append(&inter->stack, sd3);
+                inter->program_counter += 1;
+            } break;
+            case BYTECODE_MUL: {
+                StackData sd1 = dynarray_pop(&inter->stack);
+                StackData sd2 = dynarray_pop(&inter->stack);
+                StackData sd3 = {};
+
+                sd3.f = sd1.f * sd2.f;
+                dynarray_append(&inter->stack, sd3);
+                inter->program_counter += 1;
+
+            } break;
+            case BYTECODE_DIV: {
+                StackData sd1 = dynarray_pop(&inter->stack);
+                StackData sd2 = dynarray_pop(&inter->stack);
+                StackData sd3 = {};
+
+                sd3.f = sd1.f / sd2.f;
+                dynarray_append(&inter->stack, sd3);
+                inter->program_counter += 1;
+
+            } break;
+            case BytecodeType_COUNT: assert(false && "unreachable"); break;
+        }
+    }
+
+    return false;
 }
 
 
@@ -1094,6 +1222,21 @@ u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, Pane *p, f32 m
     else return 0; 
 }
 
+void clear_interpreter(Interpreter *inter) {
+    inter->src = {};
+    inter->lex = {};
+    inter->ctx = {};
+    inter->bytecode.count = 0;
+    inter->func_ids.count = 0;
+    inter->funcs.count = 0;
+    arena_clear(&inter->func_arena);
+    inter->program_counter = 0;
+    inter->return_address = 0;
+    inter->base_stackframe_index = 0;
+    inter->stack.count = 0;
+    inter->error_stack.count = 0;
+}
+
 
 int main(void) {
 
@@ -1105,19 +1248,21 @@ int main(void) {
     // Interpreter *e = (Interpreter *)arena_alloc(scratch, sizeof(*e));
     Interpreter *inter = (Interpreter *)calloc(1, sizeof(*inter));
 
-    String src = str_from_cstr("f(x, y):=x*y;f(1,2);");
+    String src = str_lit("f(x, y):=x*y;f(1,2);");
 
     memset(inter, 0, sizeof(*inter));
+    arena_init(&inter->func_arena, 100000);
+
     tokenize(inter, src);
     parse(inter);
     typecheck_tree(inter);
     graphviz_out(inter);
     bytecode_from_tree(inter);
-    execute(inter, str_from_cstr("e2"));
+    print_bytecode(&inter->bytecode);
+    bool r = execute(inter, str_lit("_s1"), nullptr, 0);
+    printf("r = %d\n", r);
 
 
-
-    return 0;
     int screen_w = 1366;
     int screen_h = 768;
 
@@ -1491,13 +1636,13 @@ int main(void) {
                         display_text_count[j] = 0;
                     }
 
-                    memset(inter, 0, sizeof(*inter));
+                    clear_interpreter(inter);
                     tokenize(inter, src_);
                     parse(inter);
+                    typecheck_tree(inter);
                     graphviz_out(inter);
                     bytecode_from_tree(inter);
-                    todo();
-                    // execute(inter);
+                    // execute(inter, );
 
 
                     
@@ -1524,7 +1669,7 @@ int main(void) {
                             if (is_definition) {
                                 todo();
                             } else {
-                                String s = string_printf(scratch, "%lg", dynarray_pop(&inter->val_stack));
+                                String s = string_printf(scratch, "%lg", dynarray_pop(&inter->stack));
                                 memcpy(display_text_buf[j], s.dat, s.count + 1);
                                 display_text_count[j] = s.count;
                             }

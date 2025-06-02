@@ -1,5 +1,6 @@
 #pragma once
 #include "common.h"
+#include "string.h"
 
 #define TokenTypeTable(X) \
 X(TOKEN_INVALID) \
@@ -63,13 +64,13 @@ enum name { \
     table(GenEnumX) \
     name##_COUNT \
 }; \
-extern const char *str_##name[];
+extern String str_##name[];
 
 
 
-#define GenEnumSrcX(X, ...) #X,
+#define GenEnumSrcX(X, ...) String {(u8 *)#X, (sizeof(#X) - 1)},
 #define GenEnumSrc(name, table) \
-const char *str_##name[] { \
+String str_##name[] { \
     table(GenEnumSrcX) \
 }; \
 

@@ -18,7 +18,7 @@ SET /P GIT_HASH= < build\version.txt
 
 
 echo Building src...
-clang++ -MJ build/build.json src/build.cpp -o build/para.exe -DGIT_HASH=0x%GIT_HASH% %FLAGS% %INCLUDES% %WARNINGS% %WINLIBS% %LIBS%
+clang++ -MJ build/build.json src/build.cpp -o build/para.exe -DGIT_HASH=0x%GIT_HASH% %FLAGS% %INCLUDES% %WARNINGS% %LIBS% %WINLIBS% 
 
 echo [ > compile_commands.json
 type build\build.json >> compile_commands.json
