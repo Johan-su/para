@@ -138,8 +138,8 @@ struct Interpreter {
     Parser ctx;   
     DynArray<Bytecode> bytecode;
 
-    DynArray<u64> func_ids;
-    DynArray<String> funcs;
+    DynArray<u64> symbol_ids;
+    DynArray<String> symbols;
 
     Arena func_arena;
 
@@ -872,7 +872,7 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
                 return;
             }
             if (string_equal(name, item->name)) {
-                if (item->type != ITEM_VARIABLE) {
+                if (item->type != ITEM_VARIABLE && item->type != ITEM_GLOBALVARIABLE) {
                     // wrong type
                     todo();
                 }
@@ -902,9 +902,9 @@ void typecheck_tree(Interpreter *inter) {
 }
 
 bool get_func_id_from_name(Interpreter *inter, String func, u64 *func_id_out) {
-    for (u64 i = 0; i < inter->funcs.count; ++i) {
-        if (string_equal(inter->funcs.dat[i], func)) {
-            *func_id_out = inter->func_ids.dat[i];
+    for (u64 i = 0; i < inter->symbols.count; ++i) {
+        if (string_equal(inter->symbols.dat[i], func)) {
+            *func_id_out = inter->symbol_ids.dat[i];
             return true;
         }
     }
@@ -922,14 +922,14 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
         } break;
         case NODE_STATEMENT: {
             assert(n->node_count == 1);
-            bool funcdef = n->nodes[0]->type == NODE_FUNCTIONDEF; 
-            if (!funcdef) {
-                String s = string_printf(&inter->func_arena, "_s%llu", inter->funcs.count);
-                dynarray_append(&inter->funcs, s);
-                dynarray_append(&inter->func_ids, inter->bytecode.count);
+            bool def = n->nodes[0]->type == NODE_FUNCTIONDEF || n->nodes[0]->type == NODE_VARIABLEDEF; 
+            if (!def) {
+                String s = string_printf(&inter->func_arena, "_s%llu", inter->symbols.count);
+                dynarray_append(&inter->symbols, s);
+                dynarray_append(&inter->symbol_ids, inter->bytecode.count);
             }
             bytecode_from_tree2(inter, n->nodes[0]);
-            if (!funcdef) {
+            if (!def) {
                 StackData sd = {};
                 sd.u = 0;
                 dynarray_append(&inter->bytecode, {BYTECODE_RETURN, sd});
@@ -956,8 +956,8 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
         } break;
         case NODE_FUNCTIONDEF: {
             String name = string_from_token(inter, n->token_index);
-            dynarray_append(&inter->funcs, name);
-            dynarray_append(&inter->func_ids, inter->bytecode.count);
+            dynarray_append(&inter->symbols, name);
+            dynarray_append(&inter->symbol_ids, inter->bytecode.count);
 
             bytecode_from_tree2(inter, n->nodes[n->node_count - 1]);
             StackData num_args = {};
@@ -970,7 +970,11 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
             assert(item);
 
             if (item->type == ITEM_GLOBALVARIABLE) {
-                todo();
+                String name = string_from_token(inter, n->token_index);
+                StackData func_id = {};
+                assert(get_func_id_from_name(inter, name, &func_id.u));
+                dynarray_append(&inter->bytecode, Bytecode {BYTECODE_CALL, func_id});
+
             } else if (item->type == ITEM_VARIABLE) {
                 StackData sd = {};
                 sd.u = item->id;
@@ -980,7 +984,15 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
             }
 
         } break;
-        case NODE_VARIABLEDEF: todo(); break;
+        case NODE_VARIABLEDEF: {
+            String name = string_from_token(inter, n->token_index);
+            dynarray_append(&inter->symbols, name);
+            dynarray_append(&inter->symbol_ids, inter->bytecode.count);
+
+            assert(n->node_count == 1);
+            bytecode_from_tree2(inter, n->nodes[0]);
+            dynarray_append(&inter->bytecode, Bytecode {BYTECODE_RETURN, {}});
+        } break;
         case NODE_ADD: {
             bytecode_from_tree2(inter, n->nodes[1]);
             bytecode_from_tree2(inter, n->nodes[0]);
@@ -1256,8 +1268,8 @@ void clear_interpreter(Interpreter *inter) {
     inter->lex = {};
     inter->ctx = {};
     inter->bytecode.count = 0;
-    inter->func_ids.count = 0;
-    inter->funcs.count = 0;
+    inter->symbol_ids.count = 0;
+    inter->symbols.count = 0;
     arena_clear(&inter->func_arena);
     inter->program_counter = 0;
     inter->return_address = 0;
@@ -1286,7 +1298,7 @@ int main(void) {
     Interpreter *inter = (Interpreter *)calloc(1, sizeof(*inter));
 
     // String src = str_lit("f(x, y):=x*y;f(1,2);");
-    String src = str_lit("a:=5;a;");
+    String src = str_lit("a:=5;a + 5;");
 
     memset(inter, 0, sizeof(*inter));
     arena_init(&inter->func_arena, 100000);
@@ -1307,6 +1319,9 @@ int main(void) {
     print_bytecode(&inter->bytecode);
     bool r = execute(inter, str_lit("_s1"), nullptr, 0);
     printf("r = %s\n", r ? "true" : "false");
+    if (r) {
+        printf("Result = %g\n", inter->stack.dat[inter->stack.count - 1].f);
+    }
 
     return 0;
     int screen_w = 1366;
