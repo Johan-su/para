@@ -770,7 +770,7 @@ void parse_statement(Interpreter *inter) {
 
     bool is_definition = false;
 
-    for (u64 i = inter->ctx.iter; i < inter->lex.token_count; ++i) {
+    for (u64 i = 0; i < inter->lex.token_count - inter->ctx.iter; ++i) {
         s64 j = (s64)i;
         if (is_token(inter, TOKEN_SEMICOLON, j)) break;
 
@@ -787,6 +787,8 @@ void parse_statement(Interpreter *inter) {
     }
 
     if (inter->errors.count > 0) {
+        inter->errors.dat[inter->errors.count - 1].statement_id = stmt->token_index;
+        inter->errors.dat[inter->errors.count - 1].has_statement = true;
         return;
     }
 
@@ -931,7 +933,13 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
                 item.type = ITEM_VARIABLE;
                 item.name = string_from_token(inter, var->token_index);
                 item.id = i;
-                dynarray_append(&n->scope.items, item);
+                // shadow declaration if it already exists
+                Item *old = find_item_in_scope(item.name, &n->scope);
+                if (old) {
+                    *old = item;
+                } else {
+                    dynarray_append(&n->scope.items, item);
+                }
             }
             typecheck_tree2(inter, n->nodes[n->node_count - 1], &n->scope);
         } break;
@@ -1273,6 +1281,16 @@ struct UI_State {
     u64 selection_anchor;
     u64 selection_start;
     u64 selection_end;
+
+
+
+    u64 pane_count;
+
+
+
+    f32 mx;
+    f32 my;
+
 };
 
 
@@ -1363,6 +1381,37 @@ void compile(Interpreter *inter, String src) {
     if (inter->errors.count == 0) bytecode_from_tree(inter);
 }
 
+
+#define has_flags(data, flags) (((data) & (flags)) == (flags))
+
+void update_pane(UI_State *ui, u64 flags, u64 pane_id, f32 *h_offset, Pane *p) {
+
+    if (has_flags(flags, PANE_DRAGGABLE)) {
+        if (ui->dragging && ui->drag_id == pane_id && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+            ui->dragging = false;
+        }
+
+        if (ui->dragging && ui->drag_id == pane_id) {
+            p->x = ui->mx - ui->drag_x_offset;
+            p->y = ui->my - ui->drag_y_offset;
+        }
+
+        {
+            if (mouse_collides(p->x, *h_offset, p->w, DRAG_BAR_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                ui->dragging = true;
+                ui->drag_id = pane_id;
+                ui->drag_x_offset = ui->mx - p->x;
+                ui->drag_y_offset = ui->my - p->y;
+            }
+            DrawRectangleV(Vector2 {p->x, *h_offset}, Vector2 {p->w, DRAG_BAR_HEIGHT}, GREEN);
+        }
+        *h_offset += DRAG_BAR_HEIGHT;
+    }
+
+}
+
+    UI_State ui = {};
+
 int main(void) {
 
     Arena t; arena_init(&t, 1000000);
@@ -1374,7 +1423,7 @@ int main(void) {
     Interpreter *inter = (Interpreter *)calloc(1, sizeof(*inter));
 
     // String src = str_lit("f(x, y):=x*y;f(1,2);");
-    String src = str_lit("f(b, a):=b*a;a:=5+1;");
+    String src = str_lit("asdf;");
 
     memset(inter, 0, sizeof(*inter));
     arena_init(&inter->func_arena, 100000);
@@ -1393,13 +1442,12 @@ int main(void) {
         printf("\n");
     }
     print_bytecode(&inter->bytecode);
-    bool r = execute(inter, str_lit("_s1"), nullptr, 0);
+    bool r = execute(inter, str_lit("_s2"), nullptr, 0);
     printf("r = %s\n", r ? "true" : "false");
     if (r) {
         printf("Result = %g\n", inter->stack.dat[inter->stack.count - 1].f);
     }
 
-    return 0;
     int screen_w = 1366;
     int screen_h = 768;
 
@@ -1427,14 +1475,13 @@ int main(void) {
     u8 display_text_buf[5][64] = {};
     u64 display_text_count[5] = {};
 
-    UI_State ui = {};
 
 
     while (!WindowShouldClose()) {
         u64 tmp_pos = arena_get_pos(scratch);
 
-        f32 mx = (f32)GetMouseX();
-        f32 my = (f32)GetMouseY();
+        ui.mx = (f32)GetMouseX();
+        ui.my = (f32)GetMouseY();
 
 
         int chars_pressed[16];
@@ -1461,35 +1508,14 @@ int main(void) {
             keys_pressed[key_count++] = tmp;
         }
 
-        u64 pane_count = 0;
         f32 h_offset;
 
         BeginDrawing();
+        ui.pane_count = 0;
 
-
-        u64 pane_id = pane_count++;
         h_offset = p1.y;
         {
-            if (ui.dragging && ui.drag_id == pane_id && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-                ui.dragging = false;
-            }
-
-            if (ui.dragging && ui.drag_id == pane_id) {
-                p1.x = (f32)mx - ui.drag_x_offset;
-                p1.y = (f32)my - ui.drag_y_offset;
-            }
-
-            {
-                if (mouse_collides(p1.x, h_offset, p1.w, DRAG_BAR_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    ui.dragging = true;
-                    ui.drag_id = pane_id;
-                    ui.drag_x_offset = (f32)mx - p1.x;
-                    ui.drag_y_offset = (f32)my - p1.y;
-                }
-                DrawRectangleV(Vector2 {p1.x, h_offset}, Vector2 {p1.w, DRAG_BAR_HEIGHT}, GREEN);
-            }
-            h_offset += DRAG_BAR_HEIGHT;
-
+            update_pane(&ui, PANE_DRAGGABLE, ui.pane_count++, &h_offset, &p1);
 
             // text input + display string
             for (u64 i = 0; i < 5; ++i) {
@@ -1498,18 +1524,18 @@ int main(void) {
                     if (ui.active && ui.active_id == i && ui.text_cursor) {
 
                         ui.selecting = false;
-                        if (mx < p1.x) {
+                        if (ui.mx < p1.x) {
                             ui.cursor_pos = 0;
-                        } else if (mx > p1.x + p1.w) {
+                        } else if (ui.mx > p1.x + p1.w) {
                             ui.cursor_pos = text_count[i] - 1;
                         } else {
-                            ui.cursor_pos = get_text_cursor_pos_from_mouse((u8 *)text_buf[i], text_count + i, &p1, (f32)mx);
+                            ui.cursor_pos = get_text_cursor_pos_from_mouse((u8 *)text_buf[i], text_count + i, &p1, (f32)ui.mx);
                         }
 
                     } else {
                         ui.selecting = false;
                         ui.text_cursor = true;
-                        ui.cursor_pos = get_text_cursor_pos_from_mouse((u8 *)text_buf[i], text_count + i, &p1, (f32)mx);
+                        ui.cursor_pos = get_text_cursor_pos_from_mouse((u8 *)text_buf[i], text_count + i, &p1, (f32)ui.mx);
                         ui.active_id = i;
                         ui.active = true;
                     }
@@ -1774,12 +1800,9 @@ int main(void) {
                     }
 
                     clear_interpreter(inter);
-                    tokenize(inter, src_);
-                    parse(inter);
-                    typecheck_tree(inter);
-                    graphviz_out(inter);
-                    bytecode_from_tree(inter);
-                    // execute(inter, );
+                    compile(inter, src_);
+                    String stmt_s = string_printf(&t, "_s%llu");
+                    execute(inter, stmt_s, nullptr, 0);
 
 
 
@@ -1788,10 +1811,11 @@ int main(void) {
                         if (text_count[j] == 0) continue;
 
                         bool skip = false;
-                        while (inter->errors.count > 0) {
-                            Error *e = inter->errors.dat + inter->errors.count - 1;
-                            todo();
-                        }
+                        if (inter->errors.count > 0) skip = true;
+                        // while (inter->errors.count > 0) {
+                        //     Error *e = inter->errors.dat + inter->errors.count - 1;
+                        //     todo();
+                        // }
                         if (!skip) {
                             Node *prog = inter->ctx.root;
                             Node *stmt = prog->nodes[non_empty_id];
@@ -1804,7 +1828,7 @@ int main(void) {
 
 
                             if (is_definition) {
-                                todo();
+                                // todo();
                             } else {
                                 String s = string_printf(scratch, "%lg", dynarray_pop(&inter->stack));
                                 memcpy(display_text_buf[j], s.dat, s.count + 1);
@@ -1825,34 +1849,12 @@ int main(void) {
                 h_offset += DISPLAY_STRING_HEIGHT;
             }
         }
-        pane_id = pane_count++;
         h_offset = p2.y;
         {
-            if (ui.dragging && ui.drag_id == pane_id && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-                ui.dragging = false;
-            }
+            update_pane(&ui, PANE_DRAGGABLE, ui.pane_count++, &h_offset, &p2);
 
-
-            if (ui.dragging && ui.drag_id == pane_id) {
-                p2.x = (f32)mx - ui.drag_x_offset;
-                p2.y = (f32)my - ui.drag_y_offset;
-            }
-
-            {
-                if (mouse_collides(p2.x, h_offset, p2.w, DRAG_BAR_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    ui.dragging = true;
-                    ui.drag_id = pane_id;
-                    ui.drag_x_offset = (f32)mx - p2.x;
-                    ui.drag_y_offset = (f32)my - p2.y;
-                }
-                DrawRectangleV(Vector2 {p2.x, h_offset}, Vector2 {p2.w, DRAG_BAR_HEIGHT}, GREEN);
-            }
-            h_offset += DRAG_BAR_HEIGHT;
             {
                 DrawRectangleV(Vector2 {p2.x, h_offset}, Vector2 {p2.w, p2.w}, BLACK);
-
-
-
             }
             h_offset += p2.w;
         }
@@ -1865,7 +1867,7 @@ int main(void) {
     scratch = nullptr;
 
 
-    CloseWindow();        // Close window and OpenGL context
+    CloseWindow(); // Close window and OpenGL context
 
     return 0;
 }

@@ -56,6 +56,9 @@ X(ITEM_GLOBALVARIABLE) \
 X(ITEM_FUNCTION) \
 
 
+#define PaneFlagsTable(X) \
+X(PANE_DRAGGABLE)
+
 
 
 #define GenEnumX(type, ...) type,
@@ -97,4 +100,4 @@ GenEnum(BytecodeType, BytecodeTypeTable)
 GenEnum(ItemType, ItemTypeTable)
 
 GenEnumFlag(TokenType, TokenTypeTable)
-
+GenEnumFlag(PaneFlags, PaneFlagsTable)
