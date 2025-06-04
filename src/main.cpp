@@ -1248,6 +1248,30 @@ bool execute(Interpreter *inter, String func, f64 *args, u64 func_args_count) {
     return false;
 }
 
+void clear_interpreter(Interpreter *inter) {
+    inter->src = {};
+    inter->lex = {};
+    inter->ctx = {};
+    inter->bytecode.count = 0;
+    inter->symbol_ids.count = 0;
+    inter->symbols.count = 0;
+    arena_clear(&inter->func_arena);
+    inter->program_counter = 0;
+    inter->return_address = 0;
+    inter->base_stackframe_index = 0;
+    inter->stack.count = 0;
+    inter->errors.count = 0;
+}
+
+
+void compile(Interpreter *inter, String src) {
+    tokenize(inter, src);
+    if (inter->errors.count == 0) parse(inter);
+    if (inter->errors.count == 0) graphviz_out(inter);
+    if (inter->errors.count == 0) typecheck_tree(inter);
+    if (inter->errors.count == 0) bytecode_from_tree(inter);
+}
+
 
 // UI System
 
@@ -1291,6 +1315,16 @@ struct UI_State {
     f32 mx;
     f32 my;
 
+
+    u64 key_count;
+    u64 char_count;
+
+
+    bool ctrl_key_down;
+    bool shift_key_down;
+
+    int keys_pressed[16];
+    int chars_pressed[16];
 };
 
 
@@ -1357,34 +1391,17 @@ u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, Pane *p, f32 m
     else return 0;
 }
 
-void clear_interpreter(Interpreter *inter) {
-    inter->src = {};
-    inter->lex = {};
-    inter->ctx = {};
-    inter->bytecode.count = 0;
-    inter->symbol_ids.count = 0;
-    inter->symbols.count = 0;
-    arena_clear(&inter->func_arena);
-    inter->program_counter = 0;
-    inter->return_address = 0;
-    inter->base_stackframe_index = 0;
-    inter->stack.count = 0;
-    inter->errors.count = 0;
-}
-
-
-void compile(Interpreter *inter, String src) {
-    tokenize(inter, src);
-    if (inter->errors.count == 0) parse(inter);
-    if (inter->errors.count == 0) graphviz_out(inter);
-    if (inter->errors.count == 0) typecheck_tree(inter);
-    if (inter->errors.count == 0) bytecode_from_tree(inter);
-}
+struct Ui_Event {
+    bool text_input_changed;
+};
 
 
 #define has_flags(data, flags) (((data) & (flags)) == (flags))
 
-void update_pane(UI_State *ui, u64 flags, u64 pane_id, f32 *h_offset, Pane *p) {
+Ui_Event update_pane(UI_State *ui, u64 flags, u64 pane_id, f32 *h_offset, Pane *p, u8 *text_buf, u64 *text_count, u64 text_capacity) {
+
+    Ui_Event event = {};
+
 
     if (has_flags(flags, PANE_DRAGGABLE)) {
         if (ui->dragging && ui->drag_id == pane_id && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
@@ -1408,6 +1425,285 @@ void update_pane(UI_State *ui, u64 flags, u64 pane_id, f32 *h_offset, Pane *p) {
         *h_offset += DRAG_BAR_HEIGHT;
     }
 
+
+
+    if (has_flags(flags, PANE_TEXT_INPUT)) {
+
+        if (mouse_collides(p->x, *h_offset, p->w, TEXT_INPUT_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            if (ui->active && ui->active_id == pane_id && ui->text_cursor) {
+
+                ui->selecting = false;
+                if (ui->mx < p->x) {
+                    ui->cursor_pos = 0;
+                } else if (ui->mx > p->x + p->w) {
+                    ui->cursor_pos = *text_count - 1;
+                } else {
+                    ui->cursor_pos = get_text_cursor_pos_from_mouse(text_buf, text_count, p, ui->mx);
+                }
+
+            } else {
+                ui->selecting = false;
+                ui->text_cursor = true;
+                ui->cursor_pos = get_text_cursor_pos_from_mouse(text_buf, text_count, p, ui->mx);
+                ui->active_id = pane_id;
+                ui->active = true;
+            }
+        }
+        event.text_input_changed = false;
+        if (ui->active && ui->active_id == pane_id && ui->text_cursor) {
+
+            event.text_input_changed = ui->key_count > 0 || ui->char_count > 0;
+
+            for (u64 j = 0; j < ui->key_count; ++j) {
+
+                u64 prev_cursor_pos = ui->cursor_pos;
+
+                if (ui->keys_pressed[j] == KEY_BACKSPACE) {
+
+                    if (*text_count > 0) {
+                        if (ui->selecting) {
+                            ui->selecting = false;
+
+                            shift_left_resize(text_buf, text_count, ui->selection_start, ui->selection_end - ui->selection_start);
+                            ui->cursor_pos = ui->selection_start;
+                        } else {
+                            if (ui->cursor_pos > 0) {
+
+                                if (ui->ctrl_key_down) {
+
+                                    if (is_whitespace(text_buf[ui->cursor_pos - 1])) {
+                                        while (ui->cursor_pos > 0 && is_whitespace(text_buf[ui->cursor_pos - 1])) {
+                                            ui->cursor_pos -= 1;
+                                        }
+                                        while (ui->cursor_pos > 0 && !is_whitespace(text_buf[ui->cursor_pos - 1])) {
+                                            ui->cursor_pos -= 1;
+                                        }
+                                    } else {
+                                        while (ui->cursor_pos > 0 && !is_whitespace(text_buf[ui->cursor_pos - 1])) {
+                                            ui->cursor_pos -= 1;
+                                        }
+                                    }
+
+                                    shift_left_resize(text_buf, text_count, ui->cursor_pos, prev_cursor_pos - ui->cursor_pos);
+                                } else {
+                                    shift_left_resize(text_buf, text_count, ui->cursor_pos - 1, 1);
+                                    ui->cursor_pos -= 1;
+                                }
+                            }
+                        }
+                    }
+
+                } else if (ui->keys_pressed[j] == KEY_DELETE) {
+
+                    if (*text_count > 0) {
+                        if (ui->selecting) {
+                            ui->selecting = false;
+
+                            shift_left_resize(text_buf, text_count, ui->selection_start, ui->selection_end - ui->selection_start);
+                            ui->cursor_pos = ui->selection_start;
+                        } else {
+                            if (ui->cursor_pos < *text_count) {
+                                shift_left_resize(text_buf, text_count, ui->cursor_pos, 1);
+                            }
+                        }
+                    }
+
+                } else if (ui->keys_pressed[j] == KEY_A) {
+                    if (*text_count > 0 && ui->ctrl_key_down) {
+                        ui->selecting = true;
+                        ui->cursor_pos = 0;
+                        ui->selection_anchor = *text_count;
+                    }
+                } else if (ui->keys_pressed[j] == KEY_X) {
+                    if (ui->selecting && ui->ctrl_key_down) {
+                        ui->selecting = false;
+                        String s = string_printf(scratch, "%.*s", (int)(ui->selection_end - ui->selection_start), ui->selection_start + text_buf);
+                        SetClipboardText((char *)s.dat);
+                        shift_left_resize(text_buf, text_count, ui->selection_start, ui->selection_end - ui->selection_start);
+                        ui->cursor_pos = ui->selection_start;
+                    }
+                } else if (ui->keys_pressed[j] == KEY_C) {
+                    if (ui->selecting && ui->ctrl_key_down) {
+                        String s = string_printf(scratch, "%.*s", (int)(ui->selection_end - ui->selection_start), ui->selection_start + text_buf);
+                        SetClipboardText((char *)s.dat);
+                    }
+                } else if (ui->keys_pressed[j] == KEY_V) {
+                    if (ui->ctrl_key_down) {
+                        const char *text = GetClipboardText();
+                        u64 len = strlen(text);
+
+                        if (len + *text_count - (ui->selection_end - ui->selection_start) > text_capacity) {
+                            // pasting clipboard would overflow
+                            todo();
+                        } else {
+                            if (ui->selecting) {
+                                ui->selecting = false;
+                                shift_left_resize(text_buf, text_count, ui->selection_start, ui->selection_end - ui->selection_start);
+                                ui->cursor_pos = ui->selection_start;
+                            }
+                            shift_right_resize(text_buf, text_count, ui->cursor_pos, len);
+                            memcpy(text_buf + ui->cursor_pos, text, len);
+                            ui->cursor_pos += len;
+                        }
+
+                    }
+                } else if (ui->keys_pressed[j] == KEY_HOME) {
+                    if (*text_count > 0) {
+                        if (!ui->selecting && ui->shift_key_down) {
+                            ui->selecting = true;
+                            ui->selection_anchor = prev_cursor_pos;
+                        }
+                        if (ui->selecting && !ui->shift_key_down) {
+                            ui->selecting = false;
+                        }
+                        ui->cursor_pos = 0;
+                    }
+                } else if (ui->keys_pressed[j] == KEY_END) {
+                    if (*text_count > 0) {
+                        if (!ui->selecting && ui->shift_key_down) {
+                            ui->selecting = true;
+                            ui->selection_anchor = prev_cursor_pos;
+                        }
+                        if (ui->selecting && !ui->shift_key_down) {
+                            ui->selecting = false;
+                        }
+                        ui->cursor_pos = *text_count;
+                    }
+                } else if (ui->keys_pressed[j] == KEY_LEFT) {
+                    if (*text_count > 0 && ui->cursor_pos > 0) {
+
+                        if (!ui->selecting && ui->shift_key_down) {
+                            ui->selecting = true;
+                            ui->selection_anchor = prev_cursor_pos;
+                        }
+                        if (ui->selecting && !ui->shift_key_down) {
+                            ui->selecting = false;
+                        }
+
+                        if (ui->ctrl_key_down) {
+                            if (is_whitespace(text_buf[ui->cursor_pos - 1])) {
+                                while (ui->cursor_pos > 0 && is_whitespace(text_buf[ui->cursor_pos - 1])) {
+                                    ui->cursor_pos -= 1;
+                                }
+                                while (ui->cursor_pos > 0 && !is_whitespace(text_buf[ui->cursor_pos - 1])) {
+                                    ui->cursor_pos -= 1;
+                                }
+                            } else {
+                                while (ui->cursor_pos > 0 && !is_whitespace(text_buf[ui->cursor_pos - 1])) {
+                                    ui->cursor_pos -= 1;
+                                }
+                            }
+                        } else {
+                            ui->cursor_pos -= 1;
+                        }
+
+                    }
+
+                } else if (ui->keys_pressed[j] == KEY_RIGHT) {
+                    if (*text_count > 0 && ui->cursor_pos < *text_count) {
+
+                        if (!ui->selecting && ui->shift_key_down) {
+                            ui->selecting = true;
+                            ui->selection_anchor = prev_cursor_pos;
+                        }
+                        if (ui->selecting && !ui->shift_key_down) {
+                            ui->selecting = false;
+                        }
+
+                        if (ui->ctrl_key_down) {
+                            if (is_whitespace(text_buf[ui->cursor_pos])) {
+                                while (ui->cursor_pos < *text_count && is_whitespace(text_buf[ui->cursor_pos])) {
+                                    ui->cursor_pos += 1;
+                                }
+                                while (ui->cursor_pos < *text_count && !is_whitespace(text_buf[ui->cursor_pos])) {
+                                    ui->cursor_pos += 1;
+                                }
+                            } else {
+                                while (ui->cursor_pos < *text_count && !is_whitespace(text_buf[ui->cursor_pos])) {
+                                    ui->cursor_pos += 1;
+                                }
+                            }
+                        } else {
+                            ui->cursor_pos += 1;
+                        }
+                    }
+                }
+            }
+
+            if (ui->selecting) {
+                if (ui->selection_anchor < ui->cursor_pos) {
+                    ui->selection_start = ui->selection_anchor;
+                    ui->selection_end = ui->cursor_pos;
+                } else {
+                    ui->selection_start = ui->cursor_pos;
+                    ui->selection_end = ui->selection_anchor;
+                }
+            }
+
+            if (ui->selecting && ui->cursor_pos == ui->selection_anchor) {
+                ui->selecting = false;
+            }
+
+
+
+            // text cursor input
+            for (u64 j = 0; j < ui->char_count && *text_count < text_capacity - 1; ++j) {
+
+                if (ui->selecting) {
+                    ui->selecting = false;
+
+                    shift_left_resize(text_buf, text_count, ui->selection_start, ui->selection_end - ui->selection_start);
+                    ui->cursor_pos = ui->selection_start;
+                }
+
+                shift_right_resize(text_buf, text_count, ui->cursor_pos, 1);
+                text_buf[ui->cursor_pos] = (u8)ui->chars_pressed[j];
+                ui->cursor_pos += 1;
+            }
+        }
+
+        Color color = DARKGREEN;
+
+        DrawRectangleV(Vector2 {p->x, *h_offset}, Vector2 {p->w, TEXT_INPUT_HEIGHT}, color);
+        {
+            String s = string_printf(scratch, "%.*s", (int)*text_count, text_buf);
+            DrawText((char *)s.dat, (s32)p->x + TEXT_INPUT_MARGIN, (s32)(*h_offset) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
+        }
+
+        if (ui->active && ui->active_id == pane_id && ui->text_cursor) {
+            String s = string_printf(scratch, "%.*s", (int)ui->cursor_pos, text_buf);
+            int sz = MeasureText((char *)s.dat, TEXT_INPUT_FONT_SIZE);
+
+            DrawRectangleV(Vector2 {p->x + TEXT_INPUT_MARGIN + (f32)sz, *h_offset + TEXT_INPUT_FONT_SIZE / 2}, Vector2 {1, TEXT_INPUT_FONT_SIZE}, TEXT_INPUT_CURSOR_COLOR);
+
+            if (ui->selecting) {
+
+                String s1 = string_printf(scratch, "%.*s", (int)ui->selection_start, text_buf);
+                int sz2 = MeasureText((char *)s1.dat, TEXT_INPUT_FONT_SIZE);
+
+                String s2 = string_printf(scratch, "%.*s", (int)(ui->selection_end - ui->selection_start), text_buf + ui->selection_start);
+                int selection_sz = MeasureText((char *)s2.dat, TEXT_INPUT_FONT_SIZE);
+                Color a = TEXT_INPUT_SELECTION_COLOR;
+                a.a = 100;
+                DrawRectangleV(Vector2 {p->x + TEXT_INPUT_MARGIN + (f32)sz2, *h_offset + TEXT_INPUT_FONT_SIZE / 2}, Vector2 {(f32)selection_sz, TEXT_INPUT_FONT_SIZE}, a);
+
+            }
+        }
+
+        *h_offset += TEXT_INPUT_HEIGHT;
+
+        // DrawRectangleV(Vector2 {p->x, *h_offset}, Vector2 {p->w, DISPLAY_STRING_HEIGHT}, ColorBrightness(color, 0.2f));
+        // DrawText((char *)display_text_buf[pane_id], (s32)p->x + TEXT_INPUT_MARGIN, (s32)(*h_offset) + DISPLAY_STRING_FONT_SIZE / 2, DISPLAY_STRING_FONT_SIZE, LIGHTGRAY);
+
+        // *h_offset += DISPLAY_STRING_HEIGHT;
+        
+    }
+
+
+
+
+
+    return event;
 }
 
     UI_State ui = {};
@@ -1484,19 +1780,17 @@ int main(void) {
         ui.my = (f32)GetMouseY();
 
 
-        int chars_pressed[16];
-        u64 char_count = 0;
+        ui.char_count = 0;
         while (true) {
             int tmp = GetCharPressed();
             if (tmp == 0) break;
 
-            chars_pressed[char_count++] = tmp;
+            ui.chars_pressed[ui.char_count++] = tmp;
         }
 
-        bool ctrl_key_down = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
-        bool shift_key_down = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
-        int keys_pressed[16];
-        u64 key_count = 0;
+        ui.ctrl_key_down = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+        ui.shift_key_down = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+        ui.key_count = 0;
         while (true) {
             int tmp = GetKeyPressed();
             if (tmp == 0) break;
@@ -1505,7 +1799,7 @@ int main(void) {
             if (tmp == KEY_LEFT_SHIFT) continue;
             if (tmp == KEY_RIGHT_SHIFT) continue;
 
-            keys_pressed[key_count++] = tmp;
+            ui.keys_pressed[ui.key_count++] = tmp;
         }
 
         f32 h_offset;
@@ -1515,343 +1809,73 @@ int main(void) {
 
         h_offset = p1.y;
         {
-            update_pane(&ui, PANE_DRAGGABLE, ui.pane_count++, &h_offset, &p1);
+            update_pane(&ui, PANE_DRAGGABLE, ui.pane_count++, &h_offset, &p1, nullptr, nullptr, 0);
 
             // text input + display string
             for (u64 i = 0; i < 5; ++i) {
+                Ui_Event event = update_pane(&ui, PANE_TEXT_INPUT, ui.pane_count++, &h_offset, &p1, text_buf[i], text_count + i, sizeof(text_buf[i]));
+                if (event.text_input_changed) {
+                    if (event.text_input_changed) {
 
-                if (mouse_collides(p1.x, h_offset, p1.w, TEXT_INPUT_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    if (ui.active && ui.active_id == i && ui.text_cursor) {
+                        sb.count = 0;
 
-                        ui.selecting = false;
-                        if (ui.mx < p1.x) {
-                            ui.cursor_pos = 0;
-                        } else if (ui.mx > p1.x + p1.w) {
-                            ui.cursor_pos = text_count[i] - 1;
-                        } else {
-                            ui.cursor_pos = get_text_cursor_pos_from_mouse((u8 *)text_buf[i], text_count + i, &p1, (f32)ui.mx);
+                        for (u64 j = 0; j < ARRAY_SIZE(text_count); ++j) {
+                            if (text_count[j] > 0) {
+                                string_builder_concat(&sb, String {text_buf[j], text_count[j]});
+                                string_builder_append(&sb, ';');
+                            }
+                        }
+                        String src_ = string_builder_to_string(&sb);
+
+                        for (u64 j = 0; j < ARRAY_SIZE(display_text_buf); ++j) {
+                            display_text_count[j] = 0;
                         }
 
-                    } else {
-                        ui.selecting = false;
-                        ui.text_cursor = true;
-                        ui.cursor_pos = get_text_cursor_pos_from_mouse((u8 *)text_buf[i], text_count + i, &p1, (f32)ui.mx);
-                        ui.active_id = i;
-                        ui.active = true;
+                        clear_interpreter(inter);
+                        compile(inter, src_);
+                        String stmt_s = string_printf(&t, "_s%llu");
+                        execute(inter, stmt_s, nullptr, 0);
+
+
+
+                        u64 non_empty_id = 0;
+                        for (u64 j = 0; j < ARRAY_SIZE(text_count); ++j) {
+                            if (text_count[j] == 0) continue;
+
+                            bool skip = false;
+                            if (inter->errors.count > 0) skip = true;
+                            // while (inter->errors.count > 0) {
+                            //     Error *e = inter->errors.dat + inter->errors.count - 1;
+                            //     todo();
+                            // }
+                            if (!skip) {
+                                Node *prog = inter->ctx.root;
+                                Node *stmt = prog->nodes[non_empty_id];
+
+                                bool is_definition = false;
+                                assert(stmt->node_count == 1);
+                                if (stmt->nodes[0]->type == NODE_FUNCTIONDEF || stmt->nodes[0]->type == NODE_VARIABLEDEF) {
+                                    is_definition = true;
+                                }
+
+
+                                if (is_definition) {
+                                    // todo();
+                                } else {
+                                    String s = string_printf(scratch, "%lg", dynarray_pop(&inter->stack));
+                                    memcpy(display_text_buf[j], s.dat, s.count + 1);
+                                    display_text_count[j] = s.count;
+                                }
+                            }
+                            non_empty_id += 1;
+                        }
                     }
                 }
-                bool text_input_changed = false;
-                if (ui.active && ui.active_id == i && ui.text_cursor) {
-
-                    text_input_changed = key_count > 0 || char_count > 0;
-
-                    for (u64 j = 0; j < key_count; ++j) {
-
-                        u64 prev_cursor_pos = ui.cursor_pos;
-
-                        if (keys_pressed[j] == KEY_BACKSPACE) {
-
-                            if (text_count[i] > 0) {
-                                if (ui.selecting) {
-                                    ui.selecting = false;
-
-                                    shift_left_resize(text_buf[i], text_count + i, ui.selection_start, ui.selection_end - ui.selection_start);
-                                    ui.cursor_pos = ui.selection_start;
-                                } else {
-                                    if (ui.cursor_pos > 0) {
-
-                                        if (ctrl_key_down) {
-
-                                            if (is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
-                                                while (ui.cursor_pos > 0 && is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
-                                                    ui.cursor_pos -= 1;
-                                                }
-                                                while (ui.cursor_pos > 0 && !is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
-                                                    ui.cursor_pos -= 1;
-                                                }
-                                            } else {
-                                                while (ui.cursor_pos > 0 && !is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
-                                                    ui.cursor_pos -= 1;
-                                                }
-                                            }
-
-                                            shift_left_resize(text_buf[i], text_count + i, ui.cursor_pos, prev_cursor_pos - ui.cursor_pos);
-                                        } else {
-                                            shift_left_resize(text_buf[i], text_count + i, ui.cursor_pos - 1, 1);
-                                            ui.cursor_pos -= 1;
-                                        }
-                                    }
-                                }
-                            }
-
-                        } else if (keys_pressed[j] == KEY_DELETE) {
-
-                            if (text_count[i] > 0) {
-                                if (ui.selecting) {
-                                    ui.selecting = false;
-
-                                    shift_left_resize(text_buf[i], text_count + i, ui.selection_start, ui.selection_end - ui.selection_start);
-                                    ui.cursor_pos = ui.selection_start;
-                                } else {
-                                    if (ui.cursor_pos < text_count[i]) {
-                                        shift_left_resize(text_buf[i], text_count + i, ui.cursor_pos, 1);
-                                    }
-                                }
-                            }
-
-                        } else if (keys_pressed[j] == KEY_A) {
-                            if (text_count[i] > 0 && ctrl_key_down) {
-                                ui.selecting = true;
-                                ui.cursor_pos = 0;
-                                ui.selection_anchor = text_count[i];
-                            }
-                        } else if (keys_pressed[j] == KEY_X) {
-                            if (ui.selecting && ctrl_key_down) {
-                                ui.selecting = false;
-                                String s = string_printf(scratch, "%.*s", (int)(ui.selection_end - ui.selection_start), ui.selection_start + text_buf[i]);
-                                SetClipboardText((char *)s.dat);
-                                shift_left_resize(text_buf[i], text_count + i, ui.selection_start, ui.selection_end - ui.selection_start);
-                                ui.cursor_pos = ui.selection_start;
-                            }
-                        } else if (keys_pressed[j] == KEY_C) {
-                            if (ui.selecting && ctrl_key_down) {
-                                String s = string_printf(scratch, "%.*s", (int)(ui.selection_end - ui.selection_start), ui.selection_start + text_buf[i]);
-                                SetClipboardText((char *)s.dat);
-                            }
-                        } else if (keys_pressed[j] == KEY_V) {
-                            if (ctrl_key_down) {
-                                const char *text = GetClipboardText();
-                                u64 len = strlen(text);
-
-                                if (len + text_count[i] - (ui.selection_end - ui.selection_start) > ARRAY_SIZE(text_buf[i])) {
-                                    // pasting clipboard would overflow
-                                    todo();
-                                } else {
-                                    if (ui.selecting) {
-                                        ui.selecting = false;
-                                        shift_left_resize(text_buf[i], text_count + i, ui.selection_start, ui.selection_end - ui.selection_start);
-                                        ui.cursor_pos = ui.selection_start;
-                                    }
-                                    shift_right_resize(text_buf[i], text_count + i, ui.cursor_pos, len);
-                                    memcpy(text_buf[i] + ui.cursor_pos, text, len);
-                                    ui.cursor_pos += len;
-                                }
-
-                            }
-                        } else if (keys_pressed[j] == KEY_HOME) {
-                            if (text_count[i] > 0) {
-                                if (!ui.selecting && shift_key_down) {
-                                    ui.selecting = true;
-                                    ui.selection_anchor = prev_cursor_pos;
-                                }
-                                if (ui.selecting && !shift_key_down) {
-                                    ui.selecting = false;
-                                }
-                                ui.cursor_pos = 0;
-                            }
-                        } else if (keys_pressed[j] == KEY_END) {
-                            if (text_count[i] > 0) {
-                                if (!ui.selecting && shift_key_down) {
-                                    ui.selecting = true;
-                                    ui.selection_anchor = prev_cursor_pos;
-                                }
-                                if (ui.selecting && !shift_key_down) {
-                                    ui.selecting = false;
-                                }
-                                ui.cursor_pos = text_count[i];
-                            }
-                        } else if (keys_pressed[j] == KEY_LEFT) {
-                            if (text_count[i] > 0 && ui.cursor_pos > 0) {
-
-                                if (!ui.selecting && shift_key_down) {
-                                    ui.selecting = true;
-                                    ui.selection_anchor = prev_cursor_pos;
-                                }
-                                if (ui.selecting && !shift_key_down) {
-                                    ui.selecting = false;
-                                }
-
-                                if (ctrl_key_down) {
-                                    if (is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
-                                        while (ui.cursor_pos > 0 && is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
-                                            ui.cursor_pos -= 1;
-                                        }
-                                        while (ui.cursor_pos > 0 && !is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
-                                            ui.cursor_pos -= 1;
-                                        }
-                                    } else {
-                                        while (ui.cursor_pos > 0 && !is_whitespace(text_buf[i][ui.cursor_pos - 1])) {
-                                            ui.cursor_pos -= 1;
-                                        }
-                                    }
-                                } else {
-                                    ui.cursor_pos -= 1;
-                                }
-
-                            }
-
-                        } else if (keys_pressed[j] == KEY_RIGHT) {
-                            if (text_count[i] > 0 && ui.cursor_pos < text_count[i]) {
-
-                                if (!ui.selecting && shift_key_down) {
-                                    ui.selecting = true;
-                                    ui.selection_anchor = prev_cursor_pos;
-                                }
-                                if (ui.selecting && !shift_key_down) {
-                                    ui.selecting = false;
-                                }
-
-                                if (ctrl_key_down) {
-                                    if (is_whitespace(text_buf[i][ui.cursor_pos])) {
-                                        while (ui.cursor_pos < text_count[i] && is_whitespace(text_buf[i][ui.cursor_pos])) {
-                                            ui.cursor_pos += 1;
-                                        }
-                                        while (ui.cursor_pos < text_count[i] && !is_whitespace(text_buf[i][ui.cursor_pos])) {
-                                            ui.cursor_pos += 1;
-                                        }
-                                    } else {
-                                        while (ui.cursor_pos < text_count[i] && !is_whitespace(text_buf[i][ui.cursor_pos])) {
-                                            ui.cursor_pos += 1;
-                                        }
-                                    }
-                                } else {
-                                    ui.cursor_pos += 1;
-                                }
-                            }
-                        }
-                    }
-
-                    if (ui.selecting) {
-                        if (ui.selection_anchor < ui.cursor_pos) {
-                            ui.selection_start = ui.selection_anchor;
-                            ui.selection_end = ui.cursor_pos;
-                        } else {
-                            ui.selection_start = ui.cursor_pos;
-                            ui.selection_end = ui.selection_anchor;
-                        }
-                    }
-
-                    if (ui.selecting && ui.cursor_pos == ui.selection_anchor) {
-                        ui.selecting = false;
-                    }
-
-
-
-                    // text cursor input
-                    for (u64 j = 0; j < char_count && text_count[i] < ARRAY_SIZE(text_buf[i]) - 1; ++j) {
-
-                        if (ui.selecting) {
-                            ui.selecting = false;
-
-                            shift_left_resize(text_buf[i], text_count + i, ui.selection_start, ui.selection_end - ui.selection_start);
-                            ui.cursor_pos = ui.selection_start;
-                        }
-
-                        shift_right_resize(text_buf[i], text_count + i, ui.cursor_pos, 1);
-                        text_buf[i][ui.cursor_pos] = (u8)chars_pressed[j];
-                        ui.cursor_pos += 1;
-                    }
-                }
-
-                Color color = DARKGREEN;
-
-                DrawRectangleV(Vector2 {p1.x, h_offset}, Vector2 {p1.w, TEXT_INPUT_HEIGHT}, color);
-                {
-                    String s = string_printf(scratch, "%.*s", (int)text_count[i], text_buf[i]);
-                    DrawText((char *)s.dat, (s32)p1.x + TEXT_INPUT_MARGIN, (s32)(h_offset) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
-                }
-
-                if (ui.active && ui.active_id == i && ui.text_cursor) {
-                    String s = string_printf(scratch, "%.*s", (int)ui.cursor_pos, text_buf[i]);
-                    int sz = MeasureText((char *)s.dat, TEXT_INPUT_FONT_SIZE);
-
-                    DrawRectangleV(Vector2 {p1.x + TEXT_INPUT_MARGIN + (f32)sz, h_offset + TEXT_INPUT_FONT_SIZE / 2}, Vector2 {1, TEXT_INPUT_FONT_SIZE}, TEXT_INPUT_CURSOR_COLOR);
-
-                    if (ui.selecting) {
-
-                        String s1 = string_printf(scratch, "%.*s", (int)ui.selection_start, text_buf[i]);
-                        int sz2 = MeasureText((char *)s1.dat, TEXT_INPUT_FONT_SIZE);
-
-                        String s2 = string_printf(scratch, "%.*s", (int)(ui.selection_end - ui.selection_start), text_buf[i] + ui.selection_start);
-                        int selection_sz = MeasureText((char *)s2.dat, TEXT_INPUT_FONT_SIZE);
-                        Color a = TEXT_INPUT_SELECTION_COLOR;
-                        a.a = 100;
-                        DrawRectangleV(Vector2 {p1.x + TEXT_INPUT_MARGIN + (f32)sz2, h_offset + TEXT_INPUT_FONT_SIZE / 2}, Vector2 {(f32)selection_sz, TEXT_INPUT_FONT_SIZE}, a);
-
-                    }
-                }
-
-                h_offset += TEXT_INPUT_HEIGHT;
-
-                if (text_input_changed) {
-
-                    sb.count = 0;
-
-                    for (u64 j = 0; j < ARRAY_SIZE(text_buf); ++j) {
-                        if (text_count[j] > 0) {
-                            string_builder_concat(&sb, String {(u8 *)text_buf[j], text_count[j]});
-                            string_builder_append(&sb, ';');
-                        }
-                    }
-                    String src_ = string_builder_to_string(&sb);
-
-                    for (u64 j = 0; j < ARRAY_SIZE(display_text_buf); ++j) {
-                        display_text_count[j] = 0;
-                    }
-
-                    clear_interpreter(inter);
-                    compile(inter, src_);
-                    String stmt_s = string_printf(&t, "_s%llu");
-                    execute(inter, stmt_s, nullptr, 0);
-
-
-
-                    u64 non_empty_id = 0;
-                    for (u64 j = 0; j < ARRAY_SIZE(text_count); ++j) {
-                        if (text_count[j] == 0) continue;
-
-                        bool skip = false;
-                        if (inter->errors.count > 0) skip = true;
-                        // while (inter->errors.count > 0) {
-                        //     Error *e = inter->errors.dat + inter->errors.count - 1;
-                        //     todo();
-                        // }
-                        if (!skip) {
-                            Node *prog = inter->ctx.root;
-                            Node *stmt = prog->nodes[non_empty_id];
-
-                            bool is_definition = false;
-                            assert(stmt->node_count == 1);
-                            if (stmt->nodes[0]->type == NODE_FUNCTIONDEF || stmt->nodes[0]->type == NODE_VARIABLEDEF) {
-                                is_definition = true;
-                            }
-
-
-                            if (is_definition) {
-                                // todo();
-                            } else {
-                                String s = string_printf(scratch, "%lg", dynarray_pop(&inter->stack));
-                                memcpy(display_text_buf[j], s.dat, s.count + 1);
-                                display_text_count[j] = s.count;
-                            }
-                        }
-                        non_empty_id += 1;
-                    }
-
-                }
-                DrawRectangleV(Vector2 {p1.x, h_offset}, Vector2 {p1.w, DISPLAY_STRING_HEIGHT}, ColorBrightness(color, 0.2f));
-                DrawText((char *)display_text_buf[i], (s32)p1.x + TEXT_INPUT_MARGIN, (s32)(h_offset) + DISPLAY_STRING_FONT_SIZE / 2, DISPLAY_STRING_FONT_SIZE, LIGHTGRAY);
-
-
-
-
-
-                h_offset += DISPLAY_STRING_HEIGHT;
             }
         }
         h_offset = p2.y;
         {
-            update_pane(&ui, PANE_DRAGGABLE, ui.pane_count++, &h_offset, &p2);
+            update_pane(&ui, PANE_DRAGGABLE, ui.pane_count++, &h_offset, &p2, nullptr, nullptr, 0);
 
             {
                 DrawRectangleV(Vector2 {p2.x, h_offset}, Vector2 {p2.w, p2.w}, BLACK);

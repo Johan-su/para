@@ -57,7 +57,8 @@ X(ITEM_FUNCTION) \
 
 
 #define PaneFlagsTable(X) \
-X(PANE_DRAGGABLE)
+X(PANE_DRAGGABLE) \
+X(PANE_TEXT_INPUT) \
 
 
 
