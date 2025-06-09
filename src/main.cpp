@@ -1285,6 +1285,20 @@ void compile(Interpreter *inter, String src) {
 #define DRAG_BAR_HEIGHT 15
 
 
+struct UI_Pane {
+    u64 flags;
+    f32 x, y;
+    f32 w, h;
+
+    u64 subpanes;
+    UI_Pane *panes;
+};
+
+
+struct Index_Pair {
+    u64 start, end; // exclusive end
+};
+
 struct UI_State {
 
     bool active;
@@ -1296,19 +1310,29 @@ struct UI_State {
     f32 drag_x_offset;
     f32 drag_y_offset;
 
-
     bool text_cursor;
     u64 cursor_pos;
-
 
     bool selecting;
     u64 selection_anchor;
     u64 selection_start;
     u64 selection_end;
 
-
-
     u64 pane_count;
+
+    DynArray<UI_Pane> ui_panes;
+
+
+    DynArray<Index_Pair> child_stack;
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1338,11 +1362,15 @@ bool mouse_collides(f32 x, f32 y, f32 w, f32 h) {
     return x_intercept && y_intercept;
 }
 
-struct Pane {
-    f32 x, y;
-    f32 w, h;
-};
 
+
+
+void push_child(UI_State *ui) {
+    Index_Pair ip = {};
+    ip.start = ui->child_stack.count;
+    ip.end = ip.start;
+    dynarray_append(&ui->child_stack, ip);
+}
 
 
 void shift_right_resize(u8 *buf, u64 *count, u64 start, u64 amount) {
@@ -1372,7 +1400,7 @@ void shift_left_resize(u8 *buf, u64 *count, u64 start, u64 amount) {
 Arena *scratch = nullptr;
 
 
-u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, Pane *p, f32 mx) {
+u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, UI_Pane *p, f32 mx) {
 
     for (u64 j = 1; j <= *text_count; ++j) {
 
@@ -1398,7 +1426,9 @@ struct Ui_Event {
 
 #define has_flags(data, flags) (((data) & (flags)) == (flags))
 
-Ui_Event update_pane(UI_State *ui, u64 flags, u64 pane_id, f32 *h_offset, Pane *p, u8 *text_buf, u64 *text_count, u64 text_capacity) {
+Ui_Event update_pane(UI_State *ui, u64 flags, f32 *h_offset, UI_Pane *p, u8 *text_buf, u64 *text_count, u64 text_capacity) {
+
+    u64 pane_id = ui->pane_count++;
 
     Ui_Event event = {};
 
@@ -1665,10 +1695,7 @@ Ui_Event update_pane(UI_State *ui, u64 flags, u64 pane_id, f32 *h_offset, Pane *
         Color color = DARKGREEN;
 
         DrawRectangleV(Vector2 {p->x, *h_offset}, Vector2 {p->w, TEXT_INPUT_HEIGHT}, color);
-        {
-            String s = string_printf(scratch, "%.*s", (int)*text_count, text_buf);
-            DrawText((char *)s.dat, (s32)p->x + TEXT_INPUT_MARGIN, (s32)(*h_offset) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
-        }
+
 
         if (ui->active && ui->active_id == pane_id && ui->text_cursor) {
             String s = string_printf(scratch, "%.*s", (int)ui->cursor_pos, text_buf);
@@ -1690,7 +1717,6 @@ Ui_Event update_pane(UI_State *ui, u64 flags, u64 pane_id, f32 *h_offset, Pane *
             }
         }
 
-        *h_offset += TEXT_INPUT_HEIGHT;
 
         // DrawRectangleV(Vector2 {p->x, *h_offset}, Vector2 {p->w, DISPLAY_STRING_HEIGHT}, ColorBrightness(color, 0.2f));
         // DrawText((char *)display_text_buf[pane_id], (s32)p->x + TEXT_INPUT_MARGIN, (s32)(*h_offset) + DISPLAY_STRING_FONT_SIZE / 2, DISPLAY_STRING_FONT_SIZE, LIGHTGRAY);
@@ -1699,6 +1725,13 @@ Ui_Event update_pane(UI_State *ui, u64 flags, u64 pane_id, f32 *h_offset, Pane *
         
     }
 
+    if (has_flags(flags, PANE_TEXT_DISPLAY)) {
+        String s = string_printf(scratch, "%.*s", (int)*text_count, text_buf);
+        DrawText((char *)s.dat, (s32)p->x + TEXT_INPUT_MARGIN, (s32)(*h_offset) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
+    }
+    // TODO: use real layouting
+    if (has_flags(flags, PANE_TEXT_INPUT)) *h_offset += TEXT_INPUT_HEIGHT;
+
 
 
 
@@ -1706,7 +1739,11 @@ Ui_Event update_pane(UI_State *ui, u64 flags, u64 pane_id, f32 *h_offset, Pane *
     return event;
 }
 
-    UI_State ui = {};
+
+
+
+
+UI_State ui = {};
 
 int main(void) {
 
@@ -1754,12 +1791,12 @@ int main(void) {
     SetTargetFPS(60);
 
 
-    Pane p1 = {
+    UI_Pane p1 = {
         0, 0,
         400, 50,
     };
 
-    Pane p2 = {
+    UI_Pane p2 = {
         1366-800, 0,
         800, 400,
     };
@@ -1809,11 +1846,13 @@ int main(void) {
 
         h_offset = p1.y;
         {
-            update_pane(&ui, PANE_DRAGGABLE, ui.pane_count++, &h_offset, &p1, nullptr, nullptr, 0);
+            update_pane(&ui, PANE_DRAGGABLE, &h_offset, &p1, nullptr, nullptr, 0);
 
             // text input + display string
+            begin_child(&ui);
             for (u64 i = 0; i < 5; ++i) {
-                Ui_Event event = update_pane(&ui, PANE_TEXT_INPUT, ui.pane_count++, &h_offset, &p1, text_buf[i], text_count + i, sizeof(text_buf[i]));
+                Ui_Event event = update_pane(&ui, PANE_TEXT_INPUT|PANE_TEXT_DISPLAY, &h_offset, &p1, text_buf[i], text_count + i, sizeof(text_buf[i]));
+                update_pane(&ui, PANE_TEXT_DISPLAY, &h_offset, &p1, display_text_buf[i], display_text_count + i, sizeof(display_text_buf[i]));
                 if (event.text_input_changed) {
                     if (event.text_input_changed) {
 
@@ -1872,10 +1911,11 @@ int main(void) {
                     }
                 }
             }
+            end_child(&ui);
         }
         h_offset = p2.y;
         {
-            update_pane(&ui, PANE_DRAGGABLE, ui.pane_count++, &h_offset, &p2, nullptr, nullptr, 0);
+            update_pane(&ui, PANE_DRAGGABLE, &h_offset, &p2, nullptr, nullptr, 0);
 
             {
                 DrawRectangleV(Vector2 {p2.x, h_offset}, Vector2 {p2.w, p2.w}, BLACK);
