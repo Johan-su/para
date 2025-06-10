@@ -1285,19 +1285,30 @@ void compile(Interpreter *inter, String src) {
 #define DRAG_BAR_HEIGHT 15
 
 
+const u64 nil_id = 0;
+
+struct Ui_Event {
+    bool text_input_changed;
+};
+
 struct UI_Pane {
     u64 flags;
+    u64 hash;
+
     f32 x, y;
     f32 w, h;
 
-    u64 subpanes;
-    UI_Pane *panes;
+    u64 parent_id;
+    u64 next_id;
+
+    u8 *text_buf;
+    u64 *text_count;
+    u64 text_capacity;
+
+    Ui_Event event;
+
 };
 
-
-struct Index_Pair {
-    u64 start, end; // exclusive end
-};
 
 struct UI_State {
 
@@ -1320,20 +1331,13 @@ struct UI_State {
 
     u64 pane_count;
 
-    DynArray<UI_Pane> ui_panes;
+    DynArray<UI_Pane> ui_panes[2];
+
+    DynArray<UI_Pane> *prev_panes;
+    DynArray<UI_Pane> *active_panes;
 
 
-    DynArray<Index_Pair> child_stack;
-
-
-
-
-
-
-
-
-
-
+    DynArray<u64> parent_stack;
 
 
     f32 mx;
@@ -1363,13 +1367,20 @@ bool mouse_collides(f32 x, f32 y, f32 w, f32 h) {
 }
 
 
+void push_parent(UI_State *ui) {
+    assert(ui->ui_panes.count > 0);
+    u64 id = ui->ui_panes.count - 1;
+    dynarray_append(&ui->parent_stack, id);
+}
 
 
-void push_child(UI_State *ui) {
-    Index_Pair ip = {};
-    ip.start = ui->child_stack.count;
-    ip.end = ip.start;
-    dynarray_append(&ui->child_stack, ip);
+void pop_parent(UI_State *ui) {
+    dynarray_pop(&ui->parent_stack);    
+}
+
+u64 get_parent_id(UI_State *ui) {
+    if (ui->parent_stack.count == 0) return 0;
+    return ui->parent_stack.dat[ui->parent_stack.count - 1];
 }
 
 
@@ -1419,12 +1430,40 @@ u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, UI_Pane *p, f3
     else return 0;
 }
 
-struct Ui_Event {
-    bool text_input_changed;
-};
 
 
 #define has_flags(data, flags) (((data) & (flags)) == (flags))
+
+
+UI_Pane *get_pane_from_hash(UI_State *ui, u64 hash) {
+    for (u64 i = 0; i < ui->prev_panes->count; ++i) {
+        if (ui->prev_panes->dat[i].hash == hash) {
+            return ui->prev_panes->dat + i;
+        } 
+    }
+    return nullptr;
+}
+
+Ui_Event create_pane(UI_State *ui, u64 flags, u64 hash, f32 x, f32 y, f32 w, f32 h, u8 *text_buf, u64 *text_count, u64 text_capacity) {
+    UI_Pane pane = {};
+
+    UI_Pane *old_pane = get_pane_from_hash(ui, hash);
+    if (old_pane) {
+        pane = *old_pane;
+    } else {
+        pane.flags = flags;
+        pane.hash = hash;
+        pane.parent_id = get_parent_id(ui);
+        pane.x = x;
+        pane.y = y;
+        pane.w = w;
+        pane.h = h;
+    }
+
+
+
+    return pane.event;
+}
 
 Ui_Event update_pane(UI_State *ui, u64 flags, f32 *h_offset, UI_Pane *p, u8 *text_buf, u64 *text_count, u64 text_capacity) {
 
@@ -1849,7 +1888,7 @@ int main(void) {
             update_pane(&ui, PANE_DRAGGABLE, &h_offset, &p1, nullptr, nullptr, 0);
 
             // text input + display string
-            begin_child(&ui);
+            push_parent(&ui);
             for (u64 i = 0; i < 5; ++i) {
                 Ui_Event event = update_pane(&ui, PANE_TEXT_INPUT|PANE_TEXT_DISPLAY, &h_offset, &p1, text_buf[i], text_count + i, sizeof(text_buf[i]));
                 update_pane(&ui, PANE_TEXT_DISPLAY, &h_offset, &p1, display_text_buf[i], display_text_count + i, sizeof(display_text_buf[i]));
@@ -1911,7 +1950,7 @@ int main(void) {
                     }
                 }
             }
-            end_child(&ui);
+            pop_parent(&ui);
         }
         h_offset = p2.y;
         {
