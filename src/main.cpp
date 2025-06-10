@@ -1280,9 +1280,13 @@ void compile(Interpreter *inter, String src) {
 #define TEXT_INPUT_MARGIN 5
 #define TEXT_INPUT_CURSOR_COLOR BLACK
 #define TEXT_INPUT_SELECTION_COLOR BLUE
+#define TEXT_INPUT_BACKGROUND_COLOR DARKGREEN
+
 #define DISPLAY_STRING_HEIGHT 25
 #define DISPLAY_STRING_FONT_SIZE 15
+
 #define DRAG_BAR_HEIGHT 15
+#define DRAG_BAR_COLOR GREEN
 
 
 const u64 nil_id = 0;
@@ -1292,11 +1296,15 @@ struct Ui_Event {
 };
 
 struct UI_Pane {
-    u64 flags;
     u64 hash;
 
+
+
+    u64 flags;
     f32 x, y;
     f32 w, h;
+
+    f32 h_offset;
 
     u64 parent_id;
     u64 next_id;
@@ -1331,10 +1339,9 @@ struct UI_State {
 
     u64 pane_count;
 
-    DynArray<UI_Pane> ui_panes[2];
 
-    DynArray<UI_Pane> *prev_panes;
-    DynArray<UI_Pane> *active_panes;
+    DynArray<UI_Pane> ui_panes[2];
+    u64 active_panes_id;
 
 
     DynArray<u64> parent_stack;
@@ -1368,8 +1375,9 @@ bool mouse_collides(f32 x, f32 y, f32 w, f32 h) {
 
 
 void push_parent(UI_State *ui) {
-    assert(ui->ui_panes.count > 0);
-    u64 id = ui->ui_panes.count - 1;
+    DynArray<UI_Pane> *panes = ui->ui_panes + ui->active_panes_id; 
+    assert(panes->count > 0);
+    u64 id = panes->count - 1;
     dynarray_append(&ui->parent_stack, id);
 }
 
@@ -1435,10 +1443,20 @@ u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, UI_Pane *p, f3
 #define has_flags(data, flags) (((data) & (flags)) == (flags))
 
 
+void begin_ui(UI_State *ui) {
+    ui->ui_panes[ui->active_panes_id].count = 0;
+}
+
+void end_ui(UI_State *ui) {
+    ui->active_panes_id += 1;
+    ui->active_panes_id %= 2;
+}
+
 UI_Pane *get_pane_from_hash(UI_State *ui, u64 hash) {
-    for (u64 i = 0; i < ui->prev_panes->count; ++i) {
-        if (ui->prev_panes->dat[i].hash == hash) {
-            return ui->prev_panes->dat + i;
+    u64 prev_id = (ui->active_panes_id + 1) % 2;
+    for (u64 i = 0; i < ui->ui_panes[prev_id].count; ++i) {
+        if (ui->ui_panes[prev_id].dat[i].hash == hash) {
+            return ui->ui_panes[prev_id].dat + i;
         } 
     }
     return nullptr;
@@ -1451,18 +1469,44 @@ Ui_Event create_pane(UI_State *ui, u64 flags, u64 hash, f32 x, f32 y, f32 w, f32
     if (old_pane) {
         pane = *old_pane;
     } else {
-        pane.flags = flags;
-        pane.hash = hash;
-        pane.parent_id = get_parent_id(ui);
         pane.x = x;
         pane.y = y;
         pane.w = w;
         pane.h = h;
-    }
 
+        pane.text_buf = text_buf;
+        pane.text_count = text_count;
+        pane.text_capacity = text_capacity;
+    }
+    
+    pane.flags = flags;
+    pane.hash = hash;
+    
+    pane.parent_id = get_parent_id(ui);
+
+    dynarray_append(ui->ui_panes + ui->active_panes_id, pane);
 
 
     return pane.event;
+}
+
+void draw_ui(UI_State *ui) {
+
+    DynArray<UI_Pane> *panes = ui->ui_panes + ui->active_panes_id;
+
+    for (u64 i = 0; i < panes->count; ++i) {
+
+        UI_Pane *pane = panes->dat + i;
+
+        if (has_flags(pane->flags, PANE_DRAGGABLE)) {
+            DrawRectangleV(Vector2 {pane->x, pane->y}, Vector2 {pane->w, DRAG_BAR_HEIGHT}, DRAG_BAR_COLOR);
+        }
+
+        if (has_flags(pane->flags, PANE_TEXT_INPUT)) {
+            DrawRectangleV(Vector2 {pane->x, pane->y}, Vector2 {pane->w, TEXT_INPUT_HEIGHT}, TEXT_INPUT_BACKGROUND_COLOR);
+        }
+
+    }
 }
 
 Ui_Event update_pane(UI_State *ui, u64 flags, f32 *h_offset, UI_Pane *p, u8 *text_buf, u64 *text_count, u64 text_capacity) {
@@ -1482,14 +1526,11 @@ Ui_Event update_pane(UI_State *ui, u64 flags, f32 *h_offset, UI_Pane *p, u8 *tex
             p->y = ui->my - ui->drag_y_offset;
         }
 
-        {
-            if (mouse_collides(p->x, *h_offset, p->w, DRAG_BAR_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                ui->dragging = true;
-                ui->drag_id = pane_id;
-                ui->drag_x_offset = ui->mx - p->x;
-                ui->drag_y_offset = ui->my - p->y;
-            }
-            DrawRectangleV(Vector2 {p->x, *h_offset}, Vector2 {p->w, DRAG_BAR_HEIGHT}, GREEN);
+        if (mouse_collides(p->x, *h_offset, p->w, DRAG_BAR_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            ui->dragging = true;
+            ui->drag_id = pane_id;
+            ui->drag_x_offset = ui->mx - p->x;
+            ui->drag_y_offset = ui->my - p->y;
         }
         *h_offset += DRAG_BAR_HEIGHT;
     }
@@ -1731,9 +1772,6 @@ Ui_Event update_pane(UI_State *ui, u64 flags, f32 *h_offset, UI_Pane *p, u8 *tex
             }
         }
 
-        Color color = DARKGREEN;
-
-        DrawRectangleV(Vector2 {p->x, *h_offset}, Vector2 {p->w, TEXT_INPUT_HEIGHT}, color);
 
 
         if (ui->active && ui->active_id == pane_id && ui->text_cursor) {
@@ -1880,7 +1918,6 @@ int main(void) {
 
         f32 h_offset;
 
-        BeginDrawing();
         ui.pane_count = 0;
 
         h_offset = p1.y;
@@ -1962,7 +1999,9 @@ int main(void) {
             h_offset += p2.w;
         }
 
+        BeginDrawing();
         ClearBackground(DARKGRAY);
+        draw_ui(&ui);
         EndDrawing();
         arena_set_pos(scratch, tmp_pos);
     }
