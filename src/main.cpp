@@ -980,7 +980,12 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
             if (string_equal(name, item->name)) {
                 if (item->type != ITEM_VARIABLE && item->type != ITEM_GLOBALVARIABLE) {
                     // wrong type
-                    todo();
+                    Error err = {};
+                    err.token_id = n->token_index;
+                    err.has_token = true;
+                    err.err_string = str_lit("Tried to use non variable as a variable");
+                    dynarray_append(&inter->errors, err);
+                    return;
                 }
             }
         } break;
@@ -1968,12 +1973,9 @@ int main(void) {
 
                         clear_interpreter(inter);
                         compile(inter, src_);
-                        String stmt_s = string_printf(&t, "_s%llu", i);
-                        execute(inter, stmt_s, nullptr, 0);
 
 
 
-                        u64 non_empty_id = 0;
                         for (u64 j = 0; j < ARRAY_SIZE(text_count); ++j) {
                             if (text_count[j] == 0) continue;
 
@@ -1985,7 +1987,7 @@ int main(void) {
                             // }
                             if (!skip) {
                                 Node *prog = inter->ctx.root;
-                                Node *stmt = prog->nodes[non_empty_id];
+                                Node *stmt = prog->nodes[j];
 
                                 bool is_definition = false;
                                 assert(stmt->node_count == 1);
@@ -1997,12 +1999,13 @@ int main(void) {
                                 if (is_definition) {
                                     // todo();
                                 } else {
+                                    String stmt_s = string_printf(&t, "_s%llu", j);
+                                    execute(inter, stmt_s, nullptr, 0);
                                     String s = string_printf(scratch, "%lg", dynarray_pop(&inter->stack));
                                     memcpy(display_text_buf[j], s.dat, s.count + 1);
                                     display_text_count[j] = s.count;
                                 }
                             }
-                            non_empty_id += 1;
                         }
                     }
                 }
@@ -2016,7 +2019,7 @@ int main(void) {
         end_ui(&ui);
 
         BeginDrawing();
-        ClearBackground(BLACK);
+        ClearBackground(GRAY);
         draw_ui(&ui);
         EndDrawing();
         arena_set_pos(scratch, tmp_pos);
