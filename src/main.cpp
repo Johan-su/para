@@ -294,8 +294,12 @@ void tokenize(Interpreter *inter, String src) {
 
             insert_token(lex, t);
         } else {
-            printf("char %c\n", src.dat[lex->iter]);
-            todo();
+            Error err = {};
+            err.has_char = true;
+            err.char_id = lex->iter;
+            err.err_string = str_lit("Unexpected character");
+            dynarray_append(&inter->errors, err);
+            return;
         }
     }
 }
@@ -375,12 +379,19 @@ Node *make_node_from_stacks(Interpreter *inter) {
 
 
     switch (top->type) {
+        case NODE_OPENPAREN: {
+            Error err = {};
+            err.token_id = top->token_index;
+            err.has_token = true;
+            err.err_string = str_lit("Mismatched opening parenthesis with no closing parenthesis");
+            dynarray_append(&inter->errors, err);
+            return nullptr;
+        } break;
         case NODE_INVALID:
         case NodeType_COUNT:
         case NODE_PROGRAM:
         case NODE_STATEMENT:
         case NODE_NUMBER:
-        case NODE_OPENPAREN:
         case NODE_FUNCTION:
         case NODE_FUNCTIONDEF:
         case NODE_VARIABLE:
@@ -452,7 +463,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
 }
 
 void make_all_nodes_from_operator_ctx(Interpreter *inter) {
-    while (inter->ctx.op_count > 0 && inter->ctx.op_stack[inter->ctx.op_count - 1]->type != NODE_OPENPAREN) {
+    while (inter->ctx.op_count > 0) {
         Node *n = make_node_from_stacks(inter);
         push_node(&inter->ctx, n);
     }
@@ -650,12 +661,24 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
 
             push_op(&inter->ctx, open_paren);
         } else if (is_token(inter, TOKEN_CLOSEPAREN, 0)) {
-            consume(inter);
-
+            u64 token_id = consume(inter);
+            if (inter->ctx.stack_count == 0) {
+                Error err = {};
+                err.has_token = true;
+                err.token_id = token_id;
+                err.err_string = str_lit("Empty parenthesis pair");
+                dynarray_append(&inter->errors, err);
+                return;
+            }
             while (true) {
                 if (inter->ctx.op_count == 0) {
                     // report mismatched parenthesis error here
-                    todo();
+                    Error err = {};
+                    err.has_token = true;
+                    err.token_id = token_id;
+                    err.err_string = str_lit("Mismatched parenthesis");
+                    dynarray_append(&inter->errors, err);
+                    return;
                 }
                 if (inter->ctx.op_stack[inter->ctx.op_count - 1]->type == NODE_OPENPAREN) {
                     pop_op(&inter->ctx);
@@ -1272,17 +1295,22 @@ void compile(Interpreter *inter, String src) {
     if (inter->errors.count == 0) bytecode_from_tree(inter);
 }
 
+union V4u8 {
+    u8 v[4];
+    struct {
+        u8 x, y, z, w;
+    };
+};
+
 
 // UI System
 
 #define TEXT_INPUT_FONT_SIZE 20
-#define TEXT_INPUT_HEIGHT 35
 #define TEXT_INPUT_MARGIN 5
 #define TEXT_INPUT_CURSOR_COLOR BLACK
 #define TEXT_INPUT_SELECTION_COLOR BLUE
 #define TEXT_INPUT_BACKGROUND_COLOR DARKGREEN
 
-#define DISPLAY_STRING_HEIGHT 25
 #define DISPLAY_STRING_FONT_SIZE 15
 
 #define DRAG_BAR_HEIGHT 15
@@ -1299,8 +1327,11 @@ struct UI_Pane {
     u64 hash;
 
 
-
     u64 flags;
+
+    Color background_color;
+
+
     f32 x, y;
     f32 w, h;
 
@@ -1454,7 +1485,7 @@ UI_Pane *get_pane_from_hash(UI_State *ui, u64 hash) {
     return nullptr;
 }
 
-Ui_Event create_pane(UI_State *ui, u64 flags, u64 hash, f32 x, f32 y, f32 w, f32 h, u8 *text_buf, u64 *text_count, u64 text_capacity) {
+Ui_Event create_pane(UI_State *ui, u64 flags, u64 hash, f32 x, f32 y, f32 w, f32 h, Color background_color, u8 *text_buf, u64 *text_count, u64 text_capacity) {
     UI_Pane pane = {};
 
     UI_Pane *old_pane = get_pane_from_hash(ui, hash);
@@ -1474,7 +1505,7 @@ Ui_Event create_pane(UI_State *ui, u64 flags, u64 hash, f32 x, f32 y, f32 w, f32
     pane.flags = flags;
     pane.hash = hash;
     pane.h_offset = 0;
-    
+    pane.background_color = background_color;
     pane.parent_id = get_parent_id(ui);
 
     dynarray_append(ui->ui_panes + ui->active_panes_id, pane);
@@ -1491,12 +1522,15 @@ void draw_ui(UI_State *ui) {
 
         UI_Pane *pane = panes->dat + i;
 
+        if (has_flags(pane->flags, PANE_BACKGROUND_COLOR)) {
+            DrawRectangleV(Vector2 {pane->x, pane->y}, Vector2 {pane->w, pane->h}, pane->background_color);
+        }
+
         if (has_flags(pane->flags, PANE_DRAGGABLE)) {
             DrawRectangleV(Vector2 {pane->x, pane->y}, Vector2 {pane->w, DRAG_BAR_HEIGHT}, DRAG_BAR_COLOR);
         }
 
         if (has_flags(pane->flags, PANE_TEXT_INPUT)) {
-            DrawRectangleV(Vector2 {pane->x, pane->y}, Vector2 {pane->w, TEXT_INPUT_HEIGHT}, TEXT_INPUT_BACKGROUND_COLOR);
             f32 h_offset = pane->y;
 
 
@@ -1514,6 +1548,7 @@ void draw_ui(UI_State *ui) {
                     String s2 = string_printf(scratch, "%.*s", (int)(ui->selection_end - ui->selection_start), pane->text_buf + ui->selection_start);
                     int selection_sz = MeasureText((char *)s2.dat, TEXT_INPUT_FONT_SIZE);
                     Color a = TEXT_INPUT_SELECTION_COLOR;
+                    a = ColorBrightness(a, 2.0f);
                     a.a = 100;
                     DrawRectangleV(Vector2 {pane->x + TEXT_INPUT_MARGIN + (f32)sz2, h_offset + TEXT_INPUT_FONT_SIZE / 2.0f}, Vector2 {(f32)selection_sz, TEXT_INPUT_FONT_SIZE}, a);
 
@@ -1526,7 +1561,6 @@ void draw_ui(UI_State *ui) {
             String s = string_printf(scratch, "%.*s", (int)*pane->text_count, pane->text_buf);
             DrawText((char *)s.dat, (s32)pane->x + TEXT_INPUT_MARGIN, (s32)(pane->y) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
         }
-
     }
 }
 
@@ -1562,12 +1596,13 @@ void update_panes(UI_State *ui) {
             // assuming downwards layout
             pane->x = parent->x;
             pane->y = parent->y + parent->h_offset;
+            
             parent->h_offset += pane->h;
         }
 
         if (has_flags(pane->flags, PANE_TEXT_INPUT)) {
 
-            if (mouse_collides(pane->x, pane->y, pane->w, TEXT_INPUT_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            if (mouse_collides(pane->x, pane->y, pane->w, pane->h) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 if (ui->active && ui->active_id == pane->hash && ui->text_cursor) {
 
                     ui->selecting = false;
@@ -1830,7 +1865,7 @@ int main(void) {
     Interpreter *inter = (Interpreter *)calloc(1, sizeof(*inter));
 
     // String src = str_lit("f(x, y):=x*y;f(1,2);");
-    String src = str_lit("asdf;");
+    String src = str_lit("((5+5));");
 
     memset(inter, 0, sizeof(*inter));
     arena_init(&inter->func_arena, 100000);
@@ -1854,6 +1889,9 @@ int main(void) {
     if (r) {
         printf("Result = %g\n", inter->stack.dat[inter->stack.count - 1].f);
     }
+
+
+
 
     int screen_w = 1366;
     int screen_h = 768;
@@ -1904,13 +1942,13 @@ int main(void) {
 
         begin_ui(&ui);
         {
-            create_pane(&ui, PANE_DRAGGABLE, 69420'0, 0, 0, 400, 50, nullptr, nullptr, 0);
+            create_pane(&ui, PANE_DRAGGABLE|PANE_BACKGROUND_COLOR, 69420'0, 0, 0, 400, 500, LIGHTGRAY, nullptr, nullptr, 0);
 
             // text input + display string
             push_parent(&ui);
             for (u64 i = 0; i < 5; ++i) {
-                Ui_Event event = create_pane(&ui, PANE_TEXT_INPUT|PANE_TEXT_DISPLAY, 79420+i, 0, 0, 400, 50, text_buf[i], text_count + i, sizeof(text_buf[i]));
-                create_pane(&ui, PANE_TEXT_DISPLAY, 80420+i, 0, 0, 400, 50, display_text_buf[i], display_text_count + i, sizeof(display_text_buf[i]));
+                Ui_Event event = create_pane(&ui, PANE_TEXT_INPUT|PANE_TEXT_DISPLAY|PANE_BACKGROUND_COLOR, 79420+i, 0, 0, 400, 35, DARKGREEN, text_buf[i], text_count + i, sizeof(text_buf[i]));
+                create_pane(&ui, PANE_TEXT_DISPLAY|PANE_BACKGROUND_COLOR, 80420+i, 0, 0, 400, 35, RED, display_text_buf[i], display_text_count + i, sizeof(display_text_buf[i]));
                 if (event.text_input_changed) {
                     if (event.text_input_changed) {
 
@@ -1930,7 +1968,7 @@ int main(void) {
 
                         clear_interpreter(inter);
                         compile(inter, src_);
-                        String stmt_s = string_printf(&t, "_s%llu");
+                        String stmt_s = string_printf(&t, "_s%llu", i);
                         execute(inter, stmt_s, nullptr, 0);
 
 
@@ -1972,13 +2010,13 @@ int main(void) {
             pop_parent(&ui);
         }
         {
-            create_pane(&ui, PANE_DRAGGABLE, 1337420, 1366-800, 0, 800, 400, nullptr, nullptr, 0);
+            create_pane(&ui, PANE_DRAGGABLE|PANE_BACKGROUND_COLOR, 1337420, 1366-800, 0, 800, 400, BLACK, nullptr, nullptr, 0);
         }
 
         end_ui(&ui);
 
         BeginDrawing();
-        ClearBackground(DARKGRAY);
+        ClearBackground(BLACK);
         draw_ui(&ui);
         EndDrawing();
         arena_set_pos(scratch, tmp_pos);
