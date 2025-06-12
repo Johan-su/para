@@ -743,17 +743,18 @@ void parse_definition(Interpreter *inter) {
             todo();
         }
         consume(inter);
-
-        parse_expr(inter, TOKEN_SEMICOLON);
-
         u64 nodes_to_pop_count = inter->ctx.stack_count - stack_start;
 
-        def->node_count = nodes_to_pop_count;
+        def->node_count = nodes_to_pop_count + 1;
         def->nodes = (Node **)calloc(def->node_count, sizeof(*def->nodes));
 
-        for (u64 i = def->node_count; i-- > 0;) {
+        for (u64 i = def->node_count - 1; i-- > 0;) {
             def->nodes[i] = pop_node(&inter->ctx);
         }
+
+        parse_expr(inter, TOKEN_SEMICOLON);
+        def->nodes[def->node_count - 1] = pop_node(&inter->ctx);
+
     } else {
         def->type = NODE_VARIABLEDEF;
         if (!is_token(inter, TOKEN_COLON, 0)) {
@@ -1870,7 +1871,7 @@ int main(void) {
     Interpreter *inter = (Interpreter *)calloc(1, sizeof(*inter));
 
     // String src = str_lit("f(x, y):=x*y;f(1,2);");
-    String src = str_lit("((5+5));");
+    String src = str_lit("f(x):=x*x;f(2);");
 
     memset(inter, 0, sizeof(*inter));
     arena_init(&inter->func_arena, 100000);
@@ -1894,6 +1895,7 @@ int main(void) {
     if (r) {
         printf("Result = %g\n", inter->stack.dat[inter->stack.count - 1].f);
     }
+    return 0;
 
 
 
