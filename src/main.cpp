@@ -1467,7 +1467,7 @@ Arena *scratch = nullptr;
 
 u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, UI_Pane *p, f32 mx) {
 
-    for (u64 j = 1; j <= *text_count; ++j) {
+    for (u64 j = 0; j <= *text_count; ++j) {
 
         u64 tmp = arena_get_pos(scratch);
 
@@ -1477,7 +1477,7 @@ u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, UI_Pane *p, f3
         arena_set_pos(scratch, tmp);
 
         if (mx - (p->x + TEXT_INPUT_MARGIN + sz) < TEXT_INPUT_FONT_SIZE / 2.0f) {
-            return j;
+            return j + 1;
         }
     }
     if (*text_count > 0) return *text_count - 1;
