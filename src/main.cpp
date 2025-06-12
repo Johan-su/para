@@ -1328,6 +1328,8 @@ union V4u8 {
 
 #define DISPLAY_STRING_FONT_SIZE 15
 
+#define PANE_MARGIN 2
+
 #define DRAG_BAR_HEIGHT 15
 #define DRAG_BAR_COLOR GREEN
 
@@ -1363,6 +1365,12 @@ struct UI_Pane {
 
 };
 
+enum Direction {
+    NORTH,
+    SOUTH,
+    EAST,
+    WEST,
+};
 
 struct UI_State {
 
@@ -1383,7 +1391,13 @@ struct UI_State {
     u64 selection_start;
     u64 selection_end;
 
-    u64 pane_count;
+
+    bool resizing;
+    u64 resize_id;
+    f32 resize_x_offset;
+    f32 resize_y_offset;
+    Direction resize_pos;
+
 
 
     DynArray<UI_Pane> ui_panes[2];
@@ -1607,16 +1621,40 @@ void update_panes(UI_State *ui) {
                 ui->drag_x_offset = ui->mx - pane->x;
                 ui->drag_y_offset = ui->my - pane->y;
             }
-            pane->h_offset += DRAG_BAR_HEIGHT;
+            pane->h_offset += DRAG_BAR_HEIGHT + PANE_MARGIN;
+        }
+
+
+        if (has_flags(pane->flags, PANE_RESIZEABLE)) {
+
+            if (ui->resizing && ui->resize_id == pane->hash && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                ui->resizing = false;
+            }
+
+            if (ui->resizing && ui->resize_id == pane->hash) {
+                if (ui->resize_pos == WEST) {
+                    todo(); 
+                }
+            }
+
+
+            if (mouse_collides(pane->x, pane->y + PANE_MARGIN, PANE_MARGIN, pane->h - PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                ui->resizing = true;
+                ui->resize_id = pane->hash;
+                ui->resize_pos = WEST;
+                ui->resize_x_offset = ui->mx - pane->x;
+                ui->resize_y_offset = ui->my - pane->y;
+            }
+
         }
 
         if (pane->parent_id != nil_id) {
             UI_Pane *parent = panes->dat + pane->parent_id;
             // assuming downwards layout
-            pane->x = 1 + parent->x;
+            pane->x = PANE_MARGIN + parent->x;
             pane->y = parent->y + parent->h_offset;
-            pane->w = max(pane->w, parent->w - 2); 
-            parent->h_offset += pane->h;
+            pane->w = max(pane->w, parent->w - 2 * PANE_MARGIN); 
+            parent->h_offset += pane->h + PANE_MARGIN;
         }
 
         if (has_flags(pane->flags, PANE_TEXT_INPUT)) {
