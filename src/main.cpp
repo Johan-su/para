@@ -95,12 +95,8 @@ struct Node {
 };
 
 struct Parser {
-    Node *node_stack[128];
-    u64 stack_count;
-
-    Node *op_stack[128];
-    u64 op_count;
-
+    DynArray<Node *> node_stack;
+    DynArray<Node *> op_stack;
     u64 iter;
 
     Node *root;
@@ -237,7 +233,13 @@ void tokenize(Interpreter *inter, String src) {
                 lex->iter += 1;
             }
             if (is_alpha(src.dat[lex->iter])) {
-                todo();
+                
+                Error err = {};
+                err.err_string = str_lit("Non digits in number");
+                err.char_id = lex->iter;
+                err.has_char = true;
+                dynarray_append(&inter->errors, err);
+                return;
             }
             u64 index_end = lex->iter;
 
@@ -330,26 +332,6 @@ u64 consume(Interpreter *inter) {
     return token_index;
 }
 
-void push_node(Parser *ctx, Node *n) {
-    assert(ctx->stack_count < ARRAY_SIZE(ctx->node_stack));
-    ctx->node_stack[ctx->stack_count++] = n;
-}
-
-Node *pop_node(Parser *ctx) {
-    assert(ctx->stack_count > 0);
-    return ctx->node_stack[--ctx->stack_count];
-}
-
-void push_op(Parser *ctx, Node *n) {
-    assert(ctx->op_count < ARRAY_SIZE(ctx->op_stack));
-    ctx->op_stack[ctx->op_count++] = n;
-}
-
-Node *pop_op(Parser *ctx) {
-    assert(ctx->op_count > 0);
-    return ctx->op_stack[--ctx->op_count];
-}
-
 Node *make_number(u64 token_index) {
     Node *n = (Node *)calloc(1, sizeof(*n));
 
@@ -371,11 +353,11 @@ bool is_binop(Interpreter *inter, s64 offset) {
 
 void pop_reverse_to_subnodes(Parser *ctx, Node *top) {
     for (u64 i = top->node_count; i-- > 0;) {
-        top->nodes[i] = pop_node(ctx);
+        top->nodes[i] = dynarray_pop(&ctx->node_stack);
     }
 }
 Node *make_node_from_stacks(Interpreter *inter) {
-    Node *top = pop_op(&inter->ctx);
+    Node *top = dynarray_pop(&inter->ctx.op_stack);
 
 
     switch (top->type) {
@@ -399,7 +381,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
             assert(false);
         } break;
         case NODE_ADD: {
-            if (inter->ctx.stack_count < 2) {
+            if (inter->ctx.node_stack.count < 2) {
                 Error err = {};
                 err.err_string = str_lit("Expected 2 operands for + operator");
                 dynarray_append(&inter->errors, err);
@@ -408,7 +390,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
             pop_reverse_to_subnodes(&inter->ctx, top);
         } break;
         case NODE_SUB: {
-            if (inter->ctx.stack_count < 2) {
+            if (inter->ctx.node_stack.count < 2) {
                 Error err = {};
                 err.err_string = str_lit("Expected 2 operands for - operator");
                 dynarray_append(&inter->errors, err);
@@ -418,7 +400,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
 
         } break;
         case NODE_MUL: {
-            if (inter->ctx.stack_count < 2) {
+            if (inter->ctx.node_stack.count < 2) {
                 Error err = {};
                 err.err_string = str_lit("Expected 2 operands for * operator");
                 dynarray_append(&inter->errors, err);
@@ -428,7 +410,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
 
         } break;
         case NODE_DIV: {
-            if (inter->ctx.stack_count < 2) {
+            if (inter->ctx.node_stack.count < 2) {
                 Error err = {};
                 err.err_string = str_lit("Expected 2 operands for / operator");
                 dynarray_append(&inter->errors, err);
@@ -438,7 +420,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
 
         } break;
         case NODE_UNARYADD: {
-            if (inter->ctx.stack_count < 1) {
+            if (inter->ctx.node_stack.count < 1) {
                 Error err = {};
                 err.err_string = str_lit("Expected 1 operands for unary + operator");
                 dynarray_append(&inter->errors, err);
@@ -448,7 +430,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
 
         } break;
         case NODE_UNARYSUB: {
-            if (inter->ctx.stack_count < 1) {
+            if (inter->ctx.node_stack.count < 1) {
                 Error err = {};
                 err.err_string = str_lit("Expected 1 operand for unary - operator");
                 dynarray_append(&inter->errors, err);
@@ -463,9 +445,9 @@ Node *make_node_from_stacks(Interpreter *inter) {
 }
 
 void make_all_nodes_from_operator_ctx(Interpreter *inter) {
-    while (inter->ctx.op_count > 0) {
+    while (inter->ctx.op_stack.count > 0) {
         Node *n = make_node_from_stacks(inter);
-        push_node(&inter->ctx, n);
+        dynarray_append(&inter->ctx.node_stack, n);
     }
 }
 
@@ -479,7 +461,7 @@ Node *make_function_call(Parser *ctx, u64 token_index, u64 arg_count) {
     func->nodes = (Node **)calloc(func->node_count, sizeof(Node *));
 
     for (u64 i = func->node_count; i-- > 0;) {
-        func->nodes[i] = pop_node(ctx);
+        func->nodes[i] = dynarray_pop(&ctx->node_stack);
     }
 
 
@@ -495,19 +477,19 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
         }
 
 
-        if (inter->ctx.op_count >= 2 && inter->ctx.op_stack[inter->ctx.op_count - 1]->type != NODE_OPENPAREN) {
-            s64 p_top = node_table_data[inter->ctx.op_stack[inter->ctx.op_count - 1]->type].precedence;
-            bool left_associative_top = node_table_data[inter->ctx.op_stack[inter->ctx.op_count - 1]->type].left_associative;
+        if (inter->ctx.op_stack.count >= 2 && inter->ctx.op_stack.dat[inter->ctx.op_stack.count - 1]->type != NODE_OPENPAREN) {
+            s64 p_top = node_table_data[inter->ctx.op_stack.dat[inter->ctx.op_stack.count - 1]->type].precedence;
+            bool left_associative_top = node_table_data[inter->ctx.op_stack.dat[inter->ctx.op_stack.count - 1]->type].left_associative;
 
-            s64 p_prev = node_table_data[inter->ctx.op_stack[inter->ctx.op_count - 2]->type].precedence;
+            s64 p_prev = node_table_data[inter->ctx.op_stack.dat[inter->ctx.op_stack.count - 2]->type].precedence;
 
             if (p_top < p_prev || (p_top == p_prev && left_associative_top)) {
 
                 // ignore top
                 {
-                    Node *top = pop_op(&inter->ctx);
+                    Node *top = dynarray_pop(&inter->ctx.op_stack);
                     make_all_nodes_from_operator_ctx(inter);
-                    push_op(&inter->ctx, top);
+                    dynarray_append(&inter->ctx.op_stack, top);
                 }
             }
 
@@ -571,19 +553,19 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
 
 
                 Node *function_call = make_function_call(&inter->ctx, id_index, arg_count);
-                push_node(&inter->ctx, function_call);
+                dynarray_append(&inter->ctx.node_stack, function_call);
             } else {
 
                 Node *var = (Node *)calloc(1, sizeof(*var));
                 var->type = NODE_VARIABLE;
                 var->token_index = id_index;
-                push_node(&inter->ctx, var);
+                dynarray_append(&inter->ctx.node_stack, var);
             }
         } else if (is_token(inter, TOKEN_NUMBER, 0)) {
             u64 token_index = consume(inter);
             Node *n = make_number(token_index);
 
-            push_node(&inter->ctx, n);
+            dynarray_append(&inter->ctx.node_stack, n);
         } else if (is_token(inter, TOKEN_PLUS, 0)) {
 
             if (is_binop(inter, -1)) {
@@ -596,7 +578,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                 unary_add->node_count = 1;
                 unary_add->nodes = (Node **)calloc(unary_add->node_count, sizeof(Node *));
 
-                push_op(&inter->ctx, unary_add);
+                dynarray_append(&inter->ctx.op_stack, unary_add);
             } else {
                 u64 plus_index = consume(inter);
 
@@ -606,7 +588,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                 add->node_count = 2;
                 add->nodes = (Node **)calloc(add->node_count, sizeof(Node *));
 
-                push_op(&inter->ctx, add);
+                dynarray_append(&inter->ctx.op_stack, add);
             }
         } else if (is_token(inter, TOKEN_MINUS, 0)) {
             if (is_binop(inter, -1)) {
@@ -619,7 +601,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                 unary_sub->node_count = 1;
                 unary_sub->nodes = (Node **)calloc(unary_sub->node_count, sizeof(Node *));
 
-                push_op(&inter->ctx, unary_sub);
+                dynarray_append(&inter->ctx.op_stack, unary_sub);
             } else {
                 u64 minus_index = consume(inter);
 
@@ -629,7 +611,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                 sub->node_count = 2;
                 sub->nodes = (Node **)calloc(sub->node_count, sizeof(Node *));
 
-                push_op(&inter->ctx, sub);
+                dynarray_append(&inter->ctx.op_stack, sub);
             }
         } else if (is_token(inter, TOKEN_STAR, 0)) {
             u64 star_index = consume(inter);
@@ -640,7 +622,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
             mul->node_count = 2;
             mul->nodes = (Node **)calloc(mul->node_count, sizeof(Node *));
 
-            push_op(&inter->ctx, mul);
+            dynarray_append(&inter->ctx.op_stack, mul);
         } else if (is_token(inter, TOKEN_SLASH, 0)) {
             u64 slash_index = consume(inter);
 
@@ -650,7 +632,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
             div->node_count = 2;
             div->nodes = (Node **)calloc(div->node_count, sizeof(Node *));
 
-            push_op(&inter->ctx, div);
+            dynarray_append(&inter->ctx.op_stack, div);
         } else if (is_token(inter, TOKEN_OPENPAREN, 0)) {
             u64 open_paren_index = consume(inter);
 
@@ -659,10 +641,10 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
             open_paren->type = NODE_OPENPAREN;
             open_paren->token_index = open_paren_index;
 
-            push_op(&inter->ctx, open_paren);
+            dynarray_append(&inter->ctx.op_stack, open_paren);
         } else if (is_token(inter, TOKEN_CLOSEPAREN, 0)) {
             u64 token_id = consume(inter);
-            if (inter->ctx.stack_count == 0) {
+            if (inter->ctx.node_stack.count == 0) {
                 Error err = {};
                 err.has_token = true;
                 err.token_id = token_id;
@@ -671,7 +653,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                 return;
             }
             while (true) {
-                if (inter->ctx.op_count == 0) {
+                if (inter->ctx.op_stack.count == 0) {
                     // report mismatched parenthesis error here
                     Error err = {};
                     err.has_token = true;
@@ -680,12 +662,12 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                     dynarray_append(&inter->errors, err);
                     return;
                 }
-                if (inter->ctx.op_stack[inter->ctx.op_count - 1]->type == NODE_OPENPAREN) {
-                    pop_op(&inter->ctx);
+                if (inter->ctx.op_stack.dat[inter->ctx.op_stack.count - 1]->type == NODE_OPENPAREN) {
+                    dynarray_pop(&inter->ctx.op_stack);
                     break;
                 }
                 Node *n = make_node_from_stacks(inter);
-                push_node(&inter->ctx, n);
+                dynarray_append(&inter->ctx.node_stack, n);
             }
 
         } else {
@@ -714,7 +696,7 @@ void parse_definition(Interpreter *inter) {
     if (is_token(inter, TOKEN_OPENPAREN, 0)) {
         consume(inter);
         def->type = NODE_FUNCTIONDEF;
-        u64 stack_start = inter->ctx.stack_count;
+        u64 stack_start = inter->ctx.node_stack.count;
 
         while (is_token(inter, TOKEN_IDENTIFIER, 0)) {
             u64 arg_id = consume(inter);
@@ -722,7 +704,7 @@ void parse_definition(Interpreter *inter) {
             Node *iden = (Node *)calloc(1, sizeof(*iden));
             iden->type = NODE_VARIABLE;
             iden->token_index = arg_id;
-            push_node(&inter->ctx, iden);
+            dynarray_append(&inter->ctx.node_stack, iden);
 
             if (is_token(inter, TOKEN_COMMA, 0)) {
                 consume(inter);
@@ -743,17 +725,27 @@ void parse_definition(Interpreter *inter) {
             todo();
         }
         consume(inter);
-        u64 nodes_to_pop_count = inter->ctx.stack_count - stack_start;
+        u64 nodes_to_pop_count = inter->ctx.node_stack.count - stack_start;
 
         def->node_count = nodes_to_pop_count + 1;
         def->nodes = (Node **)calloc(def->node_count, sizeof(*def->nodes));
 
         for (u64 i = def->node_count - 1; i-- > 0;) {
-            def->nodes[i] = pop_node(&inter->ctx);
+            def->nodes[i] = dynarray_pop(&inter->ctx.node_stack);
         }
-
+        u64 before = inter->ctx.node_stack.count;
         parse_expr(inter, TOKEN_SEMICOLON);
-        def->nodes[def->node_count - 1] = pop_node(&inter->ctx);
+        u64 count = inter->ctx.node_stack.count - before;
+        if (count == 0) {
+            // no expr
+            Error err = {};
+            err.err_string = str_lit("No expression after definition");
+            err.token_id = def->token_index;
+            err.has_token = true;
+            dynarray_append(&inter->errors, err);
+            return;
+        }
+        def->nodes[def->node_count - 1] = dynarray_pop(&inter->ctx.node_stack);
 
     } else {
         def->type = NODE_VARIABLEDEF;
@@ -770,17 +762,16 @@ void parse_definition(Interpreter *inter) {
         def->node_count = 1;
         def->nodes = (Node **)calloc(1, sizeof(*def->nodes));
 
-        if (inter->ctx.stack_count == 0) {
+        if (inter->ctx.node_stack.count == 0) {
             Error err = {};
             err.err_string = str_lit("Cannot have empty expression in variable definition");
             dynarray_append(&inter->errors, err);
             return;
         }
-        def->nodes[0] = pop_node(&inter->ctx);
+        def->nodes[0] = dynarray_pop(&inter->ctx.node_stack);
 
     }
-
-    push_node(&inter->ctx, def);
+    dynarray_append(&inter->ctx.node_stack, def);
 }
 
 
@@ -816,8 +807,8 @@ void parse_statement(Interpreter *inter) {
         return;
     }
 
-    stmt->nodes[0] = pop_node(&inter->ctx);
-    push_node(&inter->ctx, stmt);
+    stmt->nodes[0] = dynarray_pop(&inter->ctx.node_stack);
+    dynarray_append(&inter->ctx.node_stack, stmt);
 }
 
 
@@ -836,11 +827,11 @@ void parse(Interpreter *inter) {
         consume(inter);
     }
 
-    prog->node_count = inter->ctx.stack_count;
+    prog->node_count = inter->ctx.node_stack.count;
     prog->nodes = (Node **)calloc(prog->node_count, sizeof(*prog->nodes));
 
     for (u64 i = prog->node_count; i-- > 0;) {
-        prog->nodes[i] = pop_node(&inter->ctx);
+        prog->nodes[i] = dynarray_pop(&inter->ctx.node_stack);
     }
 
     inter->ctx.root = prog;
@@ -939,11 +930,21 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
                 }
                 if (n->node_count > item->func_args) {
                     // too many args
-                    todo();
+                    Error err = {};
+                    err.err_string = str_lit("Too many arguments in function ");
+                    err.token_id = n->token_index;
+                    err.has_token = true;
+                    dynarray_append(&inter->errors, err);
+                    return;
                 }
                 if (n->node_count < item->func_args) {
                     // too few args
-                    todo();
+                    Error err = {};
+                    err.err_string = str_lit("Too few arguments in function ");
+                    err.token_id = n->token_index;
+                    err.has_token = true;
+                    dynarray_append(&inter->errors, err);
+                    return;
                 }
             }
             for (u64 i = 0; i < n->node_count; ++i) {
@@ -1871,7 +1872,7 @@ int main(void) {
     Interpreter *inter = (Interpreter *)calloc(1, sizeof(*inter));
 
     // String src = str_lit("f(x, y):=x*y;f(1,2);");
-    String src = str_lit("f(x):=x*x;f(2);");
+    String src = str_lit("5*;");
 
     memset(inter, 0, sizeof(*inter));
     arena_init(&inter->func_arena, 100000);
@@ -1895,7 +1896,6 @@ int main(void) {
     if (r) {
         printf("Result = %g\n", inter->stack.dat[inter->stack.count - 1].f);
     }
-    return 0;
 
 
 
@@ -1977,7 +1977,7 @@ int main(void) {
                         compile(inter, src_);
 
 
-
+                        u64 node_id = 0;
                         for (u64 j = 0; j < ARRAY_SIZE(text_count); ++j) {
                             if (text_count[j] == 0) continue;
 
@@ -1989,7 +1989,7 @@ int main(void) {
                             // }
                             if (!skip) {
                                 Node *prog = inter->ctx.root;
-                                Node *stmt = prog->nodes[j];
+                                Node *stmt = prog->nodes[node_id];
 
                                 bool is_definition = false;
                                 assert(stmt->node_count == 1);
@@ -2001,12 +2001,13 @@ int main(void) {
                                 if (is_definition) {
                                     // todo();
                                 } else {
-                                    String stmt_s = string_printf(&t, "_s%llu", j);
+                                    String stmt_s = string_printf(&t, "_s%llu", node_id);
                                     execute(inter, stmt_s, nullptr, 0);
                                     String s = string_printf(scratch, "%lg", dynarray_pop(&inter->stack));
                                     memcpy(display_text_buf[j], s.dat, s.count + 1);
                                     display_text_count[j] = s.count;
                                 }
+                                node_id += 1;
                             }
                         }
                     }
