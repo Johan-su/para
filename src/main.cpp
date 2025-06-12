@@ -67,8 +67,7 @@ struct Token {
 
 
 struct Lexer {
-    Token *tokens;
-    u64 token_count;
+    DynArray<Token> tokens;
 
     u64 iter;
 };
@@ -95,10 +94,11 @@ struct Node {
 };
 
 struct Parser {
+    Arena node_arena;
     DynArray<Node *> node_stack;
     DynArray<Node *> op_stack;
-    u64 iter;
 
+    u64 iter;
     Node *root;
 };
 
@@ -194,10 +194,6 @@ String string_builder_to_string(String_Builder *sb) {
     return String {sb->data, sb->count};
 }
 
-void insert_token(Lexer *lex, Token t) {
-    lex->tokens[lex->token_count++] = t;
-}
-
 
 bool is_whitespace(u8 c) {
     switch (c) {
@@ -221,7 +217,6 @@ bool is_alpha(u8 c) {
 void tokenize(Interpreter *inter, String src) {
     inter->src = src;
     Lexer *lex = &inter->lex;
-    lex->tokens = (Token *)calloc(4096, sizeof(*lex->tokens));
 
     while (lex->iter < src.count) {
         if (is_whitespace(src.dat[lex->iter])) {
@@ -244,44 +239,44 @@ void tokenize(Interpreter *inter, String src) {
             u64 index_end = lex->iter;
 
             Token t = Token {TOKEN_NUMBER, index_start, index_end};
-            insert_token(lex, t);
+            dynarray_append(&lex->tokens, t);
         } else if (src.dat[lex->iter] == '+') { // 1 character tokens
-            insert_token(lex, Token {TOKEN_PLUS, lex->iter, lex->iter + 1});
+            dynarray_append(&lex->tokens, Token {TOKEN_PLUS, lex->iter, lex->iter + 1});
             lex->iter += 1;
 
         } else if (src.dat[lex->iter] == '-') {
-            insert_token(lex, Token {TOKEN_MINUS, lex->iter, lex->iter + 1});
+            dynarray_append(&lex->tokens, Token {TOKEN_MINUS, lex->iter, lex->iter + 1});
             lex->iter += 1;
 
         } else if (src.dat[lex->iter] == '*') {
-            insert_token(lex, Token {TOKEN_STAR, lex->iter, lex->iter + 1});
+            dynarray_append(&lex->tokens, Token {TOKEN_STAR, lex->iter, lex->iter + 1});
             lex->iter += 1;
 
         } else if (src.dat[lex->iter] == '/') {
-            insert_token(lex, Token {TOKEN_SLASH, lex->iter, lex->iter + 1});
+            dynarray_append(&lex->tokens, Token {TOKEN_SLASH, lex->iter, lex->iter + 1});
             lex->iter += 1;
 
         } else if (src.dat[lex->iter] == '(') {
-            insert_token(lex, Token {TOKEN_OPENPAREN, lex->iter, lex->iter + 1});
+            dynarray_append(&lex->tokens, Token {TOKEN_OPENPAREN, lex->iter, lex->iter + 1});
             lex->iter += 1;
 
         } else if (src.dat[lex->iter] == ')') {
-            insert_token(lex, Token {TOKEN_CLOSEPAREN, lex->iter, lex->iter + 1});
+            dynarray_append(&lex->tokens, Token {TOKEN_CLOSEPAREN, lex->iter, lex->iter + 1});
             lex->iter += 1;
 
         } else if (src.dat[lex->iter] == ',') {
-            insert_token(lex, Token {TOKEN_COMMA, lex->iter, lex->iter + 1});
+            dynarray_append(&lex->tokens, Token {TOKEN_COMMA, lex->iter, lex->iter + 1});
             lex->iter += 1;
 
         } else if (src.dat[lex->iter] == ';') {
-            insert_token(lex, Token {TOKEN_SEMICOLON, lex->iter, lex->iter + 1});
+            dynarray_append(&lex->tokens, Token {TOKEN_SEMICOLON, lex->iter, lex->iter + 1});
             lex->iter += 1;
         } else if (src.dat[lex->iter] == ':') {
-            insert_token(lex, Token {TOKEN_COLON, lex->iter, lex->iter + 1});
+            dynarray_append(&lex->tokens, Token {TOKEN_COLON, lex->iter, lex->iter + 1});
             lex->iter += 1;
 
         } else if (src.dat[lex->iter] == '=') {
-            insert_token(lex, Token {TOKEN_EQUAL, lex->iter, lex->iter + 1});
+            dynarray_append(&lex->tokens, Token {TOKEN_EQUAL, lex->iter, lex->iter + 1});
             lex->iter += 1;
 
         } else if (is_alpha(src.dat[lex->iter])) {
@@ -294,7 +289,7 @@ void tokenize(Interpreter *inter, String src) {
             u64 index_end = lex->iter;
             Token t = Token {TOKEN_IDENTIFIER, index_start, index_end};
 
-            insert_token(lex, t);
+            dynarray_append(&lex->tokens, t);
         } else {
             Error err = {};
             err.has_char = true;
@@ -311,14 +306,14 @@ void tokenize(Interpreter *inter, String src) {
 
 bool is_token(Interpreter *inter, TokenType t, s64 offset) {
     if ((s64)inter->ctx.iter + offset < 0) return false;
-    if ((s64)inter->ctx.iter + offset > (s64)inter->lex.token_count) return false;
+    if ((s64)inter->ctx.iter + offset > (s64)inter->lex.tokens.count) return false;
 
-    return inter->lex.tokens[(s64)inter->ctx.iter + offset].type == t;
+    return inter->lex.tokens.dat[(s64)inter->ctx.iter + offset].type == t;
 }
 
 String string_from_token(Interpreter *inter, u64 token_index) {
     String s = {};
-    Token *t = inter->lex.tokens + token_index;
+    Token *t = inter->lex.tokens.dat + token_index;
     s.count = t->end - t->start;
     s.dat = inter->src.dat + t->start;
 
@@ -326,14 +321,14 @@ String string_from_token(Interpreter *inter, u64 token_index) {
 };
 
 u64 consume(Interpreter *inter) {
-    assert(inter->ctx.iter < inter->lex.token_count);
+    assert(inter->ctx.iter < inter->lex.tokens.count);
     u64 token_index = inter->ctx.iter;
     inter->ctx.iter += 1;
     return token_index;
 }
 
-Node *make_number(u64 token_index) {
-    Node *n = (Node *)calloc(1, sizeof(*n));
+Node *make_number(Interpreter *inter, u64 token_index) {
+    Node *n = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*n));
 
     n->type = NODE_NUMBER;
     n->token_index = token_index;
@@ -443,22 +438,23 @@ Node *make_node_from_stacks(Interpreter *inter) {
 
     return top;
 }
+#define has_flags(data, flags) (((data) & (flags)) == (flags))
 
-void make_all_nodes_from_operator_ctx(Interpreter *inter) {
-    while (inter->ctx.op_stack.count > 0) {
+void make_all_nodes_from_operator_ctx(Interpreter *inter, NodeType stop_node) {
+    while (inter->ctx.op_stack.count > 0 && inter->ctx.op_stack.dat[inter->ctx.op_stack.count - 1]->type != stop_node) {
         Node *n = make_node_from_stacks(inter);
         dynarray_append(&inter->ctx.node_stack, n);
     }
 }
 
 Node *make_function_call(Parser *ctx, u64 token_index, u64 arg_count) {
-    Node *func = (Node *)calloc(1, sizeof(*func));
+    Node *func = (Node *)arena_alloc(&ctx->node_arena, sizeof(*func));
 
     func->type = NODE_FUNCTION;
     func->token_index = token_index;
     func->node_count = arg_count;
 
-    func->nodes = (Node **)calloc(func->node_count, sizeof(Node *));
+    func->nodes = (Node **)arena_alloc(&ctx->node_arena, func->node_count *sizeof(Node *));
 
     for (u64 i = func->node_count; i-- > 0;) {
         func->nodes[i] = dynarray_pop(&ctx->node_stack);
@@ -470,26 +466,27 @@ Node *make_function_call(Parser *ctx, u64 token_index, u64 arg_count) {
 
 void parse_expr(Interpreter *inter, u64 stop_token_types) {
 
-    while (inter->ctx.iter < inter->lex.token_count) {
+    while (inter->ctx.iter < inter->lex.tokens.count) {
 
-        if (inter->lex.tokens[inter->ctx.iter].type & stop_token_types) {
+        if (inter->lex.tokens.dat[inter->ctx.iter].type & stop_token_types) {
             break;
         }
 
+        DynArray<Node *> *ops = &inter->ctx.op_stack;
 
-        if (inter->ctx.op_stack.count >= 2 && inter->ctx.op_stack.dat[inter->ctx.op_stack.count - 1]->type != NODE_OPENPAREN) {
-            s64 p_top = node_table_data[inter->ctx.op_stack.dat[inter->ctx.op_stack.count - 1]->type].precedence;
-            bool left_associative_top = node_table_data[inter->ctx.op_stack.dat[inter->ctx.op_stack.count - 1]->type].left_associative;
+        if (ops->count >= 2 && ops->dat[ops->count - 1]->type != NODE_OPENPAREN) {
+            s64 p_top = node_table_data[ops->dat[ops->count - 1]->type].precedence;
+            bool left_associative_top = node_table_data[ops->dat[ops->count - 1]->type].left_associative;
 
-            s64 p_prev = node_table_data[inter->ctx.op_stack.dat[inter->ctx.op_stack.count - 2]->type].precedence;
+            s64 p_prev = node_table_data[ops->dat[ops->count - 2]->type].precedence;
 
             if (p_top < p_prev || (p_top == p_prev && left_associative_top)) {
 
                 // ignore top
                 {
-                    Node *top = dynarray_pop(&inter->ctx.op_stack);
-                    make_all_nodes_from_operator_ctx(inter);
-                    dynarray_append(&inter->ctx.op_stack, top);
+                    Node *top = dynarray_pop(ops);
+                    make_all_nodes_from_operator_ctx(inter, NODE_OPENPAREN);
+                    dynarray_append(ops, top);
                 }
             }
 
@@ -506,11 +503,11 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                 u64 func_close_index = 0;
                 {
                     u64 unclosed_paren_count = 1;
-                    for (u64 i = inter->ctx.iter; i < inter->lex.token_count; ++i) {
+                    for (u64 i = inter->ctx.iter; i < inter->lex.tokens.count; ++i) {
 
-                        if (inter->lex.tokens[i].type == TOKEN_OPENPAREN) unclosed_paren_count += 1;
+                        if (inter->lex.tokens.dat[i].type == TOKEN_OPENPAREN) unclosed_paren_count += 1;
 
-                        if (inter->lex.tokens[i].type == TOKEN_CLOSEPAREN) {
+                        if (inter->lex.tokens.dat[i].type == TOKEN_CLOSEPAREN) {
                             if (unclosed_paren_count == 1) {
                                 func_close_index = i;
                                 goto skip;
@@ -530,10 +527,10 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
 
                 u64 arg_count = 0;
                 {
-                    u64 before_count = inter->lex.token_count;
+                    u64 before_count = inter->lex.tokens.count;
                     while (!is_token(inter, TOKEN_CLOSEPAREN, 0)) {
 
-                        inter->lex.token_count = func_close_index;
+                        inter->lex.tokens.count = func_close_index;
                         parse_expr(inter, TOKEN_COMMA);
 
                         arg_count += 1;
@@ -546,7 +543,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                             todo();
                         }
                     }
-                    inter->lex.token_count = before_count;
+                    inter->lex.tokens.count = before_count;
                     consume(inter);
                 }
 
@@ -556,14 +553,14 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                 dynarray_append(&inter->ctx.node_stack, function_call);
             } else {
 
-                Node *var = (Node *)calloc(1, sizeof(*var));
+                Node *var = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*var));
                 var->type = NODE_VARIABLE;
                 var->token_index = id_index;
                 dynarray_append(&inter->ctx.node_stack, var);
             }
         } else if (is_token(inter, TOKEN_NUMBER, 0)) {
             u64 token_index = consume(inter);
-            Node *n = make_number(token_index);
+            Node *n = make_number(inter, token_index);
 
             dynarray_append(&inter->ctx.node_stack, n);
         } else if (is_token(inter, TOKEN_PLUS, 0)) {
@@ -572,21 +569,21 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                 u64 plus_index = consume(inter);
                 // unary add
 
-                Node *unary_add = (Node *)calloc(1, sizeof(*unary_add));
+                Node *unary_add = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*unary_add));
                 unary_add->token_index = plus_index;
                 unary_add->type = NODE_UNARYADD;
                 unary_add->node_count = 1;
-                unary_add->nodes = (Node **)calloc(unary_add->node_count, sizeof(Node *));
+                unary_add->nodes = (Node **)arena_alloc(&inter->ctx.node_arena, unary_add->node_count *sizeof(Node *));
 
                 dynarray_append(&inter->ctx.op_stack, unary_add);
             } else {
                 u64 plus_index = consume(inter);
 
-                Node *add = (Node *)calloc(1, sizeof(*add));
+                Node *add = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*add));
                 add->token_index = plus_index;
                 add->type = NODE_ADD;
                 add->node_count = 2;
-                add->nodes = (Node **)calloc(add->node_count, sizeof(Node *));
+                add->nodes = (Node **)arena_alloc(&inter->ctx.node_arena, add->node_count * sizeof(Node *));
 
                 dynarray_append(&inter->ctx.op_stack, add);
             }
@@ -595,48 +592,48 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                 u64 plus_index = consume(inter);
                 // unary sub
 
-                Node *unary_sub = (Node *)calloc(1, sizeof(*unary_sub));
+                Node *unary_sub = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*unary_sub));
                 unary_sub->token_index = plus_index;
                 unary_sub->type = NODE_UNARYSUB;
                 unary_sub->node_count = 1;
-                unary_sub->nodes = (Node **)calloc(unary_sub->node_count, sizeof(Node *));
+                unary_sub->nodes = (Node **)arena_alloc(&inter->ctx.node_arena, unary_sub->node_count * sizeof(Node *));
 
                 dynarray_append(&inter->ctx.op_stack, unary_sub);
             } else {
                 u64 minus_index = consume(inter);
 
-                Node *sub = (Node *)calloc(1, sizeof(*sub));
+                Node *sub = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*sub));
                 sub->token_index = minus_index;
                 sub->type = NODE_SUB;
                 sub->node_count = 2;
-                sub->nodes = (Node **)calloc(sub->node_count, sizeof(Node *));
+                sub->nodes = (Node **)arena_alloc(&inter->ctx.node_arena, sub->node_count * sizeof(Node *));
 
                 dynarray_append(&inter->ctx.op_stack, sub);
             }
         } else if (is_token(inter, TOKEN_STAR, 0)) {
             u64 star_index = consume(inter);
 
-            Node *mul = (Node *)calloc(1, sizeof(*mul));
+            Node *mul = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*mul));
             mul->token_index = star_index;
             mul->type = NODE_MUL;
             mul->node_count = 2;
-            mul->nodes = (Node **)calloc(mul->node_count, sizeof(Node *));
+            mul->nodes = (Node **)arena_alloc(&inter->ctx.node_arena, mul->node_count * sizeof(Node *));
 
             dynarray_append(&inter->ctx.op_stack, mul);
         } else if (is_token(inter, TOKEN_SLASH, 0)) {
             u64 slash_index = consume(inter);
 
-            Node *div = (Node *)calloc(1, sizeof(*div));
+            Node *div = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*div));
             div->token_index = slash_index;
             div->type = NODE_DIV;
             div->node_count = 2;
-            div->nodes = (Node **)calloc(div->node_count, sizeof(Node *));
+            div->nodes = (Node **)arena_alloc(&inter->ctx.node_arena, div->node_count * sizeof(Node *));
 
             dynarray_append(&inter->ctx.op_stack, div);
         } else if (is_token(inter, TOKEN_OPENPAREN, 0)) {
             u64 open_paren_index = consume(inter);
 
-            Node *open_paren = (Node *)calloc(1, sizeof(*open_paren));
+            Node *open_paren = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*open_paren));
 
             open_paren->type = NODE_OPENPAREN;
             open_paren->token_index = open_paren_index;
@@ -679,7 +676,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
             return;
         }
     }
-    make_all_nodes_from_operator_ctx(inter);
+    make_all_nodes_from_operator_ctx(inter, NODE_INVALID);
 }
 
 void parse_definition(Interpreter *inter) {
@@ -689,7 +686,7 @@ void parse_definition(Interpreter *inter) {
     }
     u64 id = consume(inter);
 
-    Node *def = (Node *)calloc(1, sizeof(*def));
+    Node *def = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*def));
     def->token_index = id;
 
 
@@ -701,7 +698,7 @@ void parse_definition(Interpreter *inter) {
         while (is_token(inter, TOKEN_IDENTIFIER, 0)) {
             u64 arg_id = consume(inter);
 
-            Node *iden = (Node *)calloc(1, sizeof(*iden));
+            Node *iden = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*iden));
             iden->type = NODE_VARIABLE;
             iden->token_index = arg_id;
             dynarray_append(&inter->ctx.node_stack, iden);
@@ -728,7 +725,7 @@ void parse_definition(Interpreter *inter) {
         u64 nodes_to_pop_count = inter->ctx.node_stack.count - stack_start;
 
         def->node_count = nodes_to_pop_count + 1;
-        def->nodes = (Node **)calloc(def->node_count, sizeof(*def->nodes));
+        def->nodes = (Node **)arena_alloc(&inter->ctx.node_arena, def->node_count * sizeof(*def->nodes));
 
         for (u64 i = def->node_count - 1; i-- > 0;) {
             def->nodes[i] = dynarray_pop(&inter->ctx.node_stack);
@@ -760,7 +757,7 @@ void parse_definition(Interpreter *inter) {
         parse_expr(inter, TOKEN_SEMICOLON);
 
         def->node_count = 1;
-        def->nodes = (Node **)calloc(1, sizeof(*def->nodes));
+        def->nodes = (Node **)arena_alloc(&inter->ctx.node_arena, sizeof(*def->nodes));
 
         if (inter->ctx.node_stack.count == 0) {
             Error err = {};
@@ -777,15 +774,15 @@ void parse_definition(Interpreter *inter) {
 
 void parse_statement(Interpreter *inter) {
 
-    Node *stmt = (Node *)calloc(1, sizeof(*stmt));
+    Node *stmt = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*stmt));
     stmt->type = NODE_STATEMENT;
     stmt->token_index = inter->ctx.iter;
     stmt->node_count = 1;
-    stmt->nodes = (Node **)calloc(stmt->node_count, sizeof(*stmt->nodes));
+    stmt->nodes = (Node **)arena_alloc(&inter->ctx.node_arena, stmt->node_count * sizeof(*stmt->nodes));
 
     bool is_definition = false;
 
-    for (u64 i = 0; i < inter->lex.token_count - inter->ctx.iter; ++i) {
+    for (u64 i = 0; i < inter->lex.tokens.count - inter->ctx.iter; ++i) {
         s64 j = (s64)i;
         if (is_token(inter, TOKEN_SEMICOLON, j)) break;
 
@@ -813,11 +810,11 @@ void parse_statement(Interpreter *inter) {
 
 
 void parse(Interpreter *inter) {
-    Node *prog = (Node *)calloc(1, sizeof(*prog));
+    Node *prog = (Node *)arena_alloc(&inter->ctx.node_arena, sizeof(*prog));
     prog->type = NODE_PROGRAM;
     prog->token_index = inter->ctx.iter;
 
-    while (inter->ctx.iter < inter->lex.token_count) {
+    while (inter->ctx.iter < inter->lex.tokens.count) {
         parse_statement(inter);
         if (inter->errors.count > 0) return;
 
@@ -828,7 +825,7 @@ void parse(Interpreter *inter) {
     }
 
     prog->node_count = inter->ctx.node_stack.count;
-    prog->nodes = (Node **)calloc(prog->node_count, sizeof(*prog->nodes));
+    prog->nodes = (Node **)arena_alloc(&inter->ctx.node_arena, prog->node_count * sizeof(*prog->nodes));
 
     for (u64 i = prog->node_count; i-- > 0;) {
         prog->nodes[i] = dynarray_pop(&inter->ctx.node_stack);
@@ -849,7 +846,7 @@ void graphviz_out(Interpreter *inter) {
 
     while (stack.count != 0) {
         Node *top = dynarray_pop(&stack);
-        Token t = inter->lex.tokens[top->token_index];
+        Token t = inter->lex.tokens.dat[top->token_index];
         u64 len = t.end - t.start;
         fprintf(f, "n%llu [label=\"%s: %.*s\"]\n", (u64)top, str_NodeType[top->type].dat, (int)len, inter->src.dat + t.start);
 
@@ -1278,17 +1275,28 @@ bool execute(Interpreter *inter, String func, f64 *args, u64 func_args_count) {
     return false;
 }
 
-void clear_interpreter(Interpreter *inter) {
+void reset_interpreter(Interpreter *inter) {
     inter->src = {};
-    inter->lex = {};
-    inter->ctx = {};
+
+    inter->lex.tokens.count = 0;
+    inter->lex.iter = 0;
+
+    inter->ctx.node_stack.count = 0;
+    inter->ctx.op_stack.count = 0;
+    inter->ctx.iter = 0;
+    inter->ctx.root = nullptr;
+
+
     inter->bytecode.count = 0;
     inter->symbol_ids.count = 0;
     inter->symbols.count = 0;
     arena_clear(&inter->func_arena);
+    arena_clear(&inter->ctx.node_arena);
+
     inter->program_counter = 0;
     inter->return_address = 0;
     inter->base_stackframe_index = 0;
+
     inter->stack.count = 0;
     inter->errors.count = 0;
 }
@@ -1478,7 +1486,6 @@ u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, UI_Pane *p, f3
 
 
 
-#define has_flags(data, flags) (((data) & (flags)) == (flags))
 
 
 
@@ -1859,7 +1866,39 @@ void end_ui(UI_State *ui) {
 
 
 
+
+void test() {
+    static Interpreter test_inter = {};
+    // String src = str_lit("f(x, y):=x*y;f(1,2);");
+    String src = str_lit("(5+5+5);");
+
+    arena_init(&test_inter.func_arena, 100000);
+    arena_init(&test_inter.ctx.node_arena, 100000);
+    compile(&test_inter, src);
+    for (u64 i = 0; i < test_inter.errors.count; ++i) {
+        Error *err = test_inter.errors.dat + i;
+        String s = err->err_string;
+        printf("ERROR: %.*s ", (s32)s.count, s.dat);
+
+        if (err->has_token) {
+            String tok = string_from_token(&test_inter, err->token_id);
+            printf("`%.*s`", (s32)tok.count, tok.dat);
+        }
+
+
+        printf("\n");
+    }
+    print_bytecode(&test_inter.bytecode);
+    bool r = execute(&test_inter, str_lit("_s2"), nullptr, 0);
+    printf("r = %s\n", r ? "true" : "false");
+    if (r) {
+        printf("Result = %g\n", test_inter.stack.dat[test_inter.stack.count - 1].f);
+    }
+}
+
+
 UI_State ui = {};
+Interpreter inter = {};
 
 int main(void) {
 
@@ -1869,35 +1908,10 @@ int main(void) {
     String_Builder sb; string_builder_init(&sb, 65000);
 
     // Interpreter *e = (Interpreter *)arena_alloc(scratch, sizeof(*e));
-    Interpreter *inter = (Interpreter *)calloc(1, sizeof(*inter));
-
-    // String src = str_lit("f(x, y):=x*y;f(1,2);");
-    String src = str_lit("5*;");
-
-    memset(inter, 0, sizeof(*inter));
-    arena_init(&inter->func_arena, 100000);
-    compile(inter, src);
-    for (u64 i = 0; i < inter->errors.count; ++i) {
-        Error *err = inter->errors.dat + i;
-        String s = err->err_string;
-        printf("ERROR: %.*s ", (s32)s.count, s.dat);
-
-        if (err->has_token) {
-            String tok = string_from_token(inter, err->token_id);
-            printf("`%.*s`", (s32)tok.count, tok.dat);
-        }
 
 
-        printf("\n");
-    }
-    print_bytecode(&inter->bytecode);
-    bool r = execute(inter, str_lit("_s2"), nullptr, 0);
-    printf("r = %s\n", r ? "true" : "false");
-    if (r) {
-        printf("Result = %g\n", inter->stack.dat[inter->stack.count - 1].f);
-    }
-
-
+    arena_init(&inter.func_arena, 100000);
+    arena_init(&inter.ctx.node_arena, 100000);
 
 
     int screen_w = 1366;
@@ -1973,8 +1987,8 @@ int main(void) {
                             display_text_count[j] = 0;
                         }
 
-                        clear_interpreter(inter);
-                        compile(inter, src_);
+                        reset_interpreter(&inter);
+                        compile(&inter, src_);
 
 
                         u64 node_id = 0;
@@ -1982,13 +1996,13 @@ int main(void) {
                             if (text_count[j] == 0) continue;
 
                             bool skip = false;
-                            if (inter->errors.count > 0) skip = true;
+                            if (inter.errors.count > 0) skip = true;
                             // while (inter->errors.count > 0) {
                             //     Error *e = inter->errors.dat + inter->errors.count - 1;
                             //     todo();
                             // }
                             if (!skip) {
-                                Node *prog = inter->ctx.root;
+                                Node *prog = inter.ctx.root;
                                 Node *stmt = prog->nodes[node_id];
 
                                 bool is_definition = false;
@@ -2002,8 +2016,8 @@ int main(void) {
                                     // todo();
                                 } else {
                                     String stmt_s = string_printf(&t, "_s%llu", node_id);
-                                    execute(inter, stmt_s, nullptr, 0);
-                                    String s = string_printf(scratch, "%lg", dynarray_pop(&inter->stack));
+                                    execute(&inter, stmt_s, nullptr, 0);
+                                    String s = string_printf(scratch, "%lg", dynarray_pop(&inter.stack));
                                     memcpy(display_text_buf[j], s.dat, s.count + 1);
                                     display_text_count[j] = s.count;
                                 }
