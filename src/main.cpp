@@ -1578,6 +1578,11 @@ void draw_ui(UI_State *ui) {
     }
 }
 
+f32 max(f32 a, f32 b) {
+    if (a > b) return a;
+    return b;
+}
+
 void update_panes(UI_State *ui) {
 
     DynArray<UI_Pane> *panes = ui->ui_panes + ui->active_panes_id;
@@ -1608,9 +1613,9 @@ void update_panes(UI_State *ui) {
         if (pane->parent_id != nil_id) {
             UI_Pane *parent = panes->dat + pane->parent_id;
             // assuming downwards layout
-            pane->x = parent->x;
+            pane->x = 1 + parent->x;
             pane->y = parent->y + parent->h_offset;
-            
+            pane->w = max(pane->w, parent->w - 2); 
             parent->h_offset += pane->h;
         }
 
