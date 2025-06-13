@@ -157,7 +157,6 @@ separate work thread from ui thread for more heavy tasks for example, running fu
 make ui scale correctly according to window size
 chained equality (checking for equality at every step in some list of expressions)
 
-make panes resizable
 add snapping for panes
 add ability to snap with keyboard hotkeys instead of only mouse
 add more math operators/functions like integrals, derivatives, sum.
@@ -1624,6 +1623,8 @@ void set_resizing(UI_State *ui, UI_Pane *pane, V2f32 pos) {
     ui->resize_h = pane->h;
 }
 
+
+
 void update_panes(UI_State *ui) {
 
     DynArray<UI_Pane> *panes = ui->ui_panes + ui->active_panes_id;
@@ -1674,37 +1675,25 @@ void update_panes(UI_State *ui) {
                     pane->h = ui->resize_h + ui->my - ui->resize_y;
                 }
             }
-
-            if (mouse_collides(pane->x + PANE_MARGIN, pane->y, pane->w - 2 * PANE_MARGIN, PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                set_resizing(ui, pane, make_V2f32(0, -1));
-            }
-
-            if (mouse_collides(pane->x + PANE_MARGIN, pane->y + pane->h - PANE_MARGIN, pane->w - 2 * PANE_MARGIN, PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                set_resizing(ui, pane, make_V2f32(0, 1));
-            }
-
-            if (mouse_collides(pane->x + pane->w - PANE_MARGIN, pane->y + PANE_MARGIN, PANE_MARGIN, pane->h - 2 * PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                set_resizing(ui, pane, make_V2f32(1, 0));
-            }
-
-            if (mouse_collides(pane->x, pane->y + PANE_MARGIN, PANE_MARGIN, pane->h - 2 * PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                set_resizing(ui, pane, make_V2f32(-1, 0));
-            }
-
-            if (mouse_collides(pane->x, pane->y, PANE_MARGIN, PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                set_resizing(ui, pane, make_V2f32(-1, -1));
-            }
-            
-            if (mouse_collides(pane->x + pane->w - PANE_MARGIN, pane->y, PANE_MARGIN, PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                set_resizing(ui, pane, make_V2f32(1, -1));
-            }
-
-            if (mouse_collides(pane->x, pane->y + pane->h - PANE_MARGIN, PANE_MARGIN, PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                set_resizing(ui, pane, make_V2f32(-1, 1));
-            }
-
-            if (mouse_collides(pane->x + pane->w - PANE_MARGIN, pane->y + pane->h - PANE_MARGIN, PANE_MARGIN, PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                set_resizing(ui, pane, make_V2f32(1, 1));
+            {
+                struct Value {f32 x, y, w, h, dx, dy;} table[] = {
+                    {pane->x, pane->y, pane->w, PANE_MARGIN, 0, -1},
+                    {pane->x, pane->y + pane->h - PANE_MARGIN, pane->w, PANE_MARGIN, 0, 1},
+                    {pane->x + pane->w - PANE_MARGIN, pane->y, PANE_MARGIN, pane->h, 1, 0},
+                    {pane->x, pane->y, PANE_MARGIN, pane->h, -1, 0},
+                };
+                f32 dx = 0;
+                f32 dy = 0;
+                for (u64 j = 0; j < ARRAY_SIZE(table); ++j) {
+                    Value *v = table + j;
+                    if (mouse_collides(v->x, v->y, v->w, v->h) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                        dx += v->dx;
+                        dy += v->dy;
+                    }
+                }
+                if (dx != 0 || dy != 0) {
+                    set_resizing(ui, pane, make_V2f32(dx, dy));
+                }
             }
         }
 
