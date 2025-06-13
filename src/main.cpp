@@ -1508,7 +1508,7 @@ u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, UI_Pane *p, f3
             return j + 1;
         }
     }
-    if (*text_count > 0) return *text_count - 1;
+    if (*text_count > 0) return *text_count;
     else return 0;
 }
 
