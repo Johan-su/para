@@ -1387,7 +1387,7 @@ struct UI_State {
     u64 active_id;
 
     MouseAction mouse_action;
-    MouseAction display_mouse_action;
+    MouseDisplay display_mouse;
 
     u64 drag_id;
     f32 drag_x_offset;
@@ -1629,7 +1629,7 @@ void set_resizing(UI_State *ui, UI_Pane *pane) {
 
 void update_panes(UI_State *ui) {
 
-    ui->display_mouse_action = MOUSE_ACTION_NONE;
+    ui->display_mouse = MOUSE_DISPLAY_DEFAULT;
 
     DynArray<UI_Pane> *panes = ui->ui_panes + ui->active_panes_id;
 
@@ -1647,7 +1647,7 @@ void update_panes(UI_State *ui) {
                 pane->y = ui->my - ui->drag_y_offset;
             }
             if (mouse_collides(pane->x, pane->y + PANE_MARGIN, pane->w, DRAG_BAR_HEIGHT)) {
-                ui->display_mouse_action = MOUSE_ACTION_DRAGGING;
+                ui->display_mouse = MOUSE_DISPLAY_POINTING_HAND;
                 if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                     ui->mouse_action = MOUSE_ACTION_DRAGGING;
                     ui->drag_id = pane->hash;
@@ -1699,7 +1699,7 @@ void update_panes(UI_State *ui) {
                     }
                 }
                 if (dx != 0 || dy != 0) {
-                    ui->display_mouse_action = MOUSE_ACTION_RESIZING;
+                    ui->display_mouse = MOUSE_DISPLAY_RESIZING;
                     ui->resize_pos = make_V2f32(dx, dy);
                     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                         set_resizing(ui, pane);
@@ -1719,24 +1719,28 @@ void update_panes(UI_State *ui) {
 
         if (has_flags(pane->flags, PANE_TEXT_INPUT)) {
 
-            if (mouse_collides(pane->x, pane->y, pane->w, pane->h) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                if (ui->active && ui->active_id == pane->hash && ui->text_cursor) {
+            if (mouse_collides(pane->x, pane->y, pane->w, pane->h)) {
+                ui->display_mouse = MOUSE_DISPLAY_IBEAM;
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
 
-                    ui->selecting = false;
-                    if (ui->mx < pane->x) {
-                        ui->cursor_pos = 0;
-                    } else if (ui->mx > pane->x + pane->w) {
-                        ui->cursor_pos = *pane->text_count - 1;
+                    if (ui->active && ui->active_id == pane->hash && ui->text_cursor) {
+
+                        ui->selecting = false;
+                        if (ui->mx < pane->x) {
+                            ui->cursor_pos = 0;
+                        } else if (ui->mx > pane->x + pane->w) {
+                            ui->cursor_pos = *pane->text_count - 1;
+                        } else {
+                            ui->cursor_pos = get_text_cursor_pos_from_mouse(pane->text_buf, pane->text_count, pane, ui->mx);
+                        }
+
                     } else {
+                        ui->selecting = false;
+                        ui->text_cursor = true;
                         ui->cursor_pos = get_text_cursor_pos_from_mouse(pane->text_buf, pane->text_count, pane, ui->mx);
+                        ui->active_id = pane->hash;
+                        ui->active = true;
                     }
-
-                } else {
-                    ui->selecting = false;
-                    ui->text_cursor = true;
-                    ui->cursor_pos = get_text_cursor_pos_from_mouse(pane->text_buf, pane->text_count, pane, ui->mx);
-                    ui->active_id = pane->hash;
-                    ui->active = true;
                 }
             }
             pane->event.text_input_changed = false;
@@ -1965,14 +1969,17 @@ void begin_ui(UI_State *ui) {
 
 void end_ui(UI_State *ui) {
     update_panes(ui);
-    switch (ui->display_mouse_action) {
-        case MOUSE_ACTION_NONE: {
+    switch (ui->display_mouse) {
+        case MOUSE_DISPLAY_DEFAULT: {
             SetMouseCursor(MOUSE_CURSOR_DEFAULT);
         } break;
-        case MOUSE_ACTION_DRAGGING: {
+        case MOUSE_DISPLAY_POINTING_HAND: {
             SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
         } break;
-        case MOUSE_ACTION_RESIZING: {
+        case MOUSE_DISPLAY_IBEAM: {
+            SetMouseCursor(MOUSE_CURSOR_IBEAM);
+        } break;
+        case MOUSE_DISPLAY_RESIZING: {
             V2f32 p = ui->resize_pos;
             if (p.x != 0 && p.x == p.y) {
                 SetMouseCursor(MOUSE_CURSOR_RESIZE_NWSE);
@@ -1984,7 +1991,7 @@ void end_ui(UI_State *ui) {
                 SetMouseCursor(MOUSE_CURSOR_RESIZE_NS);
             }
         } break;
-        case MouseAction_COUNT: assert(false && "unreachable"); break;
+        case MouseDisplay_COUNT: assert(false && "unreachable"); break;
     }
 }
 

@@ -69,6 +69,12 @@ X(MOUSE_ACTION_DRAGGING) \
 X(MOUSE_ACTION_RESIZING) \
 
 
+#define MouseDisplayTable(X) \
+X(MOUSE_DISPLAY_DEFAULT) \
+X(MOUSE_DISPLAY_POINTING_HAND) \
+X(MOUSE_DISPLAY_IBEAM) \
+X(MOUSE_DISPLAY_RESIZING) \
+
 #define GenEnumX(type, ...) type,
 #define GenEnum(name, table) \
 enum name { \
@@ -107,6 +113,7 @@ GenEnum(NodeType, NodeDataTable)
 GenEnum(BytecodeType, BytecodeTypeTable)
 GenEnum(ItemType, ItemTypeTable)
 GenEnum(MouseAction, MouseActionsTable)
+GenEnum(MouseDisplay, MouseDisplayTable)
 
 GenEnumFlag(TokenType, TokenTypeTable)
 GenEnumFlag(PaneFlags, PaneFlagsTable)
