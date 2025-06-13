@@ -63,6 +63,10 @@ X(PANE_TEXT_INPUT) \
 X(PANE_TEXT_DISPLAY) \
 X(PANE_BACKGROUND_COLOR) \
 
+#define MouseActionsTable(X) \
+X(MOUSE_ACTION_NONE) \
+X(MOUSE_ACTION_DRAGGING) \
+X(MOUSE_ACTION_RESIZING) \
 
 
 #define GenEnumX(type, ...) type,
@@ -102,6 +106,7 @@ enum name { \
 GenEnum(NodeType, NodeDataTable)
 GenEnum(BytecodeType, BytecodeTypeTable)
 GenEnum(ItemType, ItemTypeTable)
+GenEnum(MouseAction, MouseActionsTable)
 
 GenEnumFlag(TokenType, TokenTypeTable)
 GenEnumFlag(PaneFlags, PaneFlagsTable)

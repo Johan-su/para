@@ -1386,11 +1386,21 @@ struct UI_State {
     bool active;
     u64 active_id;
 
+    MouseAction mouse_action;
+    MouseAction display_mouse_action;
 
-    bool dragging;
     u64 drag_id;
     f32 drag_x_offset;
     f32 drag_y_offset;
+
+    u64 resize_id;
+    f32 resize_x;
+    f32 resize_y;
+    f32 resize_w;
+    f32 resize_h;
+    V2f32 resize_pos;
+
+
 
     bool text_cursor;
     u64 cursor_pos;
@@ -1401,13 +1411,6 @@ struct UI_State {
     u64 selection_end;
 
 
-    bool resizing;
-    u64 resize_id;
-    f32 resize_x;
-    f32 resize_y;
-    f32 resize_w;
-    f32 resize_h;
-    V2f32 resize_pos;
 
 
 
@@ -1613,10 +1616,9 @@ f32 min(f32 a, f32 b) {
     return b;
 }
 
-void set_resizing(UI_State *ui, UI_Pane *pane, V2f32 pos) {
-    ui->resizing = true;
+void set_resizing(UI_State *ui, UI_Pane *pane) {
+    ui->mouse_action = MOUSE_ACTION_RESIZING;
     ui->resize_id = pane->hash;
-    ui->resize_pos = pos;
     ui->resize_x = ui->mx;
     ui->resize_y = ui->my;
     ui->resize_w = pane->w;
@@ -1627,6 +1629,8 @@ void set_resizing(UI_State *ui, UI_Pane *pane, V2f32 pos) {
 
 void update_panes(UI_State *ui) {
 
+    ui->display_mouse_action = MOUSE_ACTION_NONE;
+
     DynArray<UI_Pane> *panes = ui->ui_panes + ui->active_panes_id;
 
     for (u64 i = 0; i < panes->count; ++i) {
@@ -1634,19 +1638,22 @@ void update_panes(UI_State *ui) {
 
 
         if (has_flags(pane->flags, PANE_DRAGGABLE)) {
-            if (ui->dragging && ui->drag_id == pane->hash && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-                ui->dragging = false;
+            if (ui->mouse_action == MOUSE_ACTION_DRAGGING && ui->drag_id == pane->hash && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                ui->mouse_action = MOUSE_ACTION_NONE;
             }
 
-            if (ui->dragging && ui->drag_id == pane->hash) {
+            if (ui->mouse_action == MOUSE_ACTION_DRAGGING && ui->drag_id == pane->hash) {
                 pane->x = ui->mx - ui->drag_x_offset;
                 pane->y = ui->my - ui->drag_y_offset;
             }
-            if (mouse_collides(pane->x, pane->y + PANE_MARGIN, pane->w, DRAG_BAR_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                ui->dragging = true;
-                ui->drag_id = pane->hash;
-                ui->drag_x_offset = ui->mx - pane->x;
-                ui->drag_y_offset = ui->my - pane->y;
+            if (mouse_collides(pane->x, pane->y + PANE_MARGIN, pane->w, DRAG_BAR_HEIGHT)) {
+                ui->display_mouse_action = MOUSE_ACTION_DRAGGING;
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    ui->mouse_action = MOUSE_ACTION_DRAGGING;
+                    ui->drag_id = pane->hash;
+                    ui->drag_x_offset = ui->mx - pane->x;
+                    ui->drag_y_offset = ui->my - pane->y;
+                }
             }
             pane->h_offset += DRAG_BAR_HEIGHT + 2 * PANE_MARGIN;
         }
@@ -1654,11 +1661,11 @@ void update_panes(UI_State *ui) {
 
         if (has_flags(pane->flags, PANE_RESIZEABLE)) {
 
-            if (ui->resizing && ui->resize_id == pane->hash && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-                ui->resizing = false;
+            if (ui->mouse_action == MOUSE_ACTION_RESIZING && ui->resize_id == pane->hash && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                ui->mouse_action = MOUSE_ACTION_NONE;
             }
 
-            if (ui->resizing && ui->resize_id == pane->hash) {
+            if (ui->mouse_action == MOUSE_ACTION_RESIZING && ui->resize_id == pane->hash) {
                 
                 if (ui->resize_pos.x < 0) {
                     pane->x = ui->mx;
@@ -1686,13 +1693,17 @@ void update_panes(UI_State *ui) {
                 f32 dy = 0;
                 for (u64 j = 0; j < ARRAY_SIZE(table); ++j) {
                     Value *v = table + j;
-                    if (mouse_collides(v->x, v->y, v->w, v->h) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    if (mouse_collides(v->x, v->y, v->w, v->h)) {
                         dx += v->dx;
                         dy += v->dy;
                     }
                 }
                 if (dx != 0 || dy != 0) {
-                    set_resizing(ui, pane, make_V2f32(dx, dy));
+                    ui->display_mouse_action = MOUSE_ACTION_RESIZING;
+                    ui->resize_pos = make_V2f32(dx, dy);
+                    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                        set_resizing(ui, pane);
+                    }
                 }
             }
         }
@@ -1954,6 +1965,27 @@ void begin_ui(UI_State *ui) {
 
 void end_ui(UI_State *ui) {
     update_panes(ui);
+    switch (ui->display_mouse_action) {
+        case MOUSE_ACTION_NONE: {
+            SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+        } break;
+        case MOUSE_ACTION_DRAGGING: {
+            SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+        } break;
+        case MOUSE_ACTION_RESIZING: {
+            V2f32 p = ui->resize_pos;
+            if (p.x != 0 && p.x == p.y) {
+                SetMouseCursor(MOUSE_CURSOR_RESIZE_NWSE);
+            } else if (p.x != 0 && p.x == -p.y) {
+                SetMouseCursor(MOUSE_CURSOR_RESIZE_NESW);
+            } else if (p.x != 0 && p.y == 0) {
+                SetMouseCursor(MOUSE_CURSOR_RESIZE_EW);
+            } else if (p.x == 0 && p.y != 0) {
+                SetMouseCursor(MOUSE_CURSOR_RESIZE_NS);
+            }
+        } break;
+        case MouseAction_COUNT: assert(false && "unreachable"); break;
+    }
 }
 
 
