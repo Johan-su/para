@@ -1310,6 +1310,23 @@ void compile(Interpreter *inter, String src) {
     if (inter->errors.count == 0) bytecode_from_tree(inter);
 }
 
+
+
+union V2f32 {
+    f32 v[2];
+    struct {
+        f32 x, y;
+    };
+
+};
+
+V2f32 make_V2f32(f32 x, f32 y) {
+    V2f32 pos = {};
+    pos.x = x;
+    pos.y = y;
+    return pos;
+}
+
 union V4u8 {
     u8 v[4];
     struct {
@@ -1365,13 +1382,6 @@ struct UI_Pane {
 
 };
 
-enum Direction {
-    NORTH,
-    SOUTH,
-    EAST,
-    WEST,
-};
-
 struct UI_State {
 
     bool active;
@@ -1394,9 +1404,11 @@ struct UI_State {
 
     bool resizing;
     u64 resize_id;
-    f32 resize_x_offset;
-    f32 resize_y_offset;
-    Direction resize_pos;
+    f32 resize_x;
+    f32 resize_y;
+    f32 resize_w;
+    f32 resize_h;
+    V2f32 resize_pos;
 
 
 
@@ -1555,7 +1567,7 @@ void draw_ui(UI_State *ui) {
         }
 
         if (has_flags(pane->flags, PANE_DRAGGABLE)) {
-            DrawRectangleV(Vector2 {pane->x, pane->y}, Vector2 {pane->w, DRAG_BAR_HEIGHT}, DRAG_BAR_COLOR);
+            DrawRectangleV(Vector2 {pane->x, pane->y + PANE_MARGIN}, Vector2 {pane->w, DRAG_BAR_HEIGHT}, DRAG_BAR_COLOR);
         }
 
         if (has_flags(pane->flags, PANE_TEXT_INPUT)) {
@@ -1597,6 +1609,21 @@ f32 max(f32 a, f32 b) {
     return b;
 }
 
+f32 min(f32 a, f32 b) {
+    if (a < b) return a;
+    return b;
+}
+
+void set_resizing(UI_State *ui, UI_Pane *pane, V2f32 pos) {
+    ui->resizing = true;
+    ui->resize_id = pane->hash;
+    ui->resize_pos = pos;
+    ui->resize_x = ui->mx;
+    ui->resize_y = ui->my;
+    ui->resize_w = pane->w;
+    ui->resize_h = pane->h;
+}
+
 void update_panes(UI_State *ui) {
 
     DynArray<UI_Pane> *panes = ui->ui_panes + ui->active_panes_id;
@@ -1614,14 +1641,13 @@ void update_panes(UI_State *ui) {
                 pane->x = ui->mx - ui->drag_x_offset;
                 pane->y = ui->my - ui->drag_y_offset;
             }
-
-            if (mouse_collides(pane->x, pane->y, pane->w, DRAG_BAR_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            if (mouse_collides(pane->x, pane->y + PANE_MARGIN, pane->w, DRAG_BAR_HEIGHT) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 ui->dragging = true;
                 ui->drag_id = pane->hash;
                 ui->drag_x_offset = ui->mx - pane->x;
                 ui->drag_y_offset = ui->my - pane->y;
             }
-            pane->h_offset += DRAG_BAR_HEIGHT + PANE_MARGIN;
+            pane->h_offset += DRAG_BAR_HEIGHT + 2 * PANE_MARGIN;
         }
 
 
@@ -1632,20 +1658,54 @@ void update_panes(UI_State *ui) {
             }
 
             if (ui->resizing && ui->resize_id == pane->hash) {
-                if (ui->resize_pos == WEST) {
-                    todo(); 
+                
+                if (ui->resize_pos.x < 0) {
+                    pane->x = ui->mx;
+                    pane->w = ui->resize_w + ui->resize_x - ui->mx;
+
+                } else if (ui->resize_pos.x > 0) {
+                    pane->w = ui->resize_w + ui->mx - ui->resize_x;
+                } 
+
+                if (ui->resize_pos.y < 0) {
+                    pane->y = ui->my;
+                    pane->h = ui->resize_h + ui->resize_y - ui->my;
+                } else if (ui->resize_pos.y > 0) {
+                    pane->h = ui->resize_h + ui->my - ui->resize_y;
                 }
             }
 
-
-            if (mouse_collides(pane->x, pane->y + PANE_MARGIN, PANE_MARGIN, pane->h - PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                ui->resizing = true;
-                ui->resize_id = pane->hash;
-                ui->resize_pos = WEST;
-                ui->resize_x_offset = ui->mx - pane->x;
-                ui->resize_y_offset = ui->my - pane->y;
+            if (mouse_collides(pane->x + PANE_MARGIN, pane->y, pane->w - 2 * PANE_MARGIN, PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                set_resizing(ui, pane, make_V2f32(0, -1));
             }
 
+            if (mouse_collides(pane->x + PANE_MARGIN, pane->y + pane->h - PANE_MARGIN, pane->w - 2 * PANE_MARGIN, PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                set_resizing(ui, pane, make_V2f32(0, 1));
+            }
+
+            if (mouse_collides(pane->x + pane->w - PANE_MARGIN, pane->y + PANE_MARGIN, PANE_MARGIN, pane->h - 2 * PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                set_resizing(ui, pane, make_V2f32(1, 0));
+            }
+
+            if (mouse_collides(pane->x, pane->y + PANE_MARGIN, PANE_MARGIN, pane->h - 2 * PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                set_resizing(ui, pane, make_V2f32(-1, 0));
+            }
+
+            if (mouse_collides(pane->x, pane->y, PANE_MARGIN, PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                set_resizing(ui, pane, make_V2f32(-1, -1));
+            }
+            
+            if (mouse_collides(pane->x + pane->w - PANE_MARGIN, pane->y, PANE_MARGIN, PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                set_resizing(ui, pane, make_V2f32(1, -1));
+            }
+
+            if (mouse_collides(pane->x, pane->y + pane->h - PANE_MARGIN, PANE_MARGIN, PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                set_resizing(ui, pane, make_V2f32(-1, 1));
+            }
+
+            if (mouse_collides(pane->x + pane->w - PANE_MARGIN, pane->y + pane->h - PANE_MARGIN, PANE_MARGIN, PANE_MARGIN) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                set_resizing(ui, pane, make_V2f32(1, 1));
+            }
         }
 
         if (pane->parent_id != nil_id) {
@@ -1653,7 +1713,7 @@ void update_panes(UI_State *ui) {
             // assuming downwards layout
             pane->x = PANE_MARGIN + parent->x;
             pane->y = parent->y + parent->h_offset;
-            pane->w = max(pane->w, parent->w - 2 * PANE_MARGIN); 
+            pane->w = parent->w - 2 * PANE_MARGIN;
             parent->h_offset += pane->h + PANE_MARGIN;
         }
 
@@ -2006,7 +2066,7 @@ int main(void) {
 
         begin_ui(&ui);
         {
-            create_pane(&ui, PANE_DRAGGABLE|PANE_BACKGROUND_COLOR, 69420'0, 0, 0, 400, 500, LIGHTGRAY, nullptr, nullptr, 0);
+            create_pane(&ui, PANE_DRAGGABLE|PANE_RESIZEABLE|PANE_BACKGROUND_COLOR, 69420'0, 0, 0, 400, 500, LIGHTGRAY, nullptr, nullptr, 0);
 
             // text input + display string
             push_parent(&ui);
