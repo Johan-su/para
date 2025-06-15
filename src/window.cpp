@@ -115,6 +115,13 @@ LRESULT window_callback( HWND wnd, UINT msg, WPARAM w_param, LPARAM l_param) {
                 case VK_SPACE: update_button_state(g_inputs.buttons + BUTTON_SPACE); break;
                 case VK_LSHIFT: update_button_state(g_inputs.buttons + BUTTON_LSHIFT); break;
                 case VK_LCONTROL: update_button_state(g_inputs.buttons + BUTTON_LCTRL); break;
+                case VK_BACK: update_button_state(g_inputs.buttons + BUTTON_BACKSPACE); break;
+                case VK_LEFT: update_button_state(g_inputs.buttons + BUTTON_LEFT); break;
+                case VK_UP: update_button_state(g_inputs.buttons + BUTTON_UP); break;
+                case VK_RIGHT: update_button_state(g_inputs.buttons + BUTTON_RIGHT); break;
+                case VK_DOWN: update_button_state(g_inputs.buttons + BUTTON_DOWN); break;
+                case VK_HOME: update_button_state(g_inputs.buttons + BUTTON_HOME); break;
+                case VK_END: update_button_state(g_inputs.buttons + BUTTON_END); break;
             }
 
         } break;
@@ -179,7 +186,7 @@ LRESULT window_callback( HWND wnd, UINT msg, WPARAM w_param, LPARAM l_param) {
 
 static_assert(sizeof(Window) == sizeof(Window_Internal), "window and window_internal sizes have to be the same");
 
-bool create_window(Window *window_output) {
+bool create_window(s32 w, s32 h, String title, Window *window_output) {
     if (!window_output) return false;
 
     HINSTANCE handle = GetModuleHandle(nullptr);
@@ -203,12 +210,12 @@ bool create_window(Window *window_output) {
         window.handle = CreateWindowEx(
             0,
             "window_class",
-            "window",
+            (const char *)title.dat,
             WS_BORDER|WS_VISIBLE,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
+            w,
+            h,
             nullptr,
             nullptr,
             handle,
@@ -292,9 +299,8 @@ void swap_buffers(Window *w) {
 
 int main2(void) {
 
-
     Window window;
-    if (!create_window(&window)) return 1;
+    if (!create_window(500, 500, str_lit("Window title"), &window)) return 1;
     if (!set_window_context(&window)) return 1;
     if (!gladLoadGL()) {
         LOG_ERROR("Failed to load newer OpenGl functions\n");

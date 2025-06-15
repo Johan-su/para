@@ -1,5 +1,6 @@
+#pragma once
 #include "common.h"
-
+#include "string.h"
 struct Window {
     char d[16];
 };
@@ -37,8 +38,15 @@ enum Button {
     BUTTON_Z,
     BUTTON_ESC,
     BUTTON_SPACE,
+    BUTTON_BACKSPACE,
     BUTTON_LSHIFT,
     BUTTON_LCTRL,
+    BUTTON_LEFT,
+    BUTTON_UP,
+    BUTTON_RIGHT,
+    BUTTON_DOWN,
+    BUTTON_HOME,
+    BUTTON_END,
     BUTTON_ML, // mouse
     BUTTON_MM,
     BUTTON_MR,
@@ -69,3 +77,4 @@ struct Input {
 Input get_inputs(Window *window);
 u8 get_button_presses(ButtonState *s);
 void swap_buffers(Window *window);
+bool create_window(s32 w, s32 h, String title, Window *window_output);
