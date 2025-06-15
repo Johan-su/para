@@ -1658,6 +1658,10 @@ void update_panes(UI_State *ui) {
             pane->h_offset += DRAG_BAR_HEIGHT + 2 * PANE_MARGIN;
         }
 
+        if (has_flags(pane->flags, PANE_SCROLL)) {
+            todo();
+        }
+
 
         if (has_flags(pane->flags, PANE_RESIZEABLE)) {
 
