@@ -5,8 +5,8 @@ set FLAGS=-O0 -D _CRT_SECURE_NO_WARNINGS -fwrapv -fno-strict-aliasing  -g
 set SANITIZE=-fsanitize=address -fsanitize=undefined
 set WINLIBS= -l User32.lib -l Gdi32.lib -l Shell32.lib -l Winmm.lib
 
-set LIBS=-l opengl32 -l lib/raylib.lib
-set INCLUDES=-I lib/include
+set LIBS=-l opengl32
+set INCLUDES=-I ext
 
 if not exist build mkdir build
 
