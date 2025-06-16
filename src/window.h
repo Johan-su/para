@@ -47,6 +47,7 @@ enum Button {
     BUTTON_DOWN,
     BUTTON_HOME,
     BUTTON_END,
+    BUTTON_DELETE,
     BUTTON_ML, // mouse
     BUTTON_MM,
     BUTTON_MR,
@@ -57,6 +58,7 @@ enum Button {
 
     BUTTON_COUNT,
 };
+
 struct Input {
     bool quit;
     s16 mx;
@@ -71,10 +73,31 @@ struct Input {
     u32 chars[16];
     u32 char_count;
 
+    u32 keys[16];
+    u32 key_count;
+
     ButtonState buttons[BUTTON_COUNT];
 };
 
+enum MouseCursor {
+    MOUSE_CURSOR_ARROW,
+    MOUSE_CURSOR_IBEAM,
+    MOUSE_CURSOR_RESIZE_NWSE,
+    MOUSE_CURSOR_RESIZE_NESW,
+    MOUSE_CURSOR_RESIZE_WE,
+    MOUSE_CURSOR_RESIZE_NS,
+    MOUSE_CURSOR_HAND,
+};
+
 Input get_inputs(Window *window);
+bool button_released(ButtonState *s);
+bool button_pressed(ButtonState *s);
 u8 get_button_presses(ButtonState *s);
 void swap_buffers(Window *window);
 bool create_window(s32 w, s32 h, String title, Window *window_output);
+bool set_window_context(Window *window);
+// bool destroy_window(Window *window);
+
+bool set_clipboard_text(Window *window, String s);
+String get_clipboard_text(Window *window);
+void set_mouse_cursor(MouseCursor cursor);
