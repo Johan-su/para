@@ -2054,6 +2054,117 @@ void test() {
 }
 
 
+
+
+
+
+u32 compile_shader(String src, u32 shader_type) {
+
+    u32 shader = glCreateShader(shader_type);
+    glShaderSource(shader, 1, (const char **)&src.dat, nullptr);
+    glCompileShader(shader);
+
+
+    s32 compiled = 0;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        s32 len = 0;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
+        // TODO: actually handle memory
+        char *log = (char *)malloc((u64)len);
+        glGetShaderInfoLog(shader, len, nullptr, log);
+        LOG_ERROR("Failed to compile shader %.*s because of %s\n", (s32)src.count, src.dat, log);
+        glDeleteShader(shader);
+        shader = 0;
+    }
+
+    return shader;
+}
+
+u32 create_glshader(String vsrc, String fsrc) {
+
+    u32 fshader = compile_shader(fsrc, GL_FRAGMENT_SHADER);
+    u32 vshader = compile_shader(vsrc, GL_VERTEX_SHADER);
+
+
+    u32 program = 0;
+    if (fshader && vshader) {
+        program = glCreateProgram();
+
+        glAttachShader(program, fshader);
+        glAttachShader(program, vshader);
+
+        glLinkProgram(program);
+        glValidateProgram(program);
+
+        s32 valid = 0;
+        glGetProgramiv(program, GL_VALIDATE_STATUS, &valid);
+        if (!valid) {
+            s32 len = 0;
+            glGetProgramiv(program, GL_INFO_LOG_LENGTH, &len);
+            // TODO: actually handle memory
+            char *log = (char *)malloc((u64)len);
+            glGetProgramInfoLog(program, len, nullptr, log);
+            LOG_ERROR("Shader failed validation because of %s\n", log);
+            glDeleteProgram(program);
+            program = 0;
+        }
+    } else {
+        if (fshader) glDeleteShader(fshader);
+        if (vshader) glDeleteShader(vshader);
+    }
+    // TODO: maybe handle all error paths
+
+
+    // removes source code and stuff from gpu
+    #if 0
+    glDeleteShader(fshader);
+    glDeleteShader(vshader);
+
+    glDetachShader(program, fshader);
+    glDetachShader(program, vshader);
+    #endif
+    return program;
+}
+
+
+
+
+
+String quad_vertex_shader = str_lit(R"(
+#version 330 core
+layout(location = 0) in vec4 position;
+// layout(location = 1) in vec2 texCoord;
+
+out vec2 v_TexCoord;
+
+void main() {
+    gl_Position = position;
+    // v_TexCoord = texCoord;
+}
+)");
+
+String quad_frag_shader = str_lit(R"(
+#version 330 core
+
+layout(location = 0) out vec4 color;
+
+// in vec2 v_TexCoord;
+
+uniform sampler2D u_Texture;
+void main() {
+    color = vec4(1.0, 0.0, 0.0, 1.0);
+    // color = texture(u_Texture, v_TexCoord).xxxx;
+}
+)");
+
+
+
+
+
+
+
+
 UI_State ui = {};
 Interpreter inter = {};
 
@@ -2080,9 +2191,67 @@ int main(void) {
         LOG_ERROR("Failed to load newer OpenGl functions\n");
         return 1;
     }
+
     printf("OpenGl version %s\n", glGetString(GL_VERSION));
     printf("OpenGl renderer %s\n", glGetString(GL_RENDERER));
+
+
+    u32 vao;
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+
+
+    V2f32 positions[] = {
+        make_V2f32(-0.5f, -0.5f),
+        make_V2f32(0.5f, -0.5f),
+        make_V2f32(0.5f, 0.5f),
+        make_V2f32(-0.5f, 0.5f),
+    };
+
+
+    u32 vbo;
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    
+    glBufferData(GL_ARRAY_BUFFER, sizeof(positions), positions, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, nullptr);
+    glEnableVertexAttribArray(0);
+
+
+    u32 ibo;
+    glGenBuffers(1, &ibo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+
+    u32 indicies[] = {
+        0, 1, 2,
+        2, 3, 0,
+    };
+
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indicies), indicies, GL_STATIC_DRAW);
+
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+
+    u32 shader = create_glshader(quad_vertex_shader, quad_frag_shader);
+
+
+    while(true) {
+        get_inputs(&g_window);
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+        glClearColor(0.0f, 0.5f, 0.0f, 1.0f);
+
+        glBindVertexArray(vao);
+        glUseProgram(shader);
+        glDrawElements(GL_TRIANGLES, ARRAY_SIZE(indicies), GL_UNSIGNED_INT, indicies);
+
+        swap_buffers(&g_window);
+    }
+
     return 0;
+
     u8 text_buf[5][64] = {};
     u64 text_count[5] = {};
 

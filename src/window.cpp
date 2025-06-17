@@ -3,6 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <glad/glad.h>
+#include <glad/glad_wgl.h>
 #include "window.h"
 Input g_inputs = {};
 
@@ -277,48 +278,34 @@ bool create_window(s32 w, s32 h, String title, Window *window_output) {
     window_class.lpszClassName = "window_class";
 
     ATOM windowclass_atom = RegisterClass(&window_class);
-    if (windowclass_atom) {
-        Window_Internal window = {};
-
-        window.handle = CreateWindowEx(
-            0,
-            "window_class",
-            (const char *)title.dat,
-            WS_BORDER|WS_VISIBLE,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            w,
-            h,
-            nullptr,
-            nullptr,
-            handle,
-            nullptr
-        );
-        if (window.handle) {
-            window.device_context = GetDC(window.handle);
-            memcpy(window_output, &window, sizeof(window));
-        } else {
-            LOG_ERROR("Failed to create window %ld\n", GetLastError());
-            UnregisterClass(window_class.lpszClassName, nullptr);
-            return false;
-        }
-    } else {
-        LOG_ERROR("Failed to register window class\n");
+    if (!windowclass_atom) {
+        LOG_ERROR("Failed to register class");
         return false;
-    }    
-    return true;
-}
+    }
+    Window_Internal window = {};
 
-// bool destroy_window(Window *w) {
-//     Window_Internal *window = (Window_Internal *)w;
+    window.handle = CreateWindowEx(
+        0,
+        "window_class",
+        (const char *)title.dat,
+        WS_BORDER|WS_VISIBLE,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        w,
+        h,
+        nullptr,
+        nullptr,
+        handle,
+        nullptr
+    );
+    if (!window.handle) {
+        LOG_ERROR("Failed to create window %ld\n", GetLastError());
+        UnregisterClass(window_class.lpszClassName, nullptr);
+        return false;
+    }
 
-//     wglMakeCurrent(hdc, nullptr),
-//     wglDeleteContext(hglrc);
-//     DestroyWindow(window);
-// }
+    window.device_context = GetDC(window.handle);
 
-bool set_window_context(Window *w) {
-    Window_Internal *window = (Window_Internal *)w;
 
     PIXELFORMATDESCRIPTOR pfd = {};
 
@@ -349,26 +336,97 @@ bool set_window_context(Window *w) {
     pfd.dwVisibleMask = 0;
     pfd.dwDamageMask = 0;
 
-    int pixel_format_index = ChoosePixelFormat(window->device_context, &pfd);
+    int pixel_format_index = ChoosePixelFormat(window.device_context, &pfd);
     if (pixel_format_index == 0) {
         LOG_ERROR("Failed to choose pixel format\n");
         return false;
     }
-
-    if (!SetPixelFormat(window->device_context, pixel_format_index, &pfd)) {
+    if (!SetPixelFormat(window.device_context, pixel_format_index, &pfd)) {
         LOG_ERROR("Failed to set pixel format\n");
         return false;
     }
-
-    HGLRC hglrc = wglCreateContext(window->device_context);
+    HGLRC hglrc = wglCreateContext(window.device_context);
     if (!hglrc) {
         LOG_ERROR("Failed to create context\n");
         return false;
     }
-    if (!wglMakeCurrent(window->device_context, hglrc)) {
+    if (!wglMakeCurrent(window.device_context, hglrc)) {
         LOG_ERROR("Failed to make context\n");
         return false;
     }
+    if (!gladLoadWGL(window.device_context)) {
+        LOG_ERROR("Failed to load wgl extensions\n");
+        return false;
+    }
+    if (!wglDeleteContext(hglrc)) {
+        LOG_ERROR("Failed to delete context\n");
+        return false;
+    }
+    DestroyWindow(window.handle);
+
+    window.handle = CreateWindowEx(
+        0,
+        "window_class",
+        (const char *)title.dat,
+        WS_BORDER|WS_VISIBLE,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        w,
+        h,
+        nullptr,
+        nullptr,
+        handle,
+        nullptr
+    );
+    if (!window.handle) {
+        LOG_ERROR("Failed to create window %ld\n", GetLastError());
+        UnregisterClass(window_class.lpszClassName, nullptr);
+        return false;
+    }
+    window.device_context = GetDC(window.handle);
+
+    s32 attrib_list[] = {
+        WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
+        WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
+        WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
+        WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+        WGL_COLOR_BITS_ARB, 32,
+        WGL_DEPTH_BITS_ARB, 24,
+        WGL_STENCIL_BITS_ARB, 8,
+        0, // End
+    };
+
+    s32 pixel_format;
+    u32 num_formats;
+    if (!wglChoosePixelFormatARB(window.device_context, attrib_list, nullptr, 1, &pixel_format, &num_formats)) {
+        LOG_ERROR("Failed to choose pixel format\n");
+        return false;
+    }
+
+    memcpy(window_output, &window, sizeof(window));
+    todo();
+    return true;
+}
+
+// bool destroy_window(Window *w) {
+//     Window_Internal *window = (Window_Internal *)w;
+
+//     wglMakeCurrent(hdc, nullptr),
+//     wglDeleteContext(hglrc);
+//     DestroyWindow(window);
+// }
+
+
+bool set_window_context(Window *w) {
+    Window_Internal *window = (Window_Internal *)w;
+
+
+
+
+
+
+    
+
 
     return true;
 }
