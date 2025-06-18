@@ -2149,11 +2149,12 @@ String quad_frag_shader = str_lit(R"(
 
 layout(location = 0) out vec4 color;
 
+uniform vec4 u_color;
 // in vec2 v_TexCoord;
 
 uniform sampler2D u_Texture;
 void main() {
-    color = vec4(1.0, 0.0, 0.0, 1.0);
+    color = u_color;
     // color = texture(u_Texture, v_TexCoord).xxxx;
 }
 )");
@@ -2235,7 +2236,11 @@ int main(void) {
     u32 shader = create_glshader(quad_vertex_shader, quad_frag_shader);
 
 
+    f32 x = 0;
+
     while(true) {
+        x += 0.01f;
+        if (x > 1) x = 0;
         get_inputs(&g_window);
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -2243,6 +2248,7 @@ int main(void) {
 
         glBindVertexArray(vao);
         glUseProgram(shader);
+        glUniform4f(glGetUniformLocation(shader, "u_color"), x, 0.5f, 0.5f, 1.0f);
         // glDrawArrays(GL_TRIANGLES, 0, 4);
         glDrawElements(GL_TRIANGLES, ARRAY_SIZE(indicies), GL_UNSIGNED_INT, nullptr);
 
