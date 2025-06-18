@@ -46,12 +46,11 @@ Input get_inputs(Window *w) {
 
     return inputs;
 }
-
 bool button_released(ButtonState *s) {
-    return !s->ended_down && s->transitions > 0;
+    return s->ended_down && s->transitions > 0;
 }
 bool button_pressed(ButtonState *s) {
-    return s->ended_down && s->transitions > 0;
+    return !s->ended_down && s->transitions > 0;
 }
 
 char clipboard_text[4096];
@@ -100,15 +99,16 @@ void set_mouse_cursor(MouseCursor cursor) {
     const char *ms = nullptr;
     switch (cursor) {
 
-        case MOUSE_CURSOR_ARROW: ms = "IDC_ARROW"; break;
-        case MOUSE_CURSOR_IBEAM: ms = "IDC_IBEAM"; break;
-        case MOUSE_CURSOR_RESIZE_NWSE: ms = "IDC_SIZENWSE"; break;
-        case MOUSE_CURSOR_RESIZE_NESW: ms = "IDC_SIZENESW"; break;
-        case MOUSE_CURSOR_RESIZE_WE: ms = "IDC_SIZEWE"; break;
-        case MOUSE_CURSOR_RESIZE_NS: ms = "IDC_SIZENS"; break;
-        case MOUSE_CURSOR_HAND: ms = "IDC_HAND"; break;
+        case MOUSE_CURSOR_ARROW: ms = IDC_ARROW; break;
+        case MOUSE_CURSOR_IBEAM: ms = IDC_IBEAM; break;
+        case MOUSE_CURSOR_RESIZE_NWSE: ms = IDC_SIZENWSE; break;
+        case MOUSE_CURSOR_RESIZE_NESW: ms = IDC_SIZENESW; break;
+        case MOUSE_CURSOR_RESIZE_WE: ms = IDC_SIZEWE; break;
+        case MOUSE_CURSOR_RESIZE_NS: ms = IDC_SIZENS; break;
+        case MOUSE_CURSOR_HAND: ms = IDC_HAND; break;
     }
-    HCURSOR cursor_handle = LoadCursor(nullptr, ms);
+    
+    HCURSOR cursor_handle = (HCURSOR)LoadImage(nullptr, ms, IMAGE_CURSOR, 0, 0, LR_SHARED);
     SetCursor(cursor_handle);
 }
 void update_button_state(Button button, bool is_down) {
@@ -118,7 +118,7 @@ void update_button_state(Button button, bool is_down) {
     }
 }
 
-LRESULT window_callback( HWND wnd, UINT msg, WPARAM w_param, LPARAM l_param) {
+LRESULT window_callback(HWND wnd, UINT msg, WPARAM w_param, LPARAM l_param) {
     LRESULT result = 0;
     switch (msg) {
         case WM_CLOSE: {
@@ -130,6 +130,12 @@ LRESULT window_callback( HWND wnd, UINT msg, WPARAM w_param, LPARAM l_param) {
             PAINTSTRUCT p;
             BeginPaint(wnd, &p);
             EndPaint(wnd, &p);
+        } break;
+
+        case WM_SIZE: {
+            g_inputs.resized = true;
+            g_inputs.screen_width = LOWORD(l_param); 
+            g_inputs.screen_height = HIWORD(l_param); 
         } break;
 
         case WM_KEYDOWN: 
@@ -350,7 +356,7 @@ bool create_window(s32 w, s32 h, String title, Window *window_output) {
     HINSTANCE handle = GetModuleHandle(nullptr);
     WNDCLASS window_class = {};
 
-    window_class.style = CS_OWNDC|CS_HREDRAW|CS_VREDRAW;
+    window_class.style = CS_HREDRAW|CS_VREDRAW;
     window_class.lpfnWndProc = window_callback;
     window_class.cbClsExtra = 0;
     window_class.cbWndExtra = 0;
@@ -376,7 +382,7 @@ bool create_window(s32 w, s32 h, String title, Window *window_output) {
         0,
         window_class.lpszClassName,
         (const char *)title.dat,
-        WS_BORDER,
+        0,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         w,

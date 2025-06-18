@@ -1324,12 +1324,7 @@ union V2f32 {
 
 };
 
-V2f32 make_V2f32(f32 x, f32 y) {
-    V2f32 pos = {};
-    pos.x = x;
-    pos.y = y;
-    return pos;
-}
+#define make_V2f32(x, y) V2f32 {{x, y}}
 
 union V4u8 {
     u8 v[4];
@@ -1568,12 +1563,73 @@ Ui_Event create_pane(UI_State *ui, u64 flags, u64 hash, f32 x, f32 y, f32 w, f32
     return pane.event;
 }
 
+struct QuadData {
+    u32 shader;
+    u32 vao;
+    u32 vbo;
+    u32 ibo;
+    V2f32 positions[4];
+    u32 indicies[6];
+
+};
+
+QuadData quad_data = {
+    0, 0, 0, 0,
+    {
+        make_V2f32(-0.5f, -0.5f),
+        make_V2f32(0.5f, -0.5f),
+        make_V2f32(0.5f, 0.5f),
+        make_V2f32(-0.5f, 0.5f),
+    },
+    {
+        0, 1, 2,
+        2, 3, 0,
+    }
+};
+
+u32 screen_w = 1366;
+u32 screen_h = 768;
+
+V2f32 gl_to_screen_space(V2f32 v) {
+
+    V2f32 new_v = {};
+    new_v.x = ((f32)screen_w * (v.x + 1)) / 2;
+    new_v.y = ((f32)screen_h * (v.y + 1)) / 2;
+
+    return new_v;
+}
+
+V2f32 screen_space_to_gl(V2f32 v) {
+
+    V2f32 new_v = {};
+    new_v.x = 2 * v.x / (f32)screen_w - 1;
+    new_v.y = -(2 * v.y / (f32)screen_h - 1);
+
+    return new_v;
+}
+
 void draw_rectangle(f32 x, f32 y, f32 w, f32 h, V4f32 color) {
-    todo();
+
+    V2f32 positions[] = {
+        screen_space_to_gl(make_V2f32(x, y)),
+        screen_space_to_gl(make_V2f32(x + w, y)),
+        screen_space_to_gl(make_V2f32(x + w, y + h)),
+        screen_space_to_gl(make_V2f32(x, y + h)),
+    };
+
+    glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(positions), positions);
+
+
+    glBindVertexArray(quad_data.vao);
+    glUseProgram(quad_data.shader);
+    glUniform4f(glGetUniformLocation(quad_data.shader, "u_color"), color.x, color.y, color.z, color.w);
+    glDrawElements(GL_TRIANGLES, ARRAY_SIZE(quad_data.indicies), GL_UNSIGNED_INT, nullptr);
 }
 
 void draw_text(String text, f32 x, f32 y, f32 size, V4f32 color) {
-    todo();
+    // TODO actually implement
+    return;
 }
 
 
@@ -2183,79 +2239,57 @@ int main(void) {
     arena_init(&inter.ctx.node_arena, 100000);
 
 
-    s32 screen_w = 1366;
-    s32 screen_h = 768;
-
-    if (!create_window(screen_w, screen_h, str_lit("Para"), &g_window)) return 1;
+    if (!create_window((s32)screen_w, (s32)screen_h, str_lit("Para"), &g_window)) return 1;
     if (!gladLoadGL()) {
         LOG_ERROR("Failed to load newer OpenGl functions\n");
         return 1;
     }
 
-    printf("OpenGl version %s\n", glGetString(GL_VERSION));
-    printf("OpenGl renderer %s\n", glGetString(GL_RENDERER));
+    LOG_INFO("OpenGl version %s\n", glGetString(GL_VERSION));
+    LOG_INFO("OpenGl renderer %s\n", glGetString(GL_RENDERER));
 
 
-    u32 vao;
-    glGenVertexArrays(1, &vao);
-    glBindVertexArray(vao);
+    glGenVertexArrays(1, &quad_data.vao);
+    glBindVertexArray(quad_data.vao);
+
+    {
+        glGenBuffers(1, &quad_data.vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo);
+        
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quad_data.positions), quad_data.positions, GL_STATIC_DRAW);
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(V2f32), nullptr);
+        glEnableVertexAttribArray(0);
 
 
-    V2f32 positions[] = {
-        make_V2f32(-0.5f, -0.5f),
-        make_V2f32(0.5f, -0.5f),
-        make_V2f32(0.5f, 0.5f),
-        make_V2f32(-0.5f, 0.5f),
-    };
-
-
-    u32 vbo;
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    
-    glBufferData(GL_ARRAY_BUFFER, sizeof(positions), positions, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(V2f32), nullptr);
-    glEnableVertexAttribArray(0);
-
-
-    u32 indicies[] = {
-        0, 1, 2,
-        2, 3, 0,
-    };
-
-    u32 ibo;
-    glGenBuffers(1, &ibo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indicies), indicies, GL_STATIC_DRAW);
+        glGenBuffers(1, &quad_data.ibo);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, quad_data.ibo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(quad_data.indicies), quad_data.indicies, GL_STATIC_DRAW);
+    }
 
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
 
-    u32 shader = create_glshader(quad_vertex_shader, quad_frag_shader);
+    quad_data.shader = create_glshader(quad_vertex_shader, quad_frag_shader);
 
 
-    f32 x = 0;
+    // f32 x = 0;
 
-    while(true) {
-        x += 0.01f;
-        if (x > 1) x = 0;
-        get_inputs(&g_window);
+    // while (true) {
+    //     x += 0.01f;
+    //     if (x > 1) x = 0;
+    //     get_inputs(&g_window);
 
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-        glClearColor(0.0f, 0.5f, 0.0f, 1.0f);
+    //     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    //     glClearColor(0.0f, 0.5f, 0.0f, 1.0f);
 
-        glBindVertexArray(vao);
-        glUseProgram(shader);
-        glUniform4f(glGetUniformLocation(shader, "u_color"), x, 0.5f, 0.5f, 1.0f);
-        // glDrawArrays(GL_TRIANGLES, 0, 4);
-        glDrawElements(GL_TRIANGLES, ARRAY_SIZE(indicies), GL_UNSIGNED_INT, nullptr);
+    //     draw_rectangle(100, 100, 200, 200, make_V4f32(0.23f, 0.23f, 0.23f, 1));
 
-        swap_buffers(&g_window);
-    }
+    //     swap_buffers(&g_window);
+    // }
 
-    return 0;
+    // return 0;
 
     u8 text_buf[5][64] = {};
     u64 text_count[5] = {};
@@ -2295,8 +2329,9 @@ int main(void) {
         Input input = get_inputs(&g_window);
         ui.input = &input;
 
+        screen_w = input.screen_width;
+        screen_h = input.screen_height;
         u64 tmp_pos = arena_get_pos(scratch);
-
 
         begin_ui(&ui);
         {

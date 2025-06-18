@@ -61,6 +61,11 @@ enum Button {
 
 struct Input {
     bool quit;
+
+    bool resized;
+    u32 screen_width;
+    u32 screen_height;
+
     s16 mx;
     s16 my;
 
