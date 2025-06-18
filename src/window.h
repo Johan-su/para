@@ -95,7 +95,6 @@ bool button_pressed(ButtonState *s);
 u8 get_button_presses(ButtonState *s);
 void swap_buffers(Window *window);
 bool create_window(s32 w, s32 h, String title, Window *window_output);
-bool set_window_context(Window *window);
 // bool destroy_window(Window *window);
 
 bool set_clipboard_text(Window *window, String s);

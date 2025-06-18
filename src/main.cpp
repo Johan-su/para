@@ -2186,7 +2186,6 @@ int main(void) {
     s32 screen_h = 768;
 
     if (!create_window(screen_w, screen_h, str_lit("Para"), &g_window)) return 1;
-    if (!set_window_context(&g_window)) return 1;
     if (!gladLoadGL()) {
         LOG_ERROR("Failed to load newer OpenGl functions\n");
         return 1;
