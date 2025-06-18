@@ -2133,13 +2133,13 @@ u32 create_glshader(String vsrc, String fsrc) {
 
 String quad_vertex_shader = str_lit(R"(
 #version 330 core
-layout(location = 0) in vec4 position;
+layout(location = 0) in vec2 position;
 // layout(location = 1) in vec2 texCoord;
 
 out vec2 v_TexCoord;
 
 void main() {
-    gl_Position = position;
+    gl_Position = vec4(position, 0, 1);
     // v_TexCoord = texCoord;
 }
 )");
@@ -2213,19 +2213,18 @@ int main(void) {
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     
     glBufferData(GL_ARRAY_BUFFER, sizeof(positions), positions, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, nullptr);
+    glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(V2f32), nullptr);
     glEnableVertexAttribArray(0);
 
-
-    u32 ibo;
-    glGenBuffers(1, &ibo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
 
     u32 indicies[] = {
         0, 1, 2,
         2, 3, 0,
     };
 
+    u32 ibo;
+    glGenBuffers(1, &ibo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indicies), indicies, GL_STATIC_DRAW);
 
     glBindVertexArray(0);
@@ -2244,7 +2243,8 @@ int main(void) {
 
         glBindVertexArray(vao);
         glUseProgram(shader);
-        glDrawElements(GL_TRIANGLES, ARRAY_SIZE(indicies), GL_UNSIGNED_INT, indicies);
+        // glDrawArrays(GL_TRIANGLES, 0, 4);
+        glDrawElements(GL_TRIANGLES, ARRAY_SIZE(indicies), GL_UNSIGNED_INT, nullptr);
 
         swap_buffers(&g_window);
     }
