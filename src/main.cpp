@@ -1641,6 +1641,10 @@ void draw_ui(UI_State *ui) {
 
         UI_Pane *pane = panes->dat + i;
 
+        if (pane->parent_id != nil_id) {
+
+        }
+
         if (has_flags(pane->flags, PANE_BACKGROUND_COLOR)) {
             draw_rectangle(pane->x, pane->y, pane->w, pane->h, pane->background_color);
         }
