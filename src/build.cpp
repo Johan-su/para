@@ -5,6 +5,13 @@
 #include "main.cpp"
 #include "window.cpp"
 
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
+
+#define STB_TRUETYPE_IMPLEMENTATION
+#include <stb/stb_truetype.h>
+
 #define NODE_INVALID WIN_NODE_INVALID
 #include <glad/glad.c>
 #define libGL wgl_libGL

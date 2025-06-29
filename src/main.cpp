@@ -10,6 +10,7 @@
 
 #include "window.h"
 #include "glad/glad.h"
+#include <stb/stb_truetype.h>
 
 
 Window g_window = {};
@@ -1340,14 +1341,7 @@ union V4f32 {
     }; 
 };
 
-V4f32 make_V4f32(f32 x, f32 y, f32 z, f32 w) {
-    V4f32 pos = {};
-    pos.x = x;
-    pos.y = y;
-    pos.z = z;
-    pos.w = w;
-    return pos;
-}
+#define make_V4f32(x, y, z, w) V4f32 {{x, y, z, w}}
 
 
 // UI System
@@ -1439,6 +1433,8 @@ struct UI_State {
     DynArray<u64> parent_stack;
 };
 
+u32 quad_shader = 0;
+u32 text_shader = 0;
 
 bool mouse_collides(Input *input, f32 x, f32 y, f32 w, f32 h) {
     f32 mx = (f32)input->mx;
@@ -1564,11 +1560,12 @@ Ui_Event create_pane(UI_State *ui, u64 flags, u64 hash, f32 x, f32 y, f32 w, f32
 }
 
 struct QuadData {
-    u32 shader;
     u32 vao;
-    u32 vbo;
+    u32 vbo_coords;
+    u32 vbo_texcoords;
     u32 ibo;
     V2f32 positions[4];
+    V2f32 tex_coords[4];
     u32 indicies[6];
 
 };
@@ -1580,6 +1577,12 @@ QuadData quad_data = {
         make_V2f32(0.5f, -0.5f),
         make_V2f32(0.5f, 0.5f),
         make_V2f32(-0.5f, 0.5f),
+    },
+    {
+        make_V2f32(0.0f, 0.0f),
+        make_V2f32(1.0f, 0.0f),
+        make_V2f32(1.0f, 1.0f),
+        make_V2f32(0.0f, 1.0f),
     },
     {
         0, 1, 2,
@@ -1608,24 +1611,80 @@ V2f32 screen_space_to_gl(V2f32 v) {
     return new_v;
 }
 
-void draw_rectangle(f32 x, f32 y, f32 w, f32 h, V4f32 color) {
+
+void draw_quad(V2f32 pos0, V2f32 pos1, V2f32 uv0, V2f32 uv1, u32 shader, V4f32 color) {
 
     V2f32 positions[] = {
-        screen_space_to_gl(make_V2f32(x, y)),
-        screen_space_to_gl(make_V2f32(x + w, y)),
-        screen_space_to_gl(make_V2f32(x + w, y + h)),
-        screen_space_to_gl(make_V2f32(x, y + h)),
+        screen_space_to_gl(pos0),
+        screen_space_to_gl(make_V2f32(pos1.x, pos0.y)),
+        screen_space_to_gl(pos1),
+        screen_space_to_gl(make_V2f32(pos0.x, pos1.y)),
     };
 
-    glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo);
+    V2f32 tex_coords[] = {
+        uv0,
+        make_V2f32(uv1.x, uv0.y),
+        uv1,
+        make_V2f32(uv0.x, uv1.y),
+    };
+
+    glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo_coords);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(positions), positions);
+
+    glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo_texcoords);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(tex_coords), tex_coords);
 
 
     glBindVertexArray(quad_data.vao);
-    glUseProgram(quad_data.shader);
-    glUniform4f(glGetUniformLocation(quad_data.shader, "u_color"), color.x, color.y, color.z, color.w);
+    glUseProgram(shader);
+    glUniform4f(glGetUniformLocation(shader, "u_color"), color.x, color.y, color.z, color.w);
     glDrawElements(GL_TRIANGLES, ARRAY_SIZE(quad_data.indicies), GL_UNSIGNED_INT, nullptr);
 }
+
+void draw_rectangle(f32 x, f32 y, f32 w, f32 h, V4f32 color) {
+    draw_quad(make_V2f32(x, y), make_V2f32(x + w, y + h), make_V2f32(0, 0), make_V2f32(1, 1), quad_shader, color);
+}
+
+u8 ttf_buffer[1<<20];
+u8 temp_bitmap[512*512];
+
+stbtt_bakedchar cdata[96]; // ASCII 32..126 is 95 glyphs
+u32 ftex;
+
+void my_stbtt_initfont(void) {
+   fread(ttf_buffer, 1, 1<<20, fopen("c:/windows/fonts/times.ttf", "rb"));
+   stbtt_BakeFontBitmap(ttf_buffer,0, 32.0, temp_bitmap,512,512, 32,96, cdata); // no guarantee this fits!
+   // can free ttf_buffer at this point
+   glGenTextures(1, &ftex);
+   glBindTexture(GL_TEXTURE_2D, ftex);
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, 512,512, 0, GL_ALPHA, GL_UNSIGNED_BYTE, temp_bitmap);
+   // can free temp_bitmap at this point
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+}
+
+void my_stbtt_print(f32 x, f32 y, String text) {
+   // assume orthographic projection with units = screen pixels, origin at top left
+   glEnable(GL_TEXTURE_2D);
+   glBindTexture(GL_TEXTURE_2D, ftex);
+   for (u64 i = 0; i < text.count; ++i) {
+        if (text.dat[i] >= 32 && text.dat[i] < 128) {
+            stbtt_aligned_quad q;
+            stbtt_GetBakedQuad(cdata, 512,512, text.dat[i] - 32, &x, &y, &q, 1);//1=opengl & d3d10+,0=d3d9
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            V4f32 color = make_V4f32(1.0f, 0.0f, 0.0f, 1.0f);
+            draw_quad(make_V2f32(q.x0, q.y0), make_V2f32(q.x1, q.y1), make_V2f32(q.s1, q.t1), make_V2f32(q.s0, q.t0), text_shader, color);
+            glDisable(GL_BLEND);
+            // glTexCoord2f(q.s0,q.t0); glVertex2f(q.x0,q.y0);
+            // glTexCoord2f(q.s1,q.t0); glVertex2f(q.x1,q.y0);
+            // glTexCoord2f(q.s1,q.t1); glVertex2f(q.x1,q.y1);
+            // glTexCoord2f(q.s0,q.t1); glVertex2f(q.x0,q.y1);
+        }
+   }
+}
+
+
+
 
 void draw_text(String text, f32 x, f32 y, f32 size, V4f32 color) {
     // TODO actually implement
@@ -2194,13 +2253,13 @@ u32 create_glshader(String vsrc, String fsrc) {
 String quad_vertex_shader = str_lit(R"(
 #version 330 core
 layout(location = 0) in vec2 position;
-// layout(location = 1) in vec2 texCoord;
+layout(location = 1) in vec2 texCoord;
 
 out vec2 v_TexCoord;
 
 void main() {
     gl_Position = vec4(position, 0, 1);
-    // v_TexCoord = texCoord;
+    v_TexCoord = texCoord;
 }
 )");
 
@@ -2212,10 +2271,24 @@ layout(location = 0) out vec4 color;
 uniform vec4 u_color;
 // in vec2 v_TexCoord;
 
-uniform sampler2D u_Texture;
+// uniform sampler2D u_Texture;
 void main() {
     color = u_color;
-    // color = texture(u_Texture, v_TexCoord).xxxx;
+    // color = vec4(v_TexCoord, 0, 0);
+}
+)");
+
+String quadstr_frag_shader = str_lit(R"(
+#version 330 core
+
+layout(location = 0) out vec4 color;
+
+uniform vec4 u_color;
+in vec2 v_TexCoord;
+
+uniform sampler2D u_Texture;
+void main() {
+    color = vec4(texture(u_Texture, v_TexCoord).www, 1);
 }
 )");
 
@@ -2257,12 +2330,19 @@ int main(void) {
     glBindVertexArray(quad_data.vao);
 
     {
-        glGenBuffers(1, &quad_data.vbo);
-        glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo);
+        glGenBuffers(1, &quad_data.vbo_coords);
+        glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo_coords);
         
         glBufferData(GL_ARRAY_BUFFER, sizeof(quad_data.positions), quad_data.positions, GL_STATIC_DRAW);
         glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(V2f32), nullptr);
         glEnableVertexAttribArray(0);
+
+        glGenBuffers(1, &quad_data.vbo_texcoords);
+        glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo_texcoords);
+
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quad_data.tex_coords), quad_data.tex_coords, GL_STATIC_DRAW);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, sizeof(V2f32), nullptr);
+        glEnableVertexAttribArray(1);
 
 
         glGenBuffers(1, &quad_data.ibo);
@@ -2275,7 +2355,10 @@ int main(void) {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
 
-    quad_data.shader = create_glshader(quad_vertex_shader, quad_frag_shader);
+    quad_shader = create_glshader(quad_vertex_shader, quad_frag_shader);
+    if (!quad_shader) return 1;
+    text_shader = create_glshader(quad_vertex_shader, quadstr_frag_shader);
+    if (!text_shader) return 1;
 
 
     // f32 x = 0;
@@ -2326,6 +2409,7 @@ int main(void) {
     dark_green.w = 1.0f;
 
 
+    my_stbtt_initfont();
 
     bool running = true;
     while (running) {
@@ -2414,9 +2498,11 @@ int main(void) {
         
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-
-        glClearColor(0.23f, 0.23f, 0.23f, 1.0f);
-        draw_ui(&ui);
+        // glClearColor(0.23f, 0.23f, 0.23f, 1.0f);
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        // draw_rectangle(50.0f, 50.0f, 50.0f, 50.0f, make_V4f32(0.5f, 0.5f, 0.5f, 1));
+        my_stbtt_print(50.0f, 50.0f, str_lit("Test"));
+        // draw_ui(&ui);
 
         swap_buffers(&g_window);
         arena_set_pos(scratch, tmp_pos);
