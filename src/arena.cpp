@@ -1,5 +1,4 @@
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 #include "arena.h"
 
@@ -22,9 +21,8 @@ u64 align_to_8_boundry(u64 a) {
 
 void *arena_alloc(Arena *arena, u64 byte_amount) {
     assert(arena->pos % 8 == 0);
-    if (arena->pos + byte_amount > arena->max_capacity)
-    {
-        fprintf(stderr, "ERROR: arena out of memory\n");
+    if (arena->pos + byte_amount > arena->max_capacity) {
+        LOG_ERROR("arena out of memory\n");
         return nullptr;
     }
 

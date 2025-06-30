@@ -1645,50 +1645,44 @@ void draw_rectangle(f32 x, f32 y, f32 w, f32 h, V4f32 color) {
     draw_quad(make_V2f32(x, y), make_V2f32(x + w, y + h), make_V2f32(0, 0), make_V2f32(1, 1), quad_shader, color);
 }
 
-u8 ttf_buffer[1<<20];
-u8 temp_bitmap[512*512];
-
 stbtt_bakedchar cdata[96]; // ASCII 32..126 is 95 glyphs
 u32 ftex;
 
-void my_stbtt_initfont(void) {
-   fread(ttf_buffer, 1, 1<<20, fopen("c:/windows/fonts/times.ttf", "rb"));
-   stbtt_BakeFontBitmap(ttf_buffer,0, 32.0, temp_bitmap,512,512, 32,96, cdata); // no guarantee this fits!
-   // can free ttf_buffer at this point
-   glGenTextures(1, &ftex);
-   glBindTexture(GL_TEXTURE_2D, ftex);
-   glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, 512,512, 0, GL_ALPHA, GL_UNSIGNED_BYTE, temp_bitmap);
-   // can free temp_bitmap at this point
-   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+u32 create_font_texture(String path) {
+    
+    u64 tmp = arena_get_pos(scratch);
+    u8 *tmp_bitmap = (u8 *)arena_alloc(scratch, 512*512);
+    u8 *ttf_buf = (u8 *)arena_alloc(scratch, 1<<20);
+
+    fread(ttf_buf, 1, 1<<20, fopen((char *)path.dat, "rb"));
+    stbtt_BakeFontBitmap(ttf_buf, 0, 32.0, tmp_bitmap, 512, 512, 32, 96, cdata); // no guarantee this fits!
+
+    u32 tex = 0;
+
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 512, 512, 0, GL_RED, GL_UNSIGNED_BYTE, tmp_bitmap);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);       
+
+    arena_set_pos(scratch, tmp);
+    return tex;
 }
 
-void my_stbtt_print(f32 x, f32 y, String text) {
-   // assume orthographic projection with units = screen pixels, origin at top left
-   glEnable(GL_TEXTURE_2D);
-   glBindTexture(GL_TEXTURE_2D, ftex);
-   for (u64 i = 0; i < text.count; ++i) {
+void draw_text(String text, f32 x, f32 y, f32 size, V4f32 color) {
+    // assume orthographic projection with units = screen pixels, origin at top left
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, ftex);
+    for (u64 i = 0; i < text.count; ++i) {
         if (text.dat[i] >= 32 && text.dat[i] < 128) {
             stbtt_aligned_quad q;
             stbtt_GetBakedQuad(cdata, 512,512, text.dat[i] - 32, &x, &y, &q, 1);//1=opengl & d3d10+,0=d3d9
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            V4f32 color = make_V4f32(1.0f, 0.0f, 0.0f, 1.0f);
-            draw_quad(make_V2f32(q.x0, q.y0), make_V2f32(q.x1, q.y1), make_V2f32(q.s1, q.t1), make_V2f32(q.s0, q.t0), text_shader, color);
+            draw_quad(make_V2f32(q.x0, q.y0), make_V2f32(q.x1, q.y1), make_V2f32(q.s0, q.t0), make_V2f32(q.s1, q.t1), text_shader, color);
             glDisable(GL_BLEND);
-            // glTexCoord2f(q.s0,q.t0); glVertex2f(q.x0,q.y0);
-            // glTexCoord2f(q.s1,q.t0); glVertex2f(q.x1,q.y0);
-            // glTexCoord2f(q.s1,q.t1); glVertex2f(q.x1,q.y1);
-            // glTexCoord2f(q.s0,q.t1); glVertex2f(q.x0,q.y1);
         }
    }
-}
-
-
-
-
-void draw_text(String text, f32 x, f32 y, f32 size, V4f32 color) {
-    // TODO actually implement
-    return;
 }
 
 
@@ -2288,7 +2282,7 @@ in vec2 v_TexCoord;
 
 uniform sampler2D u_Texture;
 void main() {
-    color = vec4(texture(u_Texture, v_TexCoord).www, 1);
+    color = u_color * vec4(texture(u_Texture, v_TexCoord).xxx, 1);
 }
 )");
 
@@ -2304,12 +2298,11 @@ Interpreter inter = {};
 
 int main(void) {
 
-    Arena t; arena_init(&t, 1000000);
+    Arena t; arena_init(&t, 10000000);
     scratch = &t;
 
     String_Builder sb; string_builder_init(&sb, 65000);
 
-    // Interpreter *e = (Interpreter *)arena_alloc(scratch, sizeof(*e));
 
 
     arena_init(&inter.func_arena, 100000);
@@ -2409,7 +2402,8 @@ int main(void) {
     dark_green.w = 1.0f;
 
 
-    my_stbtt_initfont();
+    ftex = create_font_texture(str_lit("c:/windows/fonts/times.ttf"));
+    if (!ftex) return 1;
 
     bool running = true;
     while (running) {
@@ -2498,11 +2492,9 @@ int main(void) {
         
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-        // glClearColor(0.23f, 0.23f, 0.23f, 1.0f);
-        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-        // draw_rectangle(50.0f, 50.0f, 50.0f, 50.0f, make_V4f32(0.5f, 0.5f, 0.5f, 1));
-        my_stbtt_print(50.0f, 50.0f, str_lit("Test"));
-        // draw_ui(&ui);
+        glClearColor(0.23f, 0.23f, 0.23f, 0.0f);
+        draw_text(str_lit("abcdefghijklmnopqrstuvwxyz"), 50.0f, 50.0f, 32.0f, make_V4f32(1.0f, 1.0f, 1.0f, 1.0f));
+        draw_ui(&ui);
 
         swap_buffers(&g_window);
         arena_set_pos(scratch, tmp_pos);
