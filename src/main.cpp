@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include <string.h>
+#include <math.h>
 
 #include "common.h"
 #include "arena.h"
@@ -1346,7 +1347,7 @@ union V4f32 {
 
 // UI System
 
-#define TEXT_INPUT_FONT_SIZE 20
+#define TEXT_INPUT_FONT_SIZE 30
 #define TEXT_INPUT_MARGIN 5
 #define TEXT_INPUT_CURSOR_COLOR make_V4f32(0, 0, 0.0f, 1.0f)
 #define TEXT_INPUT_SELECTION_COLOR make_V4f32(0, 0, 1.0f, 1.0f)
@@ -1490,10 +1491,69 @@ void shift_left_resize(u8 *buf, u64 *count, u64 start, u64 amount) {
 
 
 Arena *scratch = nullptr;
+stbtt_bakedchar cdata[96]; // ASCII 32..126 is 95 glyphs
+u32 ftex;
+
+f32 font_pixel_size;
+
+u32 screen_w = 1366;
+u32 screen_h = 768;
+
+V2f32 screen_space_to_gl(V2f32 v) {
+
+    V2f32 new_v = {};
+    new_v.x = 2 * v.x / (f32)screen_w - 1;
+    new_v.y = -(2 * v.y / (f32)screen_h - 1);
+
+    return new_v;
+}
+
+V2f32 gl_to_screen_space(V2f32 v) {
+
+    V2f32 new_v = {};
+    new_v.x = ((f32)screen_w * (v.x + 1)) / 2;
+    new_v.y = ((f32)screen_h * (v.y + 1)) / 2;
+
+    return new_v;
+}
+
+void get_baked_quad(const stbtt_bakedchar *chardata, u32 pw, u32 ph, s32 char_index, f32 *xpos, f32 *ypos, f32 scale, stbtt_aligned_quad *q) {
+
+   const stbtt_bakedchar *b = chardata + char_index;
+   f32 round_x = floorf((*xpos + b->xoff * scale) + 0.5f);
+   f32 round_y = floorf((*ypos + b->yoff * scale) + 0.5f);
+
+   q->x0 = round_x;
+   q->y0 = round_y;
+   q->x1 = round_x + (b->x1 - b->x0) * scale;
+   q->y1 = round_y + (b->y1 - b->y0) * scale;
+
+
+
+   f32 ipw = 1.0f / (f32)pw;
+   f32 iph = 1.0f / (f32)ph;
+   q->s0 = b->x0 * ipw;
+   q->t0 = b->y0 * iph;
+   q->s1 = b->x1 * ipw;
+   q->t1 = b->y1 * iph;
+
+   *xpos += b->xadvance * scale;
+}
+
 
 f32 measure_text(String text, f32 size) {
-    todo();
-    return 0.0f;
+
+    f32 scale = size / font_pixel_size;
+
+    f32 x = 0;
+    f32 y = 0;
+    for (u64 i = 0; i < text.count; ++i) {
+        if (text.dat[i] >= 32 && text.dat[i] < 128) {
+            stbtt_aligned_quad q;
+            get_baked_quad(cdata, 512, 512, text.dat[i] - 32, &x, &y, scale, &q);
+        }
+    }
+    return screen_space_to_gl(make_V2f32(x, y)).x;
 }
 
 u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, UI_Pane *p, f32 mx) {
@@ -1590,28 +1650,6 @@ QuadData quad_data = {
     }
 };
 
-u32 screen_w = 1366;
-u32 screen_h = 768;
-
-V2f32 gl_to_screen_space(V2f32 v) {
-
-    V2f32 new_v = {};
-    new_v.x = ((f32)screen_w * (v.x + 1)) / 2;
-    new_v.y = ((f32)screen_h * (v.y + 1)) / 2;
-
-    return new_v;
-}
-
-V2f32 screen_space_to_gl(V2f32 v) {
-
-    V2f32 new_v = {};
-    new_v.x = 2 * v.x / (f32)screen_w - 1;
-    new_v.y = -(2 * v.y / (f32)screen_h - 1);
-
-    return new_v;
-}
-
-
 void draw_quad(V2f32 pos0, V2f32 pos1, V2f32 uv0, V2f32 uv1, u32 shader, V4f32 color) {
 
     V2f32 positions[] = {
@@ -1645,17 +1683,16 @@ void draw_rectangle(f32 x, f32 y, f32 w, f32 h, V4f32 color) {
     draw_quad(make_V2f32(x, y), make_V2f32(x + w, y + h), make_V2f32(0, 0), make_V2f32(1, 1), quad_shader, color);
 }
 
-stbtt_bakedchar cdata[96]; // ASCII 32..126 is 95 glyphs
-u32 ftex;
 
-u32 create_font_texture(String path) {
+void init_font_texture(String path, f32 font_pixel_height) {
     
     u64 tmp = arena_get_pos(scratch);
     u8 *tmp_bitmap = (u8 *)arena_alloc(scratch, 512*512);
     u8 *ttf_buf = (u8 *)arena_alloc(scratch, 1<<20);
 
     fread(ttf_buf, 1, 1<<20, fopen((char *)path.dat, "rb"));
-    stbtt_BakeFontBitmap(ttf_buf, 0, 32.0, tmp_bitmap, 512, 512, 32, 96, cdata); // no guarantee this fits!
+    font_pixel_size = font_pixel_height;
+    stbtt_BakeFontBitmap(ttf_buf, 0, font_pixel_size, tmp_bitmap, 512, 512, 32, 96, cdata); // no guarantee this fits!
 
     u32 tex = 0;
 
@@ -1666,25 +1703,28 @@ u32 create_font_texture(String path) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);       
 
     arena_set_pos(scratch, tmp);
-    return tex;
+    ftex = tex;
 }
 
+
 void draw_text(String text, f32 x, f32 y, f32 size, V4f32 color) {
-    // assume orthographic projection with units = screen pixels, origin at top left
+
+    f32 scale = size / font_pixel_size;
+
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, ftex);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     for (u64 i = 0; i < text.count; ++i) {
         if (text.dat[i] >= 32 && text.dat[i] < 128) {
             stbtt_aligned_quad q;
-            stbtt_GetBakedQuad(cdata, 512,512, text.dat[i] - 32, &x, &y, &q, 1);//1=opengl & d3d10+,0=d3d9
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            get_baked_quad(cdata, 512, 512, text.dat[i] - 32, &x, &y, scale, &q);
             draw_quad(make_V2f32(q.x0, q.y0), make_V2f32(q.x1, q.y1), make_V2f32(q.s0, q.t0), make_V2f32(q.s1, q.t1), text_shader, color);
-            glDisable(GL_BLEND);
         }
-   }
+    }
+    glDisable(GL_BLEND);
 }
-
 
 void draw_ui(UI_State *ui) {
 
@@ -1736,7 +1776,7 @@ void draw_ui(UI_State *ui) {
 
         if (has_flags(pane->flags, PANE_TEXT_DISPLAY)) {
             String s = string_printf(scratch, "%.*s", (int)*pane->text_count, pane->text_buf);
-            draw_text(s, pane->x + TEXT_INPUT_MARGIN, pane->y + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, make_V4f32(0.5f, 0.5f, 0.5f, 1.0f));
+            draw_text(s, pane->x + TEXT_INPUT_MARGIN, pane->y + TEXT_INPUT_FONT_SIZE / 2.0f, TEXT_INPUT_FONT_SIZE, make_V4f32(1.0f, 1.0f, 1.0f, 1.0f));
         }
     }
 }
@@ -2282,7 +2322,7 @@ in vec2 v_TexCoord;
 
 uniform sampler2D u_Texture;
 void main() {
-    color = u_color * vec4(texture(u_Texture, v_TexCoord).xxx, 1);
+    color = u_color * vec4(texture(u_Texture, v_TexCoord).xxxx);
 }
 )");
 
@@ -2402,8 +2442,7 @@ int main(void) {
     dark_green.w = 1.0f;
 
 
-    ftex = create_font_texture(str_lit("c:/windows/fonts/times.ttf"));
-    if (!ftex) return 1;
+    init_font_texture(str_lit("c:/windows/fonts/times.ttf"), TEXT_INPUT_FONT_SIZE);
 
     bool running = true;
     while (running) {
@@ -2417,7 +2456,6 @@ int main(void) {
 
         begin_ui(&ui);
         {
-
             create_pane(&ui, PANE_DRAGGABLE|PANE_RESIZEABLE|PANE_BACKGROUND_COLOR, 69420'0, 0, 0, 400, 500, light_gray, nullptr, nullptr, 0);
 
             // text input + display string
@@ -2489,11 +2527,10 @@ int main(void) {
         }
 
         end_ui(&ui);
-        
+
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
         glClearColor(0.23f, 0.23f, 0.23f, 0.0f);
-        draw_text(str_lit("abcdefghijklmnopqrstuvwxyz"), 50.0f, 50.0f, 32.0f, make_V4f32(1.0f, 1.0f, 1.0f, 1.0f));
         draw_ui(&ui);
 
         swap_buffers(&g_window);
