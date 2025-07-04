@@ -178,26 +178,20 @@ add graph viewer similar to desmos
 
 */
 
-void string_builder_init(String_Builder *sb, u64 cap) {
-    sb->count = 0;
-    sb->max_capacity = cap;
-    sb->data = (u8 *)calloc(1, sb->max_capacity);
+void string_builder_append(DynArray<u8> *sb, u8 b) {
+    assert(sb->count < sb->cap);
+    sb->dat[sb->count++] = b;
 }
 
-void string_builder_append(String_Builder *sb, u8 b) {
-    assert(sb->count < sb->max_capacity);
-    sb->data[sb->count++] = b;
-}
-
-void string_builder_concat(String_Builder *sb, String s) {
-    assert(sb->count + s.count < sb->max_capacity);
+void string_builder_concat(DynArray<u8> *sb, String s) {
+    assert(sb->count + s.count < sb->cap);
     for (u64 i = 0; i < s.count; ++i) {
-        sb->data[sb->count++] = s.dat[i];
+        sb->dat[sb->count++] = s.dat[i];
     }
 }
 
-String string_builder_to_string(String_Builder *sb) {
-    return String {sb->data, sb->count};
+String string_builder_to_string(DynArray<u8> *sb) {
+    return String {sb->dat, sb->count};
 }
 
 
@@ -1553,7 +1547,7 @@ f32 measure_text(String text, f32 size) {
             get_baked_quad(cdata, 512, 512, text.dat[i] - 32, &x, &y, scale, &q);
         }
     }
-    return screen_space_to_gl(make_V2f32(x, y)).x;
+    return x;
 }
 
 u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, UI_Pane *p, f32 mx) {
@@ -1754,7 +1748,11 @@ void draw_ui(UI_State *ui) {
                 String s = string_printf(scratch, "%.*s", (int)ui->cursor_pos, pane->text_buf);
                 f32 sz = measure_text(s, TEXT_INPUT_FONT_SIZE);
 
-                draw_rectangle(pane->x + TEXT_INPUT_MARGIN + (f32)sz, h_offset + TEXT_INPUT_FONT_SIZE / 2.0f, 1, TEXT_INPUT_FONT_SIZE, TEXT_INPUT_CURSOR_COLOR);
+                f32 bar_size = TEXT_INPUT_FONT_SIZE - 8;
+                if (bar_size < 8) {
+                    bar_size = 8;
+                }
+                draw_rectangle(pane->x + TEXT_INPUT_MARGIN + (f32)sz, h_offset + bar_size / 2.0f, 1, bar_size, TEXT_INPUT_CURSOR_COLOR);
 
                 if (ui->selecting) {
 
@@ -1767,7 +1765,7 @@ void draw_ui(UI_State *ui) {
                     a.x *= 1.5f;
                     a.y *= 1.5f;
                     a.z *= 1.5f;
-                    draw_rectangle(pane->x + TEXT_INPUT_MARGIN + (f32)sz2, h_offset + TEXT_INPUT_FONT_SIZE / 2.0f, (f32)selection_sz, TEXT_INPUT_FONT_SIZE, a);
+                    draw_rectangle(pane->x + TEXT_INPUT_MARGIN + (f32)sz2, h_offset + bar_size / 2.0f, (f32)selection_sz, bar_size, a);
 
                 }
             }
@@ -1776,7 +1774,7 @@ void draw_ui(UI_State *ui) {
 
         if (has_flags(pane->flags, PANE_TEXT_DISPLAY)) {
             String s = string_printf(scratch, "%.*s", (int)*pane->text_count, pane->text_buf);
-            draw_text(s, pane->x + TEXT_INPUT_MARGIN, pane->y + TEXT_INPUT_FONT_SIZE / 2.0f, TEXT_INPUT_FONT_SIZE, make_V4f32(1.0f, 1.0f, 1.0f, 1.0f));
+            draw_text(s, pane->x + TEXT_INPUT_MARGIN, pane->y + TEXT_INPUT_FONT_SIZE, TEXT_INPUT_FONT_SIZE, make_V4f32(1.0f, 1.0f, 1.0f, 1.0f));
         }
     }
 }
@@ -1942,7 +1940,7 @@ void update_panes(UI_State *ui) {
                             } else {
                                 if (ui->cursor_pos > 0) {
 
-                                    if (ui->input->buttons[BUTTON_LCTRL].ended_down) {
+                                    if (ui->input->buttons[BUTTON_CTRL].ended_down) {
 
                                         if (is_whitespace(pane->text_buf[ui->cursor_pos - 1])) {
                                             while (ui->cursor_pos > 0 && is_whitespace(pane->text_buf[ui->cursor_pos - 1])) {
@@ -1982,27 +1980,27 @@ void update_panes(UI_State *ui) {
                         }
 
                     } else if (ui->input->keys[j] == BUTTON_A) {
-                        if (*pane->text_count > 0 && ui->input->buttons[BUTTON_LCTRL].ended_down) {
+                        if (*pane->text_count > 0 && ui->input->buttons[BUTTON_CTRL].ended_down) {
                             ui->selecting = true;
                             ui->cursor_pos = 0;
                             ui->selection_anchor = *pane->text_count;
                         }
                     } else if (ui->input->keys[j] == BUTTON_X) {
-                        if (ui->selecting && ui->input->buttons[BUTTON_LCTRL].ended_down) {
+                        if (ui->selecting && ui->input->buttons[BUTTON_CTRL].ended_down) {
                             ui->selecting = false;
                             String s = string_printf(scratch, "%.*s", (int)(ui->selection_end - ui->selection_start), ui->selection_start + pane->text_buf);
-                            set_clipboard_text(&g_window, s);
+                            set_clipboard_text(s);
                             shift_left_resize(pane->text_buf, pane->text_count, ui->selection_start, ui->selection_end - ui->selection_start);
                             ui->cursor_pos = ui->selection_start;
                         }
                     } else if (ui->input->keys[j] == BUTTON_C) {
-                        if (ui->selecting && ui->input->buttons[BUTTON_LCTRL].ended_down) {
+                        if (ui->selecting && ui->input->buttons[BUTTON_CTRL].ended_down) {
                             String s = string_printf(scratch, "%.*s", (int)(ui->selection_end - ui->selection_start), ui->selection_start + pane->text_buf);
-                            set_clipboard_text(&g_window, s);
+                            set_clipboard_text(s);
                         }
                     } else if (ui->input->keys[j] == BUTTON_V) {
-                        if (ui->input->buttons[BUTTON_LCTRL].ended_down) {
-                            String text = get_clipboard_text(&g_window);
+                        if (ui->input->buttons[BUTTON_CTRL].ended_down) {
+                            String text = get_clipboard_text();
                             u64 len = text.count;
 
                             if (len + *pane->text_count - (ui->selection_end - ui->selection_start) > pane->text_capacity) {
@@ -2022,22 +2020,22 @@ void update_panes(UI_State *ui) {
                         }
                     } else if (ui->input->keys[j] == BUTTON_HOME) {
                         if (*pane->text_count > 0) {
-                            if (!ui->selecting && ui->input->buttons[BUTTON_LSHIFT].ended_down) {
+                            if (!ui->selecting && ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = true;
                                 ui->selection_anchor = prev_cursor_pos;
                             }
-                            if (ui->selecting && !ui->input->buttons[BUTTON_LSHIFT].ended_down) {
+                            if (ui->selecting && !ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = false;
                             }
                             ui->cursor_pos = 0;
                         }
                     } else if (ui->input->keys[j] == BUTTON_END) {
                         if (*pane->text_count > 0) {
-                            if (!ui->selecting && ui->input->buttons[BUTTON_LSHIFT].ended_down) {
+                            if (!ui->selecting && ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = true;
                                 ui->selection_anchor = prev_cursor_pos;
                             }
-                            if (ui->selecting && !ui->input->buttons[BUTTON_LSHIFT].ended_down) {
+                            if (ui->selecting && !ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = false;
                             }
                             ui->cursor_pos = *pane->text_count;
@@ -2045,15 +2043,15 @@ void update_panes(UI_State *ui) {
                     } else if (ui->input->keys[j] == BUTTON_LEFT) {
                         if (*pane->text_count > 0 && ui->cursor_pos > 0) {
 
-                            if (!ui->selecting && ui->input->buttons[BUTTON_LSHIFT].ended_down) {
+                            if (!ui->selecting && ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = true;
                                 ui->selection_anchor = prev_cursor_pos;
                             }
-                            if (ui->selecting && !ui->input->buttons[BUTTON_LSHIFT].ended_down) {
+                            if (ui->selecting && !ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = false;
                             }
 
-                            if (ui->input->buttons[BUTTON_LCTRL].ended_down) {
+                            if (ui->input->buttons[BUTTON_CTRL].ended_down) {
                                 if (is_whitespace(pane->text_buf[ui->cursor_pos - 1])) {
                                     while (ui->cursor_pos > 0 && is_whitespace(pane->text_buf[ui->cursor_pos - 1])) {
                                         ui->cursor_pos -= 1;
@@ -2075,15 +2073,15 @@ void update_panes(UI_State *ui) {
                     } else if (ui->input->keys[j] == BUTTON_RIGHT) {
                         if (*pane->text_count > 0 && ui->cursor_pos < *pane->text_count) {
 
-                            if (!ui->selecting && ui->input->buttons[BUTTON_LSHIFT].ended_down) {
+                            if (!ui->selecting && ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = true;
                                 ui->selection_anchor = prev_cursor_pos;
                             }
-                            if (ui->selecting && !ui->input->buttons[BUTTON_LSHIFT].ended_down) {
+                            if (ui->selecting && !ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = false;
                             }
 
-                            if (ui->input->buttons[BUTTON_LCTRL].ended_down) {
+                            if (ui->input->buttons[BUTTON_CTRL].ended_down) {
                                 if (is_whitespace(pane->text_buf[ui->cursor_pos])) {
                                     while (ui->cursor_pos < *pane->text_count && is_whitespace(pane->text_buf[ui->cursor_pos])) {
                                         ui->cursor_pos += 1;
@@ -2122,16 +2120,19 @@ void update_panes(UI_State *ui) {
                 // text cursor input
                 for (u64 j = 0; j < ui->input->char_count && *pane->text_count < pane->text_capacity - 1; ++j) {
 
-                    if (ui->selecting) {
-                        ui->selecting = false;
+                    u32 character = ui->input->chars[j];
+                    if (character >= 32 && character < 127) {
+                        if (ui->selecting) {
+                            ui->selecting = false;
 
-                        shift_left_resize(pane->text_buf, pane->text_count, ui->selection_start, ui->selection_end - ui->selection_start);
-                        ui->cursor_pos = ui->selection_start;
+                            shift_left_resize(pane->text_buf, pane->text_count, ui->selection_start, ui->selection_end - ui->selection_start);
+                            ui->cursor_pos = ui->selection_start;
+                        }
+
+                        shift_right_resize(pane->text_buf, pane->text_count, ui->cursor_pos, 1);
+                        pane->text_buf[ui->cursor_pos] = (u8)character;
+                        ui->cursor_pos += 1;
                     }
-
-                    shift_right_resize(pane->text_buf, pane->text_count, ui->cursor_pos, 1);
-                    pane->text_buf[ui->cursor_pos] = (u8)ui->input->chars[j];
-                    ui->cursor_pos += 1;
                 }
             }
         }
@@ -2341,7 +2342,7 @@ int main(void) {
     Arena t; arena_init(&t, 10000000);
     scratch = &t;
 
-    String_Builder sb; string_builder_init(&sb, 65000);
+    DynArray<u8> sb; dynarray_init(&sb, 65000);
 
 
 
@@ -2448,6 +2449,12 @@ int main(void) {
     while (running) {
 
         Input input = get_inputs(&g_window);
+        for (u64 i = 0; i < input.char_count; ++i) {
+            printf("char: %u\n", input.chars[i]);
+        }
+        for (u64 i = 0; i < input.key_count; ++i) {
+            printf("key: %u\n", input.keys[i]);
+        }
         ui.input = &input;
 
         screen_w = input.screen_width;

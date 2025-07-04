@@ -55,29 +55,32 @@ bool button_pressed(ButtonState *s) {
 
 char clipboard_text[4096];
 
-bool set_clipboard_text(Window *w, String s) {
-    Window_Internal *window = (Window_Internal *)w;
+bool set_clipboard_text(String s) {
 
-    if (OpenClipboard(window->handle)) {
-        EmptyClipboard();
+    if (OpenClipboard(nullptr)) {
+        if (!EmptyClipboard()) {
+            LOG_ERROR("Emptying the clipboard failed\n");
+            return false;
+        }
         snprintf(clipboard_text, sizeof(clipboard_text), "%.*s", (s32)s.count, s.dat);
+        HGLOBAL result = GlobalAlloc(GMEM_MOVEABLE, s.count + 1);
+        memcpy(GlobalLock(result), clipboard_text, s.count + 1);
+        GlobalUnlock(result);
 
-        SetClipboardData(CF_TEXT, clipboard_text);
-
+        SetClipboardData(CF_TEXT, result);
         CloseClipboard();
+        GlobalFree(result);
         return true;
     }
 
     return false;
 }
-String get_clipboard_text(Window *w) {
-    Window_Internal *window = (Window_Internal *)w;
 
+String get_clipboard_text() {
     String s = {};
-    if (OpenClipboard(window->handle)) {
+    if (OpenClipboard(nullptr)) {
         void *data = GetClipboardData(CF_TEXT);
-        u64 len = strlen((char *)data);
-        memcpy(clipboard_text, data, len);
+        strcpy(clipboard_text, (char *)data);
         CloseClipboard();
     }
 
@@ -177,8 +180,8 @@ LRESULT window_callback(HWND wnd, UINT msg, WPARAM w_param, LPARAM l_param) {
                 case 'Z': update_button_state(BUTTON_Z, is_down); break;
                 case VK_ESCAPE: update_button_state(BUTTON_ESC, is_down); break;
                 case VK_SPACE: update_button_state(BUTTON_SPACE, is_down); break;
-                case VK_LSHIFT: update_button_state(BUTTON_LSHIFT, is_down); break;
-                case VK_LCONTROL: update_button_state(BUTTON_LCTRL, is_down); break;
+                case VK_SHIFT: update_button_state(BUTTON_SHIFT, is_down); break;
+                case VK_CONTROL: update_button_state(BUTTON_CTRL, is_down); break;
                 case VK_BACK: update_button_state(BUTTON_BACKSPACE, is_down); break;
                 case VK_LEFT: update_button_state(BUTTON_LEFT, is_down); break;
                 case VK_UP: update_button_state(BUTTON_UP, is_down); break;

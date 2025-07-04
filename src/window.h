@@ -39,8 +39,8 @@ enum Button {
     BUTTON_ESC,
     BUTTON_SPACE,
     BUTTON_BACKSPACE,
-    BUTTON_LSHIFT,
-    BUTTON_LCTRL,
+    BUTTON_SHIFT,
+    BUTTON_CTRL,
     BUTTON_LEFT,
     BUTTON_UP,
     BUTTON_RIGHT,
@@ -102,6 +102,6 @@ void swap_buffers(Window *window);
 bool create_window(s32 w, s32 h, String title, Window *window_output);
 // bool destroy_window(Window *window);
 
-bool set_clipboard_text(Window *window, String s);
-String get_clipboard_text(Window *window);
+bool set_clipboard_text(String s);
+String get_clipboard_text();
 void set_mouse_cursor(MouseCursor cursor);
