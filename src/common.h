@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stdio.h>
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -59,3 +60,7 @@ do {                                                    \
 } while (0)
 
 #define todo() assert(false && "TODO")
+
+#define LOG_INFO(...) printf("INFO: " __VA_ARGS__);
+#define LOG_WARNING(...) printf("WARNING: " __VA_ARGS__);
+#define LOG_ERROR(...) fprintf(stderr, "ERROR: " __VA_ARGS__);

@@ -1,13 +1,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <raylib.h>
 #include <string.h>
+#include <math.h>
 
 #include "common.h"
 #include "arena.h"
 #include "meta.h"
 #include "string.h"
+
+#include "window.h"
+#include "glad/glad.h"
+#include <stb/stb_truetype.h>
+
+
+Window g_window = {};
 
 template <typename T>
 struct DynArray {
@@ -171,26 +178,20 @@ add graph viewer similar to desmos
 
 */
 
-void string_builder_init(String_Builder *sb, u64 cap) {
-    sb->count = 0;
-    sb->max_capacity = cap;
-    sb->data = (u8 *)calloc(1, sb->max_capacity);
+void string_builder_append(DynArray<u8> *sb, u8 b) {
+    assert(sb->count < sb->cap);
+    sb->dat[sb->count++] = b;
 }
 
-void string_builder_append(String_Builder *sb, u8 b) {
-    assert(sb->count < sb->max_capacity);
-    sb->data[sb->count++] = b;
-}
-
-void string_builder_concat(String_Builder *sb, String s) {
-    assert(sb->count + s.count < sb->max_capacity);
+void string_builder_concat(DynArray<u8> *sb, String s) {
+    assert(sb->count + s.count < sb->cap);
     for (u64 i = 0; i < s.count; ++i) {
-        sb->data[sb->count++] = s.dat[i];
+        sb->dat[sb->count++] = s.dat[i];
     }
 }
 
-String string_builder_to_string(String_Builder *sb) {
-    return String {sb->data, sb->count};
+String string_builder_to_string(DynArray<u8> *sb) {
+    return String {sb->dat, sb->count};
 }
 
 
@@ -1319,12 +1320,7 @@ union V2f32 {
 
 };
 
-V2f32 make_V2f32(f32 x, f32 y) {
-    V2f32 pos = {};
-    pos.x = x;
-    pos.y = y;
-    return pos;
-}
+#define make_V2f32(x, y) V2f32 {{x, y}}
 
 union V4u8 {
     u8 v[4];
@@ -1333,21 +1329,30 @@ union V4u8 {
     };
 };
 
+union V4f32 {
+    f32 v[4];
+    struct {
+        f32 x, y, z, w;
+    }; 
+};
+
+#define make_V4f32(x, y, z, w) V4f32 {{x, y, z, w}}
+
 
 // UI System
 
-#define TEXT_INPUT_FONT_SIZE 20
+#define TEXT_INPUT_FONT_SIZE 30
 #define TEXT_INPUT_MARGIN 5
-#define TEXT_INPUT_CURSOR_COLOR BLACK
-#define TEXT_INPUT_SELECTION_COLOR BLUE
-#define TEXT_INPUT_BACKGROUND_COLOR DARKGREEN
+#define TEXT_INPUT_CURSOR_COLOR make_V4f32(0, 0, 0.0f, 1.0f)
+#define TEXT_INPUT_SELECTION_COLOR make_V4f32(0, 0, 1.0f, 1.0f)
+#define TEXT_INPUT_BACKGROUND_COLOR make_V4f32(0, 0.39f, 0, 1.0f)
 
 #define DISPLAY_STRING_FONT_SIZE 15
 
 #define PANE_MARGIN 2
 
 #define DRAG_BAR_HEIGHT 15
-#define DRAG_BAR_COLOR GREEN
+#define DRAG_BAR_COLOR make_V4f32(0, 1.0f, 0, 1.0f)
 
 
 const u64 nil_id = 0;
@@ -1362,7 +1367,7 @@ struct UI_Pane {
 
     u64 flags;
 
-    Color background_color;
+    V4f32 background_color;
 
 
     f32 x, y;
@@ -1382,6 +1387,8 @@ struct UI_Pane {
 };
 
 struct UI_State {
+
+    Input *input;
 
     bool active;
     u64 active_id;
@@ -1419,27 +1426,14 @@ struct UI_State {
 
 
     DynArray<u64> parent_stack;
-
-
-    f32 mx;
-    f32 my;
-
-
-    u64 key_count;
-    u64 char_count;
-
-
-    bool ctrl_key_down;
-    bool shift_key_down;
-
-    int keys_pressed[16];
-    int chars_pressed[16];
 };
 
+u32 quad_shader = 0;
+u32 text_shader = 0;
 
-bool mouse_collides(f32 x, f32 y, f32 w, f32 h) {
-    f32 mx = (f32)GetMouseX();
-    f32 my = (f32)GetMouseY();
+bool mouse_collides(Input *input, f32 x, f32 y, f32 w, f32 h) {
+    f32 mx = (f32)input->mx;
+    f32 my = (f32)input->my;
 
     bool x_intercept = mx >= x && mx <= x + w;
     bool y_intercept = my >= y && my <= y + h;
@@ -1491,7 +1485,70 @@ void shift_left_resize(u8 *buf, u64 *count, u64 start, u64 amount) {
 
 
 Arena *scratch = nullptr;
+stbtt_bakedchar cdata[96]; // ASCII 32..126 is 95 glyphs
+u32 ftex;
 
+f32 font_pixel_size;
+
+u32 screen_w = 1366;
+u32 screen_h = 768;
+
+V2f32 screen_space_to_gl(V2f32 v) {
+
+    V2f32 new_v = {};
+    new_v.x = 2 * v.x / (f32)screen_w - 1;
+    new_v.y = -(2 * v.y / (f32)screen_h - 1);
+
+    return new_v;
+}
+
+V2f32 gl_to_screen_space(V2f32 v) {
+
+    V2f32 new_v = {};
+    new_v.x = ((f32)screen_w * (v.x + 1)) / 2;
+    new_v.y = ((f32)screen_h * (v.y + 1)) / 2;
+
+    return new_v;
+}
+
+void get_baked_quad(const stbtt_bakedchar *chardata, u32 pw, u32 ph, s32 char_index, f32 *xpos, f32 *ypos, f32 scale, stbtt_aligned_quad *q) {
+
+   const stbtt_bakedchar *b = chardata + char_index;
+   f32 round_x = floorf((*xpos + b->xoff * scale) + 0.5f);
+   f32 round_y = floorf((*ypos + b->yoff * scale) + 0.5f);
+
+   q->x0 = round_x;
+   q->y0 = round_y;
+   q->x1 = round_x + (b->x1 - b->x0) * scale;
+   q->y1 = round_y + (b->y1 - b->y0) * scale;
+
+
+
+   f32 ipw = 1.0f / (f32)pw;
+   f32 iph = 1.0f / (f32)ph;
+   q->s0 = b->x0 * ipw;
+   q->t0 = b->y0 * iph;
+   q->s1 = b->x1 * ipw;
+   q->t1 = b->y1 * iph;
+
+   *xpos += b->xadvance * scale;
+}
+
+
+f32 measure_text(String text, f32 size) {
+
+    f32 scale = size / font_pixel_size;
+
+    f32 x = 0;
+    f32 y = 0;
+    for (u64 i = 0; i < text.count; ++i) {
+        if (text.dat[i] >= 32 && text.dat[i] < 128) {
+            stbtt_aligned_quad q;
+            get_baked_quad(cdata, 512, 512, text.dat[i] - 32, &x, &y, scale, &q);
+        }
+    }
+    return x;
+}
 
 u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, UI_Pane *p, f32 mx) {
 
@@ -1500,7 +1557,7 @@ u64 get_text_cursor_pos_from_mouse(u8 *text_buf, u64 *text_count, UI_Pane *p, f3
         u64 tmp = arena_get_pos(scratch);
 
         String s = string_printf(scratch, "%.*s", (int)j, text_buf);
-        f32 sz = (f32)MeasureText((char *)s.dat, TEXT_INPUT_FONT_SIZE);
+        f32 sz = measure_text(s, TEXT_INPUT_FONT_SIZE);
 
         arena_set_pos(scratch, tmp);
 
@@ -1527,7 +1584,7 @@ UI_Pane *get_pane_from_hash(UI_State *ui, u64 hash) {
     return nullptr;
 }
 
-Ui_Event create_pane(UI_State *ui, u64 flags, u64 hash, f32 x, f32 y, f32 w, f32 h, Color background_color, u8 *text_buf, u64 *text_count, u64 text_capacity) {
+Ui_Event create_pane(UI_State *ui, u64 flags, u64 hash, f32 x, f32 y, f32 w, f32 h, V4f32 background_color, u8 *text_buf, u64 *text_count, u64 text_capacity) {
     UI_Pane pane = {};
 
     UI_Pane *old_pane = get_pane_from_hash(ui, hash);
@@ -1556,6 +1613,113 @@ Ui_Event create_pane(UI_State *ui, u64 flags, u64 hash, f32 x, f32 y, f32 w, f32
     return pane.event;
 }
 
+struct QuadData {
+    u32 vao;
+    u32 vbo_coords;
+    u32 vbo_texcoords;
+    u32 ibo;
+    V2f32 positions[4];
+    V2f32 tex_coords[4];
+    u32 indicies[6];
+
+};
+
+QuadData quad_data = {
+    0, 0, 0, 0,
+    {
+        make_V2f32(-0.5f, -0.5f),
+        make_V2f32(0.5f, -0.5f),
+        make_V2f32(0.5f, 0.5f),
+        make_V2f32(-0.5f, 0.5f),
+    },
+    {
+        make_V2f32(0.0f, 0.0f),
+        make_V2f32(1.0f, 0.0f),
+        make_V2f32(1.0f, 1.0f),
+        make_V2f32(0.0f, 1.0f),
+    },
+    {
+        0, 1, 2,
+        2, 3, 0,
+    }
+};
+
+void draw_quad(V2f32 pos0, V2f32 pos1, V2f32 uv0, V2f32 uv1, u32 shader, V4f32 color) {
+
+    V2f32 positions[] = {
+        screen_space_to_gl(pos0),
+        screen_space_to_gl(make_V2f32(pos1.x, pos0.y)),
+        screen_space_to_gl(pos1),
+        screen_space_to_gl(make_V2f32(pos0.x, pos1.y)),
+    };
+
+    V2f32 tex_coords[] = {
+        uv0,
+        make_V2f32(uv1.x, uv0.y),
+        uv1,
+        make_V2f32(uv0.x, uv1.y),
+    };
+
+    glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo_coords);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(positions), positions);
+
+    glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo_texcoords);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(tex_coords), tex_coords);
+
+
+    glBindVertexArray(quad_data.vao);
+    glUseProgram(shader);
+    glUniform4f(glGetUniformLocation(shader, "u_color"), color.x, color.y, color.z, color.w);
+    glDrawElements(GL_TRIANGLES, ARRAY_SIZE(quad_data.indicies), GL_UNSIGNED_INT, nullptr);
+}
+
+void draw_rectangle(f32 x, f32 y, f32 w, f32 h, V4f32 color) {
+    draw_quad(make_V2f32(x, y), make_V2f32(x + w, y + h), make_V2f32(0, 0), make_V2f32(1, 1), quad_shader, color);
+}
+
+
+void init_font_texture(String path, f32 font_pixel_height) {
+    
+    u64 tmp = arena_get_pos(scratch);
+    u8 *tmp_bitmap = (u8 *)arena_alloc(scratch, 512*512);
+    u8 *ttf_buf = (u8 *)arena_alloc(scratch, 1<<20);
+
+    fread(ttf_buf, 1, 1<<20, fopen((char *)path.dat, "rb"));
+    font_pixel_size = font_pixel_height;
+    stbtt_BakeFontBitmap(ttf_buf, 0, font_pixel_size, tmp_bitmap, 512, 512, 32, 96, cdata); // no guarantee this fits!
+
+    u32 tex = 0;
+
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 512, 512, 0, GL_RED, GL_UNSIGNED_BYTE, tmp_bitmap);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);       
+
+    arena_set_pos(scratch, tmp);
+    ftex = tex;
+}
+
+
+void draw_text(String text, f32 x, f32 y, f32 size, V4f32 color) {
+
+    f32 scale = size / font_pixel_size;
+
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, ftex);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    for (u64 i = 0; i < text.count; ++i) {
+        if (text.dat[i] >= 32 && text.dat[i] < 128) {
+            stbtt_aligned_quad q;
+            get_baked_quad(cdata, 512, 512, text.dat[i] - 32, &x, &y, scale, &q);
+            draw_quad(make_V2f32(q.x0, q.y0), make_V2f32(q.x1, q.y1), make_V2f32(q.s0, q.t0), make_V2f32(q.s1, q.t1), text_shader, color);
+        }
+    }
+    glDisable(GL_BLEND);
+}
+
 void draw_ui(UI_State *ui) {
 
     DynArray<UI_Pane> *panes = ui->ui_panes + ui->active_panes_id;
@@ -1564,12 +1728,16 @@ void draw_ui(UI_State *ui) {
 
         UI_Pane *pane = panes->dat + i;
 
+        if (pane->parent_id != nil_id) {
+
+        }
+
         if (has_flags(pane->flags, PANE_BACKGROUND_COLOR)) {
-            DrawRectangleV(Vector2 {pane->x, pane->y}, Vector2 {pane->w, pane->h}, pane->background_color);
+            draw_rectangle(pane->x, pane->y, pane->w, pane->h, pane->background_color);
         }
 
         if (has_flags(pane->flags, PANE_DRAGGABLE)) {
-            DrawRectangleV(Vector2 {pane->x, pane->y + PANE_MARGIN}, Vector2 {pane->w, DRAG_BAR_HEIGHT}, DRAG_BAR_COLOR);
+            draw_rectangle(pane->x, pane->y + PANE_MARGIN, pane->w, DRAG_BAR_HEIGHT, DRAG_BAR_COLOR);
         }
 
         if (has_flags(pane->flags, PANE_TEXT_INPUT)) {
@@ -1578,21 +1746,26 @@ void draw_ui(UI_State *ui) {
 
             if (ui->active && ui->active_id == pane->hash && ui->text_cursor) {
                 String s = string_printf(scratch, "%.*s", (int)ui->cursor_pos, pane->text_buf);
-                int sz = MeasureText((char *)s.dat, TEXT_INPUT_FONT_SIZE);
+                f32 sz = measure_text(s, TEXT_INPUT_FONT_SIZE);
 
-                DrawRectangleV(Vector2 {pane->x + TEXT_INPUT_MARGIN + (f32)sz, h_offset + TEXT_INPUT_FONT_SIZE / 2.0f}, Vector2 {1, TEXT_INPUT_FONT_SIZE}, TEXT_INPUT_CURSOR_COLOR);
+                f32 bar_size = TEXT_INPUT_FONT_SIZE - 8;
+                if (bar_size < 8) {
+                    bar_size = 8;
+                }
+                draw_rectangle(pane->x + TEXT_INPUT_MARGIN + (f32)sz, h_offset + bar_size / 2.0f, 1, bar_size, TEXT_INPUT_CURSOR_COLOR);
 
                 if (ui->selecting) {
 
                     String s1 = string_printf(scratch, "%.*s", (int)ui->selection_start, pane->text_buf);
-                    int sz2 = MeasureText((char *)s1.dat, TEXT_INPUT_FONT_SIZE);
+                    f32 sz2 = measure_text(s1, TEXT_INPUT_FONT_SIZE);
 
                     String s2 = string_printf(scratch, "%.*s", (int)(ui->selection_end - ui->selection_start), pane->text_buf + ui->selection_start);
-                    int selection_sz = MeasureText((char *)s2.dat, TEXT_INPUT_FONT_SIZE);
-                    Color a = TEXT_INPUT_SELECTION_COLOR;
-                    a = ColorBrightness(a, 2.0f);
-                    a.a = 100;
-                    DrawRectangleV(Vector2 {pane->x + TEXT_INPUT_MARGIN + (f32)sz2, h_offset + TEXT_INPUT_FONT_SIZE / 2.0f}, Vector2 {(f32)selection_sz, TEXT_INPUT_FONT_SIZE}, a);
+                    f32 selection_sz = measure_text(s2, TEXT_INPUT_FONT_SIZE);
+                    V4f32 a = TEXT_INPUT_SELECTION_COLOR;
+                    a.x *= 1.5f;
+                    a.y *= 1.5f;
+                    a.z *= 1.5f;
+                    draw_rectangle(pane->x + TEXT_INPUT_MARGIN + (f32)sz2, h_offset + bar_size / 2.0f, (f32)selection_sz, bar_size, a);
 
                 }
             }
@@ -1601,7 +1774,7 @@ void draw_ui(UI_State *ui) {
 
         if (has_flags(pane->flags, PANE_TEXT_DISPLAY)) {
             String s = string_printf(scratch, "%.*s", (int)*pane->text_count, pane->text_buf);
-            DrawText((char *)s.dat, (s32)pane->x + TEXT_INPUT_MARGIN, (s32)(pane->y) + TEXT_INPUT_FONT_SIZE / 2, TEXT_INPUT_FONT_SIZE, LIGHTGRAY);
+            draw_text(s, pane->x + TEXT_INPUT_MARGIN, pane->y + TEXT_INPUT_FONT_SIZE, TEXT_INPUT_FONT_SIZE, make_V4f32(1.0f, 1.0f, 1.0f, 1.0f));
         }
     }
 }
@@ -1619,8 +1792,8 @@ f32 min(f32 a, f32 b) {
 void set_resizing(UI_State *ui, UI_Pane *pane) {
     ui->mouse_action = MOUSE_ACTION_RESIZING;
     ui->resize_id = pane->hash;
-    ui->resize_x = ui->mx;
-    ui->resize_y = ui->my;
+    ui->resize_x = ui->input->mx;
+    ui->resize_y = ui->input->my;
     ui->resize_w = pane->w;
     ui->resize_h = pane->h;
 }
@@ -1638,52 +1811,52 @@ void update_panes(UI_State *ui) {
 
 
         if (has_flags(pane->flags, PANE_DRAGGABLE)) {
-            if (ui->mouse_action == MOUSE_ACTION_DRAGGING && ui->drag_id == pane->hash && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+            if (ui->mouse_action == MOUSE_ACTION_DRAGGING && ui->drag_id == pane->hash && button_released(ui->input->buttons + BUTTON_ML)) {
                 ui->mouse_action = MOUSE_ACTION_NONE;
             }
 
             if (ui->mouse_action == MOUSE_ACTION_DRAGGING && ui->drag_id == pane->hash) {
-                pane->x = ui->mx - ui->drag_x_offset;
-                pane->y = ui->my - ui->drag_y_offset;
+                pane->x = ui->input->mx - ui->drag_x_offset;
+                pane->y = ui->input->my - ui->drag_y_offset;
             }
-            if (mouse_collides(pane->x, pane->y + PANE_MARGIN, pane->w, DRAG_BAR_HEIGHT)) {
+            if (mouse_collides(ui->input, pane->x, pane->y + PANE_MARGIN, pane->w, DRAG_BAR_HEIGHT)) {
                 ui->display_mouse = MOUSE_DISPLAY_POINTING_HAND;
-                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                if (get_button_presses(ui->input->buttons + BUTTON_ML) > 0) {
                     ui->mouse_action = MOUSE_ACTION_DRAGGING;
                     ui->drag_id = pane->hash;
-                    ui->drag_x_offset = ui->mx - pane->x;
-                    ui->drag_y_offset = ui->my - pane->y;
+                    ui->drag_x_offset = ui->input->mx - pane->x;
+                    ui->drag_y_offset = ui->input->my - pane->y;
                 }
             }
             pane->h_offset += DRAG_BAR_HEIGHT + 2 * PANE_MARGIN;
         }
 
-        if (has_flags(pane->flags, PANE_SCROLL)) {
-            todo();
-        }
+        // if (has_flags(pane->flags, PANE_SCROLL)) {
+        //     todo();
+        // }
 
 
         if (has_flags(pane->flags, PANE_RESIZEABLE)) {
 
-            if (ui->mouse_action == MOUSE_ACTION_RESIZING && ui->resize_id == pane->hash && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+            if (ui->mouse_action == MOUSE_ACTION_RESIZING && ui->resize_id == pane->hash && button_released(ui->input->buttons + BUTTON_ML)) {
                 ui->mouse_action = MOUSE_ACTION_NONE;
             }
 
             if (ui->mouse_action == MOUSE_ACTION_RESIZING && ui->resize_id == pane->hash) {
                 
                 if (ui->resize_pos.x < 0) {
-                    pane->x = ui->mx;
-                    pane->w = ui->resize_w + ui->resize_x - ui->mx;
+                    pane->x = ui->input->mx;
+                    pane->w = ui->resize_w + ui->resize_x - ui->input->mx;
 
                 } else if (ui->resize_pos.x > 0) {
-                    pane->w = ui->resize_w + ui->mx - ui->resize_x;
+                    pane->w = ui->resize_w + ui->input->mx - ui->resize_x;
                 } 
 
                 if (ui->resize_pos.y < 0) {
-                    pane->y = ui->my;
-                    pane->h = ui->resize_h + ui->resize_y - ui->my;
+                    pane->y = ui->input->my;
+                    pane->h = ui->resize_h + ui->resize_y - ui->input->my;
                 } else if (ui->resize_pos.y > 0) {
-                    pane->h = ui->resize_h + ui->my - ui->resize_y;
+                    pane->h = ui->resize_h + ui->input->my - ui->resize_y;
                 }
             }
             {
@@ -1697,7 +1870,7 @@ void update_panes(UI_State *ui) {
                 f32 dy = 0;
                 for (u64 j = 0; j < ARRAY_SIZE(table); ++j) {
                     Value *v = table + j;
-                    if (mouse_collides(v->x, v->y, v->w, v->h)) {
+                    if (mouse_collides(ui->input, v->x, v->y, v->w, v->h)) {
                         dx += v->dx;
                         dy += v->dy;
                     }
@@ -1705,7 +1878,7 @@ void update_panes(UI_State *ui) {
                 if (dx != 0 || dy != 0) {
                     ui->display_mouse = MOUSE_DISPLAY_RESIZING;
                     ui->resize_pos = make_V2f32(dx, dy);
-                    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    if (get_button_presses(ui->input->buttons + BUTTON_ML) > 0) {
                         set_resizing(ui, pane);
                     }
                 }
@@ -1723,25 +1896,25 @@ void update_panes(UI_State *ui) {
 
         if (has_flags(pane->flags, PANE_TEXT_INPUT)) {
 
-            if (mouse_collides(pane->x, pane->y, pane->w, pane->h)) {
+            if (mouse_collides(ui->input, pane->x, pane->y, pane->w, pane->h)) {
                 ui->display_mouse = MOUSE_DISPLAY_IBEAM;
-                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                if (get_button_presses(ui->input->buttons + BUTTON_ML) > 0) {
 
                     if (ui->active && ui->active_id == pane->hash && ui->text_cursor) {
 
                         ui->selecting = false;
-                        if (ui->mx < pane->x) {
+                        if (ui->input->mx < pane->x) {
                             ui->cursor_pos = 0;
-                        } else if (ui->mx > pane->x + pane->w) {
+                        } else if (ui->input->mx > pane->x + pane->w) {
                             ui->cursor_pos = *pane->text_count - 1;
                         } else {
-                            ui->cursor_pos = get_text_cursor_pos_from_mouse(pane->text_buf, pane->text_count, pane, ui->mx);
+                            ui->cursor_pos = get_text_cursor_pos_from_mouse(pane->text_buf, pane->text_count, pane, ui->input->mx);
                         }
 
                     } else {
                         ui->selecting = false;
                         ui->text_cursor = true;
-                        ui->cursor_pos = get_text_cursor_pos_from_mouse(pane->text_buf, pane->text_count, pane, ui->mx);
+                        ui->cursor_pos = get_text_cursor_pos_from_mouse(pane->text_buf, pane->text_count, pane, ui->input->mx);
                         ui->active_id = pane->hash;
                         ui->active = true;
                     }
@@ -1750,13 +1923,13 @@ void update_panes(UI_State *ui) {
             pane->event.text_input_changed = false;
             if (ui->active && ui->active_id == pane->hash && ui->text_cursor) {
 
-                pane->event.text_input_changed = ui->key_count > 0 || ui->char_count > 0;
+                pane->event.text_input_changed = ui->input->key_count > 0 || ui->input->char_count > 0;
 
-                for (u64 j = 0; j < ui->key_count; ++j) {
+                for (u64 j = 0; j < ui->input->key_count; ++j) {
 
                     u64 prev_cursor_pos = ui->cursor_pos;
 
-                    if (ui->keys_pressed[j] == KEY_BACKSPACE) {
+                    if (ui->input->keys[j] == BUTTON_BACKSPACE) {
 
                         if (*pane->text_count > 0) {
                             if (ui->selecting) {
@@ -1767,7 +1940,7 @@ void update_panes(UI_State *ui) {
                             } else {
                                 if (ui->cursor_pos > 0) {
 
-                                    if (ui->ctrl_key_down) {
+                                    if (ui->input->buttons[BUTTON_CTRL].ended_down) {
 
                                         if (is_whitespace(pane->text_buf[ui->cursor_pos - 1])) {
                                             while (ui->cursor_pos > 0 && is_whitespace(pane->text_buf[ui->cursor_pos - 1])) {
@@ -1791,7 +1964,7 @@ void update_panes(UI_State *ui) {
                             }
                         }
 
-                    } else if (ui->keys_pressed[j] == KEY_DELETE) {
+                    } else if (ui->input->keys[j] == BUTTON_DELETE) {
 
                         if (*pane->text_count > 0) {
                             if (ui->selecting) {
@@ -1806,29 +1979,29 @@ void update_panes(UI_State *ui) {
                             }
                         }
 
-                    } else if (ui->keys_pressed[j] == KEY_A) {
-                        if (*pane->text_count > 0 && ui->ctrl_key_down) {
+                    } else if (ui->input->keys[j] == BUTTON_A) {
+                        if (*pane->text_count > 0 && ui->input->buttons[BUTTON_CTRL].ended_down) {
                             ui->selecting = true;
                             ui->cursor_pos = 0;
                             ui->selection_anchor = *pane->text_count;
                         }
-                    } else if (ui->keys_pressed[j] == KEY_X) {
-                        if (ui->selecting && ui->ctrl_key_down) {
+                    } else if (ui->input->keys[j] == BUTTON_X) {
+                        if (ui->selecting && ui->input->buttons[BUTTON_CTRL].ended_down) {
                             ui->selecting = false;
                             String s = string_printf(scratch, "%.*s", (int)(ui->selection_end - ui->selection_start), ui->selection_start + pane->text_buf);
-                            SetClipboardText((char *)s.dat);
+                            set_clipboard_text(s);
                             shift_left_resize(pane->text_buf, pane->text_count, ui->selection_start, ui->selection_end - ui->selection_start);
                             ui->cursor_pos = ui->selection_start;
                         }
-                    } else if (ui->keys_pressed[j] == KEY_C) {
-                        if (ui->selecting && ui->ctrl_key_down) {
+                    } else if (ui->input->keys[j] == BUTTON_C) {
+                        if (ui->selecting && ui->input->buttons[BUTTON_CTRL].ended_down) {
                             String s = string_printf(scratch, "%.*s", (int)(ui->selection_end - ui->selection_start), ui->selection_start + pane->text_buf);
-                            SetClipboardText((char *)s.dat);
+                            set_clipboard_text(s);
                         }
-                    } else if (ui->keys_pressed[j] == KEY_V) {
-                        if (ui->ctrl_key_down) {
-                            const char *text = GetClipboardText();
-                            u64 len = strlen(text);
+                    } else if (ui->input->keys[j] == BUTTON_V) {
+                        if (ui->input->buttons[BUTTON_CTRL].ended_down) {
+                            String text = get_clipboard_text();
+                            u64 len = text.count;
 
                             if (len + *pane->text_count - (ui->selection_end - ui->selection_start) > pane->text_capacity) {
                                 // pasting clipboard would overflow
@@ -1840,45 +2013,45 @@ void update_panes(UI_State *ui) {
                                     ui->cursor_pos = ui->selection_start;
                                 }
                                 shift_right_resize(pane->text_buf, pane->text_count, ui->cursor_pos, len);
-                                memcpy(pane->text_buf + ui->cursor_pos, text, len);
+                                memcpy(pane->text_buf + ui->cursor_pos, text.dat, len);
                                 ui->cursor_pos += len;
                             }
 
                         }
-                    } else if (ui->keys_pressed[j] == KEY_HOME) {
+                    } else if (ui->input->keys[j] == BUTTON_HOME) {
                         if (*pane->text_count > 0) {
-                            if (!ui->selecting && ui->shift_key_down) {
+                            if (!ui->selecting && ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = true;
                                 ui->selection_anchor = prev_cursor_pos;
                             }
-                            if (ui->selecting && !ui->shift_key_down) {
+                            if (ui->selecting && !ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = false;
                             }
                             ui->cursor_pos = 0;
                         }
-                    } else if (ui->keys_pressed[j] == KEY_END) {
+                    } else if (ui->input->keys[j] == BUTTON_END) {
                         if (*pane->text_count > 0) {
-                            if (!ui->selecting && ui->shift_key_down) {
+                            if (!ui->selecting && ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = true;
                                 ui->selection_anchor = prev_cursor_pos;
                             }
-                            if (ui->selecting && !ui->shift_key_down) {
+                            if (ui->selecting && !ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = false;
                             }
                             ui->cursor_pos = *pane->text_count;
                         }
-                    } else if (ui->keys_pressed[j] == KEY_LEFT) {
+                    } else if (ui->input->keys[j] == BUTTON_LEFT) {
                         if (*pane->text_count > 0 && ui->cursor_pos > 0) {
 
-                            if (!ui->selecting && ui->shift_key_down) {
+                            if (!ui->selecting && ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = true;
                                 ui->selection_anchor = prev_cursor_pos;
                             }
-                            if (ui->selecting && !ui->shift_key_down) {
+                            if (ui->selecting && !ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = false;
                             }
 
-                            if (ui->ctrl_key_down) {
+                            if (ui->input->buttons[BUTTON_CTRL].ended_down) {
                                 if (is_whitespace(pane->text_buf[ui->cursor_pos - 1])) {
                                     while (ui->cursor_pos > 0 && is_whitespace(pane->text_buf[ui->cursor_pos - 1])) {
                                         ui->cursor_pos -= 1;
@@ -1897,18 +2070,18 @@ void update_panes(UI_State *ui) {
 
                         }
 
-                    } else if (ui->keys_pressed[j] == KEY_RIGHT) {
+                    } else if (ui->input->keys[j] == BUTTON_RIGHT) {
                         if (*pane->text_count > 0 && ui->cursor_pos < *pane->text_count) {
 
-                            if (!ui->selecting && ui->shift_key_down) {
+                            if (!ui->selecting && ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = true;
                                 ui->selection_anchor = prev_cursor_pos;
                             }
-                            if (ui->selecting && !ui->shift_key_down) {
+                            if (ui->selecting && !ui->input->buttons[BUTTON_SHIFT].ended_down) {
                                 ui->selecting = false;
                             }
 
-                            if (ui->ctrl_key_down) {
+                            if (ui->input->buttons[BUTTON_CTRL].ended_down) {
                                 if (is_whitespace(pane->text_buf[ui->cursor_pos])) {
                                     while (ui->cursor_pos < *pane->text_count && is_whitespace(pane->text_buf[ui->cursor_pos])) {
                                         ui->cursor_pos += 1;
@@ -1945,18 +2118,21 @@ void update_panes(UI_State *ui) {
 
 
                 // text cursor input
-                for (u64 j = 0; j < ui->char_count && *pane->text_count < pane->text_capacity - 1; ++j) {
+                for (u64 j = 0; j < ui->input->char_count && *pane->text_count < pane->text_capacity - 1; ++j) {
 
-                    if (ui->selecting) {
-                        ui->selecting = false;
+                    u32 character = ui->input->chars[j];
+                    if (character >= 32 && character < 127) {
+                        if (ui->selecting) {
+                            ui->selecting = false;
 
-                        shift_left_resize(pane->text_buf, pane->text_count, ui->selection_start, ui->selection_end - ui->selection_start);
-                        ui->cursor_pos = ui->selection_start;
+                            shift_left_resize(pane->text_buf, pane->text_count, ui->selection_start, ui->selection_end - ui->selection_start);
+                            ui->cursor_pos = ui->selection_start;
+                        }
+
+                        shift_right_resize(pane->text_buf, pane->text_count, ui->cursor_pos, 1);
+                        pane->text_buf[ui->cursor_pos] = (u8)character;
+                        ui->cursor_pos += 1;
                     }
-
-                    shift_right_resize(pane->text_buf, pane->text_count, ui->cursor_pos, 1);
-                    pane->text_buf[ui->cursor_pos] = (u8)ui->chars_pressed[j];
-                    ui->cursor_pos += 1;
                 }
             }
         }
@@ -1975,24 +2151,24 @@ void end_ui(UI_State *ui) {
     update_panes(ui);
     switch (ui->display_mouse) {
         case MOUSE_DISPLAY_DEFAULT: {
-            SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+            set_mouse_cursor(MOUSE_CURSOR_ARROW);
         } break;
         case MOUSE_DISPLAY_POINTING_HAND: {
-            SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+            set_mouse_cursor(MOUSE_CURSOR_HAND);
         } break;
         case MOUSE_DISPLAY_IBEAM: {
-            SetMouseCursor(MOUSE_CURSOR_IBEAM);
+            set_mouse_cursor(MOUSE_CURSOR_IBEAM);
         } break;
         case MOUSE_DISPLAY_RESIZING: {
             V2f32 p = ui->resize_pos;
             if (p.x != 0 && p.x == p.y) {
-                SetMouseCursor(MOUSE_CURSOR_RESIZE_NWSE);
+                set_mouse_cursor(MOUSE_CURSOR_RESIZE_NWSE);
             } else if (p.x != 0 && p.x == -p.y) {
-                SetMouseCursor(MOUSE_CURSOR_RESIZE_NESW);
+                set_mouse_cursor(MOUSE_CURSOR_RESIZE_NESW);
             } else if (p.x != 0 && p.y == 0) {
-                SetMouseCursor(MOUSE_CURSOR_RESIZE_EW);
+                set_mouse_cursor(MOUSE_CURSOR_RESIZE_WE);
             } else if (p.x == 0 && p.y != 0) {
-                SetMouseCursor(MOUSE_CURSOR_RESIZE_NS);
+                set_mouse_cursor(MOUSE_CURSOR_RESIZE_NS);
             }
         } break;
         case MouseDisplay_COUNT: assert(false && "unreachable"); break;
@@ -2032,32 +2208,209 @@ void test() {
 }
 
 
+
+
+
+
+u32 compile_shader(String src, u32 shader_type) {
+
+    u32 shader = glCreateShader(shader_type);
+    glShaderSource(shader, 1, (const char **)&src.dat, nullptr);
+    glCompileShader(shader);
+
+
+    s32 compiled = 0;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        s32 len = 0;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
+        // TODO: actually handle memory
+        char *log = (char *)malloc((u64)len);
+        glGetShaderInfoLog(shader, len, nullptr, log);
+        LOG_ERROR("Failed to compile shader %.*s because of %s\n", (s32)src.count, src.dat, log);
+        glDeleteShader(shader);
+        shader = 0;
+    }
+
+    return shader;
+}
+
+u32 create_glshader(String vsrc, String fsrc) {
+
+    u32 fshader = compile_shader(fsrc, GL_FRAGMENT_SHADER);
+    u32 vshader = compile_shader(vsrc, GL_VERTEX_SHADER);
+
+
+    u32 program = 0;
+    if (fshader && vshader) {
+        program = glCreateProgram();
+
+        glAttachShader(program, fshader);
+        glAttachShader(program, vshader);
+
+        glLinkProgram(program);
+        glValidateProgram(program);
+
+        s32 valid = 0;
+        glGetProgramiv(program, GL_VALIDATE_STATUS, &valid);
+        if (!valid) {
+            s32 len = 0;
+            glGetProgramiv(program, GL_INFO_LOG_LENGTH, &len);
+            // TODO: actually handle memory
+            char *log = (char *)malloc((u64)len);
+            glGetProgramInfoLog(program, len, nullptr, log);
+            LOG_ERROR("Shader failed validation because of %s\n", log);
+            glDeleteProgram(program);
+            program = 0;
+        }
+    } else {
+        if (fshader) glDeleteShader(fshader);
+        if (vshader) glDeleteShader(vshader);
+    }
+    // TODO: maybe handle all error paths
+
+
+    // removes source code and stuff from gpu
+    #if 0
+    glDeleteShader(fshader);
+    glDeleteShader(vshader);
+
+    glDetachShader(program, fshader);
+    glDetachShader(program, vshader);
+    #endif
+    return program;
+}
+
+
+
+
+
+String quad_vertex_shader = str_lit(R"(
+#version 330 core
+layout(location = 0) in vec2 position;
+layout(location = 1) in vec2 texCoord;
+
+out vec2 v_TexCoord;
+
+void main() {
+    gl_Position = vec4(position, 0, 1);
+    v_TexCoord = texCoord;
+}
+)");
+
+String quad_frag_shader = str_lit(R"(
+#version 330 core
+
+layout(location = 0) out vec4 color;
+
+uniform vec4 u_color;
+// in vec2 v_TexCoord;
+
+// uniform sampler2D u_Texture;
+void main() {
+    color = u_color;
+    // color = vec4(v_TexCoord, 0, 0);
+}
+)");
+
+String quadstr_frag_shader = str_lit(R"(
+#version 330 core
+
+layout(location = 0) out vec4 color;
+
+uniform vec4 u_color;
+in vec2 v_TexCoord;
+
+uniform sampler2D u_Texture;
+void main() {
+    color = u_color * vec4(texture(u_Texture, v_TexCoord).xxxx);
+}
+)");
+
+
+
+
+
+
+
+
 UI_State ui = {};
 Interpreter inter = {};
 
 int main(void) {
 
-    Arena t; arena_init(&t, 1000000);
+    Arena t; arena_init(&t, 10000000);
     scratch = &t;
 
-    String_Builder sb; string_builder_init(&sb, 65000);
+    DynArray<u8> sb; dynarray_init(&sb, 65000);
 
-    // Interpreter *e = (Interpreter *)arena_alloc(scratch, sizeof(*e));
 
 
     arena_init(&inter.func_arena, 100000);
     arena_init(&inter.ctx.node_arena, 100000);
 
 
-    int screen_w = 1366;
-    int screen_h = 768;
+    if (!create_window((s32)screen_w, (s32)screen_h, str_lit("Para"), &g_window)) return 1;
+    if (!gladLoadGL()) {
+        LOG_ERROR("Failed to load newer OpenGl functions\n");
+        return 1;
+    }
+
+    LOG_INFO("OpenGl version %s\n", glGetString(GL_VERSION));
+    LOG_INFO("OpenGl renderer %s\n", glGetString(GL_RENDERER));
 
 
-    InitWindow(screen_w, screen_h, "Para");
+    glGenVertexArrays(1, &quad_data.vao);
+    glBindVertexArray(quad_data.vao);
 
-    SetWindowState(FLAG_WINDOW_RESIZABLE);
-    SetTargetFPS(60);
+    {
+        glGenBuffers(1, &quad_data.vbo_coords);
+        glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo_coords);
+        
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quad_data.positions), quad_data.positions, GL_STATIC_DRAW);
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(V2f32), nullptr);
+        glEnableVertexAttribArray(0);
 
+        glGenBuffers(1, &quad_data.vbo_texcoords);
+        glBindBuffer(GL_ARRAY_BUFFER, quad_data.vbo_texcoords);
+
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quad_data.tex_coords), quad_data.tex_coords, GL_STATIC_DRAW);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, sizeof(V2f32), nullptr);
+        glEnableVertexAttribArray(1);
+
+
+        glGenBuffers(1, &quad_data.ibo);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, quad_data.ibo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(quad_data.indicies), quad_data.indicies, GL_STATIC_DRAW);
+    }
+
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+
+    quad_shader = create_glshader(quad_vertex_shader, quad_frag_shader);
+    if (!quad_shader) return 1;
+    text_shader = create_glshader(quad_vertex_shader, quadstr_frag_shader);
+    if (!text_shader) return 1;
+
+
+    // f32 x = 0;
+
+    // while (true) {
+    //     x += 0.01f;
+    //     if (x > 1) x = 0;
+    //     get_inputs(&g_window);
+
+    //     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    //     glClearColor(0.0f, 0.5f, 0.0f, 1.0f);
+
+    //     draw_rectangle(100, 100, 200, 200, make_V4f32(0.23f, 0.23f, 0.23f, 1));
+
+    //     swap_buffers(&g_window);
+    // }
+
+    // return 0;
 
     u8 text_buf[5][64] = {};
     u64 text_count[5] = {};
@@ -2065,46 +2418,58 @@ int main(void) {
     u8 display_text_buf[5][64] = {};
     u64 display_text_count[5] = {};
 
+    V4f32 light_gray = {};
+    light_gray.x = 0.5f;
+    light_gray.y = 0.5f;
+    light_gray.z = 0.5f;
+    light_gray.w = 1.0f;
+
+    V4f32 red = {};
+    red.x = 1.0f;
+    red.y = 0;
+    red.z = 0;
+    red.w = 1.0f;
+
+    V4f32 black = {};
+    black.x = 0;
+    black.y = 0;
+    black.z = 0;
+    black.w = 1.0f;
+
+    V4f32 dark_green = {};
+    dark_green.x = 0;
+    dark_green.y = 0.4f;
+    dark_green.z = 0;
+    dark_green.w = 1.0f;
 
 
-    while (!WindowShouldClose()) {
+    init_font_texture(str_lit("c:/windows/fonts/times.ttf"), TEXT_INPUT_FONT_SIZE);
+
+    bool running = true;
+    while (running) {
+
+        Input input = get_inputs(&g_window);
+        for (u64 i = 0; i < input.char_count; ++i) {
+            printf("char: %u\n", input.chars[i]);
+        }
+        for (u64 i = 0; i < input.key_count; ++i) {
+            printf("key: %u\n", input.keys[i]);
+        }
+        ui.input = &input;
+
+        screen_w = input.screen_width;
+        screen_h = input.screen_height;
         u64 tmp_pos = arena_get_pos(scratch);
-
-        ui.mx = (f32)GetMouseX();
-        ui.my = (f32)GetMouseY();
-
-
-        ui.char_count = 0;
-        while (true) {
-            int tmp = GetCharPressed();
-            if (tmp == 0) break;
-
-            ui.chars_pressed[ui.char_count++] = tmp;
-        }
-
-        ui.ctrl_key_down = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
-        ui.shift_key_down = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
-        ui.key_count = 0;
-        while (true) {
-            int tmp = GetKeyPressed();
-            if (tmp == 0) break;
-            if (tmp == KEY_LEFT_CONTROL) continue;
-            if (tmp == KEY_RIGHT_CONTROL) continue;
-            if (tmp == KEY_LEFT_SHIFT) continue;
-            if (tmp == KEY_RIGHT_SHIFT) continue;
-
-            ui.keys_pressed[ui.key_count++] = tmp;
-        }
 
         begin_ui(&ui);
         {
-            create_pane(&ui, PANE_DRAGGABLE|PANE_RESIZEABLE|PANE_BACKGROUND_COLOR, 69420'0, 0, 0, 400, 500, LIGHTGRAY, nullptr, nullptr, 0);
+            create_pane(&ui, PANE_DRAGGABLE|PANE_RESIZEABLE|PANE_BACKGROUND_COLOR, 69420'0, 0, 0, 400, 500, light_gray, nullptr, nullptr, 0);
 
             // text input + display string
             push_parent(&ui);
             for (u64 i = 0; i < 5; ++i) {
-                Ui_Event event = create_pane(&ui, PANE_TEXT_INPUT|PANE_TEXT_DISPLAY|PANE_BACKGROUND_COLOR, 79420+i, 0, 0, 400, 35, DARKGREEN, text_buf[i], text_count + i, sizeof(text_buf[i]));
-                create_pane(&ui, PANE_TEXT_DISPLAY|PANE_BACKGROUND_COLOR, 80420+i, 0, 0, 400, 35, RED, display_text_buf[i], display_text_count + i, sizeof(display_text_buf[i]));
+                Ui_Event event = create_pane(&ui, PANE_TEXT_INPUT|PANE_TEXT_DISPLAY|PANE_BACKGROUND_COLOR, 79420+i, 0, 0, 400, 35, dark_green, text_buf[i], text_count + i, sizeof(text_buf[i]));
+                create_pane(&ui, PANE_TEXT_DISPLAY|PANE_BACKGROUND_COLOR, 80420+i, 0, 0, 400, 35, red, display_text_buf[i], display_text_count + i, sizeof(display_text_buf[i]));
                 if (event.text_input_changed) {
                     if (event.text_input_changed) {
 
@@ -2165,22 +2530,22 @@ int main(void) {
             pop_parent(&ui);
         }
         {
-            create_pane(&ui, PANE_DRAGGABLE|PANE_BACKGROUND_COLOR, 1337420, 1366-800, 0, 800, 400, BLACK, nullptr, nullptr, 0);
+            create_pane(&ui, PANE_DRAGGABLE|PANE_BACKGROUND_COLOR, 1337420, 1366-800, 0, 800, 400, black, nullptr, nullptr, 0);
         }
 
         end_ui(&ui);
 
-        BeginDrawing();
-        ClearBackground(GRAY);
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+        glClearColor(0.23f, 0.23f, 0.23f, 0.0f);
         draw_ui(&ui);
-        EndDrawing();
+
+        swap_buffers(&g_window);
         arena_set_pos(scratch, tmp_pos);
     }
     arena_clean(&t);
     scratch = nullptr;
 
-
-    CloseWindow(); // Close window and OpenGL context
 
     return 0;
 }
