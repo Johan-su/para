@@ -1367,6 +1367,8 @@ struct UI_Pane {
 
     u64 flags;
 
+    bool is_parent;
+
     V4f32 background_color;
 
 
@@ -1426,6 +1428,9 @@ struct UI_State {
 
 
     DynArray<u64> parent_stack;
+
+
+    u8 parent_depth;
 };
 
 u32 quad_shader = 0;
@@ -1446,6 +1451,7 @@ void push_parent(UI_State *ui) {
     DynArray<UI_Pane> *panes = ui->ui_panes + ui->active_panes_id; 
     assert(panes->count > 0);
     u64 id = panes->count - 1;
+    panes->dat[id].is_parent = true;
     dynarray_append(&ui->parent_stack, id);
 }
 
@@ -1728,8 +1734,25 @@ void draw_ui(UI_State *ui) {
 
         UI_Pane *pane = panes->dat + i;
 
-        if (pane->parent_id != nil_id) {
+        if (pane->is_parent) {
+            if (pane->parent_id == nil_id) {
+                ui->parent_depth = 0;
+            }
 
+            glStencilMask(0xFF);
+            glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
+            f32 x = pane->x + PANE_MARGIN;
+            f32 y = pane->y + PANE_MARGIN;
+            f32 w = pane->w - PANE_MARGIN;
+            f32 h = pane->h - PANE_MARGIN;
+
+            draw_quad(make_V2f32(x, y), make_V2f32(pane->x + w, pane->y + h), make_V2f32(0, 0), make_V2f32(1, 1), quad_shader, make_V4f32(1, 1, 1, 1));
+            glStencilMask(0);
+            ui->parent_depth += 1;
+        }
+
+        if (pane->parent_id != nil_id) {
+            glStencilFunc(GL_EQUAL, ui->parent_depth, 0xFF);
         }
 
         if (has_flags(pane->flags, PANE_BACKGROUND_COLOR)) {
@@ -1776,6 +1799,12 @@ void draw_ui(UI_State *ui) {
             String s = string_printf(scratch, "%.*s", (int)*pane->text_count, pane->text_buf);
             draw_text(s, pane->x + TEXT_INPUT_MARGIN, pane->y + TEXT_INPUT_FONT_SIZE, TEXT_INPUT_FONT_SIZE, make_V4f32(1.0f, 1.0f, 1.0f, 1.0f));
         }
+
+        if (pane->parent_id != nil_id) {
+            glStencilFunc(GL_EQUAL, 0, 0x0);
+            glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+        }
+
     }
 }
 
@@ -1885,8 +1914,13 @@ void update_panes(UI_State *ui) {
             }
         }
 
+        bool inside_parent_active_area = true;
         if (pane->parent_id != nil_id) {
+            inside_parent_active_area = false;
             UI_Pane *parent = panes->dat + pane->parent_id;
+            if (mouse_collides(ui->input, parent->x + PANE_MARGIN, parent->y + PANE_MARGIN, parent->w - 2 * PANE_MARGIN, parent->h - 2 * PANE_MARGIN)) {
+                inside_parent_active_area = true;
+            }
             // assuming downwards layout
             pane->x = PANE_MARGIN + parent->x;
             pane->y = parent->y + parent->h_offset;
@@ -1896,7 +1930,7 @@ void update_panes(UI_State *ui) {
 
         if (has_flags(pane->flags, PANE_TEXT_INPUT)) {
 
-            if (mouse_collides(ui->input, pane->x, pane->y, pane->w, pane->h)) {
+            if (inside_parent_active_area && mouse_collides(ui->input, pane->x, pane->y, pane->w, pane->h)) {
                 ui->display_mouse = MOUSE_DISPLAY_IBEAM;
                 if (get_button_presses(ui->input->buttons + BUTTON_ML) > 0) {
 
@@ -2535,6 +2569,10 @@ int main(void) {
 
         end_ui(&ui);
 
+
+        glEnable(GL_STENCIL_TEST);
+        glStencilMask(0xFF);
+        glStencilFunc(GL_ALWAYS, 1, 0xff);
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
         glClearColor(0.23f, 0.23f, 0.23f, 0.0f);
