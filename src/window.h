@@ -97,6 +97,8 @@ enum MouseCursor {
 Input get_inputs(Window *window);
 bool button_released(ButtonState *s);
 bool button_pressed(ButtonState *s);
+bool button_down(ButtonState *s);
+
 u8 get_button_presses(ButtonState *s);
 void swap_buffers(Window *window);
 bool create_window(s32 w, s32 h, String title, Window *window_output);

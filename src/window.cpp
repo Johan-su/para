@@ -53,6 +53,10 @@ bool button_pressed(ButtonState *s) {
     return !s->ended_down && s->transitions > 0;
 }
 
+bool button_down(ButtonState *s) {
+    return s->ended_down;
+}
+
 char clipboard_text[4096];
 
 bool set_clipboard_text(String s) {
@@ -382,10 +386,10 @@ bool create_window(s32 w, s32 h, String title, Window *window_output) {
 
     Window_Internal window = {};
     window.handle = CreateWindowEx(
-        0,
+        WS_EX_APPWINDOW,
         window_class.lpszClassName,
         (const char *)title.dat,
-        0,
+        WS_OVERLAPPEDWINDOW | WS_SIZEBOX,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         w,
