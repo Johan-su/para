@@ -2467,6 +2467,10 @@ int main(void) {
     dark_green.w = 1.0f;
 
 
+    char tmp_text_buffer[1024];
+    String text = {};
+    text.dat = (u8 *)tmp_text_buffer;
+
     init_font_texture(str_lit("c:/windows/fonts/times.ttf"), TEXT_INPUT_FONT_SIZE);
 
     bool running = true;
@@ -2485,6 +2489,15 @@ int main(void) {
         screen_h = input.screen_height;
         u64 tmp_pos = arena_get_pos(scratch);
 
+
+        for (u64 i = 0; i < input.char_count; ++i) {
+            text.dat[text.count++] = (u8)input.chars[i];
+        }
+        printf("%.*s\n", (s32)text.count, text.dat);
+
+
+        draw_text(text, 50, 50, 30, make_V4f32(1, 1, 1, 1));
+        /*
         begin_ui(&ui);
         {
             create_pane(&ui, PANE_DRAGGABLE|PANE_RESIZEABLE|PANE_BACKGROUND_COLOR, 69420'0, 0, 0, 400, 500, light_gray, nullptr, nullptr, 0);
@@ -2558,7 +2571,7 @@ int main(void) {
         }
 
         end_ui(&ui);
-
+        */
 
         glEnable(GL_STENCIL_TEST);
         glStencilMask(0xFF);
@@ -2566,7 +2579,7 @@ int main(void) {
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
         glClearColor(0.23f, 0.23f, 0.23f, 0.0f);
-        draw_ui(&ui);
+        // draw_ui(&ui);
 
         swap_buffers(&g_window);
         arena_set_pos(scratch, tmp_pos);
