@@ -2,8 +2,9 @@
 #include "meta.cpp"
 #include "common.cpp"
 #include "string.cpp"
-#include "main.cpp"
+// #include "main.cpp"
 #include "window.cpp"
+#include "font.cpp"
 
 
 #pragma clang diagnostic push
