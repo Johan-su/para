@@ -64,3 +64,38 @@ do {                                                    \
 #define LOG_INFO(...) printf("INFO: " __VA_ARGS__);
 #define LOG_WARNING(...) printf("WARNING: " __VA_ARGS__);
 #define LOG_ERROR(...) fprintf(stderr, "ERROR: " __VA_ARGS__);
+
+
+template <typename T>
+struct DynArray {
+    u64 count;
+    u64 cap;
+    T *dat;
+};
+template <typename T>
+void dynarray_init(DynArray<T> *dynarray, u64 cap) {
+    dynarray->count = 0;
+    dynarray->cap = cap;
+    dynarray->dat = (T *)calloc(dynarray->cap, sizeof(T));
+}
+template <typename T>
+void dynarray_append(DynArray<T> *dynarray, T v) {
+    if (dynarray->cap == 0) dynarray_init(dynarray, 1 << 14);
+    assert(dynarray->count < dynarray->cap);
+    dynarray->dat[dynarray->count++] = v;
+}
+template <typename T>
+T dynarray_pop(DynArray<T> *dynarray) {
+    assert(dynarray->count > 0);
+    return dynarray->dat[--dynarray->count];
+}
+
+template <typename T>
+void dynarray_swap(DynArray<T> *dynarray, u64 index1, u64 index2) {
+    assert(index1 < dynarray->count);
+    assert(index2 < dynarray->count);
+
+    T tmp = dynarray->dat[index1];
+    dynarray->dat[index1] = dynarray->dat[index2];
+    dynarray->dat[index2] = tmp;
+}
