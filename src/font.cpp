@@ -173,10 +173,49 @@ struct Hmetrics {
     s16 left_side_bearing; // in font design units.
 };
 
+enum Glyph_Flags: u8 {
+    GLYPH_FLAGS_ON_CURVE_POINT = 0x01, // Bit 0: If set, the point is on the curve; otherwise, it is off the curve.
+    GLYPH_FLAGS_X_SHORT_VECTOR = 0x02, // Bit 1: If set, the corresponding x-coordinate is 1 byte long, and the sign is determined by the X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR flag. If not set, its interpretation depends on the X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR flag: If that other flag is set, the x-coordinate is the same as the previous x-coordinate, and no element is added to the xCoordinates array. If both flags are not set, the corresponding element in the xCoordinates array is two bytes and interpreted as a signed integer. See the description of the X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR flag for additional information.
+    GLYPH_FLAGS_Y_SHORT_VECTOR = 0x04, // Bit 2: If set, the corresponding y-coordinate is 1 byte long, and the sign is determined by the Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR flag. If not set, its interpretation depends on the Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR flag: If that other flag is set, the y-coordinate is the same as the previous y-coordinate, and no element is added to the yCoordinates array. If both flags are not set, the corresponding element in the yCoordinates array is two bytes and interpreted as a signed integer. See the description of the Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR flag for additional information.
+    GLYPH_FLAGS_REPEAT_FLAG = 0x08, // Bit 3: If set, the next byte (read as unsigned) specifies the number of additional times this flag byte is to be repeated in the logical flags array — that is, the number of additional logical flag entries inserted after this entry. (In the expanded logical array, this bit is ignored.) In this way, the number of flags listed can be smaller than the number of points in the glyph description.
+    GLYPH_FLAGS_X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR = 0x10, // Bit 4: This flag has two meanings, depending on how the X_SHORT_VECTOR flag is set. If X_SHORT_VECTOR is set, this bit describes the sign of the value, with 1 equaling positive and 0 negative. If X_SHORT_VECTOR is not set and this bit is set, then the current x-coordinate is the same as the previous x-coordinate. If X_SHORT_VECTOR is not set and this bit is also not set, the current x-coordinate is a signed 16-bit delta vector.
+    GLYPH_FLAGS_Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR = 0x20, // Bit 5: This flag has two meanings, depending on how the Y_SHORT_VECTOR flag is set. If Y_SHORT_VECTOR is set, this bit describes the sign of the value, with 1 equaling positive and 0 negative. If Y_SHORT_VECTOR is not set and this bit is set, then the current y-coordinate is the same as the previous y-coordinate. If Y_SHORT_VECTOR is not set and this bit is also not set, the current y-coordinate is a signed 16-bit delta vector.
+    GLYPH_FLAGS_OVERLAP_SIMPLE = 0x40, // Bit 6: If set, contours in the glyph description could overlap. Use of this flag is not required — that is, contours may overlap without having this flag set. When used, it must be set on the first flag byte for the glyph. See additional details below.
+    GLYPH_FLAGS_Reserved = 0x80, // Bit 7 is reserved: set to zero.
+};
+
+union ContourCoord {
+    u8 u;
+    s16 s;
+};
+
+struct Glyph {
+    s16 number_of_contours; // If the number of contours is greater than or equal to zero, this is a simple glyph. If negative, this is a composite glyph — the value -1 should be used for composite glyphs.
+    s16 xmin; // Minimum x for coordinate data.
+    s16 ymin; // Minimum y for coordinate data.
+    s16 xmax; // Maximum x for coordinate data.
+    s16 ymax; // Maximum y for coordinate data.
+
+
+    DynArray<u16> end_pts_of_contour; // Array of point indices for the last point of each contour, in increasing numeric order.
+
+    // u16 instruction_length; // Total number of bytes for instructions. If instructionLength is zero, no instructions are present for this glyph, and this field is followed directly by the flags field.
+    // DynArray<u8> instructions; // Array of instruction byte code for the glyph.
+
+    DynArray<Glyph_Flags> glyph_flags; // Array of flag elements. See below for details regarding the number of flag array elements.
+    DynArray<ContourCoord> x_coords; // Contour point x-coordinates. See below for details regarding the number of coordinate array elements. Coordinate for the first point is relative to (0,0); others are relative to previous point.
+    DynArray<ContourCoord> y_coords; // Contour point y-coordinates. See below for details regarding the number of coordinate array elements. Coordinate for the first point is relative to (0,0); others are relative to previous point.
+
+
+};
+
+
 struct Font {
 
     DynArray<SequentialMapGroup> smgs;
 
+
+// head
     bool baseline_at_y0;
     bool left_sidebearing_point_at_x0;
     bool instructions_may_depend_on_point_size;
@@ -196,6 +235,21 @@ struct Font {
     bool shadow;
     bool condensed;
     bool extended;
+
+    s16 index_to_loc_format; // 0 for short offsets (Offset16), 1 for long (Offset32)
+
+// maxp
+
+    u16 num_glyphs;
+
+
+// loca
+
+    DynArray<Offset32> loca_offsets;
+// glyf
+
+    DynArray<Glyph> glyphs;
+//
 
     u16 advance_width_max;
     s16 min_left_side_bearing;
@@ -359,7 +413,6 @@ int main(void) {
         u16 num_tables = btl_u16(*numTables);
 
         u16 btl_numberOfHMetrics = 0;
-        u16 btl_numGlyphs = 0;
 
         for (u64 i = 0; i < num_tables; ++i) {
             TagIndex ti = {};
@@ -445,6 +498,8 @@ int main(void) {
                     if (btl_macStyle & (1 << 5)) font.condensed = true;
                     if (btl_macStyle & (1 << 6)) font.extended = true;
 
+                    font.index_to_loc_format = btl_s16(*indexToLocFormat);
+
                 } else {
                     LOG_ERROR("Invalid magic in `head` table in font %s\n", path);
                     return 1;
@@ -511,7 +566,7 @@ int main(void) {
                 }
                 s16 *left_side_bearings = (s16 *)(hmtx_table + btl_numberOfHMetrics);
 
-                u64 left_side_bearings_count = btl_numGlyphs - btl_numberOfHMetrics;
+                u64 left_side_bearings_count = font.num_glyphs - btl_numberOfHMetrics;
                 for (u64 j = 0; j < left_side_bearings_count; ++j) {
                     s16 *bigendian_lsb = left_side_bearings + j;
                     dynarray_append(&font.glyph_left_side_bearings, btl_s16(*bigendian_lsb));
@@ -535,7 +590,8 @@ int main(void) {
                 u16 *maxComponentElements = maxSizeOfInstructions + 1;
                 u16 *maxComponentDepth = maxComponentElements + 1;
 
-                btl_numGlyphs = btl_u16(*numGlyphs);
+                font.num_glyphs = btl_u16(*numGlyphs);
+
             } else if (is_tabletag(str_lit("name"), tr_tableTag)) {
                 // might be used later
             } else if (is_tabletag(str_lit("OS/2"), tr_tableTag)) {
@@ -643,6 +699,76 @@ int main(void) {
                 // u32 *minMemType1 = (u32 *)(maxMemType42 + 1);
                 // u32 *maxMemType1 = (u32 *)(minMemType1 + 1);
 
+
+            } else if (is_tabletag(str_lit("loca"), tr_tableTag)) {
+                u8 *loca_table = table_directory + tr_offset_from_start_of_file;
+
+
+                switch (font.index_to_loc_format) {
+                    case 0: {
+                        todo();
+                    } break;
+                    case 1: {
+                        u64 offset_count = font.num_glyphs + 1;
+                        Offset32 *offset_start = (Offset32 *)loca_table;
+                        for (u64 j = 0; j < offset_count; ++j) {
+                            Offset32 *offsets = offset_start + j;
+                            dynarray_append(&font.loca_offsets, btl_u32(*offsets));
+                        }
+
+                    } break;
+                    default: assert(false && "unreachable");
+                }
+
+
+            } else if (is_tabletag(str_lit("glyf"), tr_tableTag)) {
+                u8 *glyf_table = table_directory + tr_offset_from_start_of_file;
+
+                for (u64 j = 0; j < font.num_glyphs; ++j) {
+
+
+                    s16 *numberOfContours = (s16 *)glyf_table;
+                    s16 *xMin = numberOfContours + 1;
+                    s16 *yMin = xMin + 1;
+                    s16 *xMax = yMin + 1;
+                    s16 *yMax = xMax + 1;
+
+                    Glyph glyph = {};
+
+                    glyph.number_of_contours = btl_s16(*numberOfContours);
+                    glyph.xmin = btl_s16(*xMin);
+                    glyph.ymin = btl_s16(*yMin);
+                    glyph.xmax = btl_s16(*xMax);
+                    glyph.ymax = btl_s16(*yMax);
+
+
+                    if (glyph.number_of_contours >= 0) {
+                        u16 *endPtsOfContours = (u16 *)(yMax + 1);
+                        u16 *instruction_length = endPtsOfContours + 1 + glyph.number_of_contours;
+                        u16 btl_instruction_length = btl_u16(*instruction_length);
+                        assert(btl_instruction_length == 0);
+
+                        u8 *instructions = (u8 *)(instruction_length + 1);
+                        u8 *flags = instructions + 1 + btl_instruction_length;
+
+                        
+                        u16 number_of_contours = (u16)glyph.number_of_contours; 
+                        for (u64 k = 0; k < number_of_contours; ++k) {
+                            dynarray_append(&glyph.end_pts_of_contour, btl_u16(endPtsOfContours[k]));
+                        }
+                        // TODO repeating bit
+                        u64 flag_count = 0;
+                        for (;; ++flag_count) {
+                            dynarray_append(&glyph.glyph_flags, (Glyph_Flags)flags[flag_count]);
+                        }
+                        u8 *xCoordinates = flags + 1 + flag_count;
+
+
+
+                    } else {
+                        todo();
+                    }
+                }
 
             }
 
