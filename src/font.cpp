@@ -420,10 +420,16 @@ int main(void) {
             TagIndex *ti = tag_to_table.dat + i; 
             if (is_tabletag(str_lit("hhea"), ti->table_tag)) {
                 dynarray_swap(&tag_to_table, 0, i);
-            } else if (is_tabletag(str_lit("maxp"), ti->table_tag)) {
+            } else if (is_tabletag(str_lit("head"), ti->table_tag)) {
                 dynarray_swap(&tag_to_table, 1, i);
-            } else if (is_tabletag(str_lit("hmtx"), ti->table_tag)) {
+            } else if (is_tabletag(str_lit("maxp"), ti->table_tag)) {
                 dynarray_swap(&tag_to_table, 2, i);
+            } else if (is_tabletag(str_lit("hmtx"), ti->table_tag)) {
+                dynarray_swap(&tag_to_table, 3, i);
+            } else if (is_tabletag(str_lit("loca"), ti->table_tag)) {
+                dynarray_swap(&tag_to_table, 4, i);
+            } else if (is_tabletag(str_lit("glyf"), ti->table_tag)) {
+                dynarray_swap(&tag_to_table, 5, i);
             }
         }
 
@@ -702,7 +708,12 @@ int main(void) {
 
                 switch (font.index_to_loc_format) {
                     case 0: {
-                        todo();
+                        u64 offset_count = font.num_glyphs + 1;
+                        Offset16 *offset_start = (Offset16 *)loca_table;
+                        for (u64 j = 0; j < offset_count; ++j) {
+                            Offset32 offset = 2 * (u32)btl_u16(offset_start[j]);
+                            dynarray_append(&font.loca_offsets, offset);
+                        }
                     } break;
                     case 1: {
                         u64 offset_count = font.num_glyphs + 1;
@@ -719,11 +730,14 @@ int main(void) {
 
             } else if (is_tabletag(str_lit("glyf"), tr_tableTag)) {
                 u8 *glyf_table = table_directory + tr_offset_from_start_of_file;
+                assert((u64)glyf_table % 2 == 0);
 
-                for (u64 i2 = 0; i2 < font.num_glyphs; ++i2) {
+                for (u64 glyph_id = 0; glyph_id < font.num_glyphs; ++glyph_id) {
 
+                    u8 *glyph_start = glyf_table + font.loca_offsets.dat[glyph_id];
+                    assert((u64)glyph_start % 2 == 0);
 
-                    s16 *numberOfContours = (s16 *)glyf_table;
+                    s16 *numberOfContours = (s16 *)glyph_start;
                     s16 *xMin = numberOfContours + 1;
                     s16 *yMin = xMin + 1;
                     s16 *xMax = yMin + 1;
@@ -740,19 +754,19 @@ int main(void) {
 
                     if (glyph.number_of_contours >= 0) {
                         u16 *endPtsOfContours = (u16 *)(yMax + 1);
-                        u16 *instruction_length = endPtsOfContours + 1 + glyph.number_of_contours;
+                        u16 *instruction_length = endPtsOfContours + glyph.number_of_contours;
                         u16 btl_instruction_length = btl_u16(*instruction_length);
                         // assert(btl_instruction_length == 0);
 
                         u8 *instructions = (u8 *)(instruction_length + 1);
-                        u8 *flags = instructions + 1 + btl_instruction_length;
+                        u8 *flags = instructions + btl_instruction_length;
 
                         
                         u16 number_of_contours = (u16)glyph.number_of_contours; 
                         for (u64 i3 = 0; i3 < number_of_contours; ++i3) {
                             dynarray_append(&glyph.end_pts_of_contour, btl_u16(endPtsOfContours[i3]));
                         }
-                        u64 number_of_points = glyph.end_pts_of_contour.dat[glyph.end_pts_of_contour.count - 1];
+                        u64 number_of_points = glyph.end_pts_of_contour.dat[glyph.end_pts_of_contour.count - 1] + 1;
                         DynArray<u8> flag_arr = {};
                         u64 flag_iter = 0;
                         for (u64 i3 = 0; i3 < number_of_points; ++i3) {
@@ -771,54 +785,73 @@ int main(void) {
                             }
                         }
                         u64 real_flag_len = flag_iter;
-                        u8 *xCoordinates = flags + 1 + real_flag_len;
+                        u8 *xCoordinates = flags + real_flag_len;
 
                         DynArray<s16> x_arr = {};
                         DynArray<s16> y_arr = {};
 
-
-                        for (u64 i3 = 0; x_arr.count < flag_arr.count; ++i3) {
+                        u64 x_index = 0;
+                        s16 x = 0;
+                        for (u64 i3 = 0; i3 < flag_arr.count; ++i3) {
                             u8 f = flag_arr.dat[i3];
                             
                             if (f & CONTOUR_FLAGS_X_SHORT_VECTOR) {
 
-                                s16 val = (f & CONTOUR_FLAGS_X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR) ? xCoordinates[i3] : -xCoordinates[i3];
-
-                                dynarray_append(&x_arr, val);
+                                s16 dx = (f & CONTOUR_FLAGS_X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR) ? xCoordinates[x_index] : -xCoordinates[x_index];
+                                x += dx;
+                                dynarray_append(&x_arr, x);
+                                x_index += 1;
                             } else {
                                 if (f & CONTOUR_FLAGS_X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR) {
-                                    s16 prev_val = x_arr.dat[x_arr.count - 1];
-                                    dynarray_append(&x_arr, prev_val); 
+                                    dynarray_append(&x_arr, x); 
                                 } else {
-                                    s16 *x_coord = (s16 *)xCoordinates + i3;
-                                    s16 btl_x_coord = btl_s16(*x_coord);
-                                    dynarray_append(&x_arr, btl_x_coord);
+                                    u8 *dx_coord = xCoordinates + x_index;
+                                    
+                                    s16 s_dx_coord;
+                                    memcpy(&s_dx_coord, dx_coord, sizeof(s_dx_coord));
+
+                                    s16 btl_dx_coord = btl_s16(s_dx_coord);
+                                    x += btl_dx_coord;
+                                    assert(x >= glyph.xmin);
+                                    assert(x <= glyph.xmax);
+                                    dynarray_append(&x_arr, x);
+                                    x_index += 2;
                                 }
                             }
                         }
 
-                        u8 *yCoordinates = xCoordinates + 1 + x_arr.count;
+                        u8 *yCoordinates = xCoordinates + x_index;
 
+                        u64 y_index = 0;
+                        s16 y = 0;
                         for (u64 i3 = 0; y_arr.count < flag_arr.count; ++i3) {
                             u8 f = flag_arr.dat[i3];
                             
                             if (f & CONTOUR_FLAGS_Y_SHORT_VECTOR) {
 
-                                s16 val = (f & CONTOUR_FLAGS_Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR) ? yCoordinates[i3] : -yCoordinates[i3];
+                                s16 dy = (f & CONTOUR_FLAGS_Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR) ? yCoordinates[y_index] : -yCoordinates[y_index];
+                                y += dy;
 
-                                dynarray_append(&y_arr, val);
+                                dynarray_append(&y_arr, y);
+                                y_index += 1;
                             } else {
                                 if (f & CONTOUR_FLAGS_Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR) {
-                                    s16 prev_val = y_arr.dat[y_arr.count - 1];
-                                    dynarray_append(&y_arr, prev_val); 
+                                    dynarray_append(&y_arr, y); 
                                 } else {
-                                    s16 *y_coord = (s16 *)yCoordinates + i3;
-                                    s16 btl_y_coord = btl_s16(*y_coord);
-                                    dynarray_append(&y_arr, btl_y_coord);
+                                    u8 *dy_coord = yCoordinates + y_index;
+                                    
+                                    s16 s_dy_coord;
+                                    memcpy(&s_dy_coord, dy_coord, sizeof(s_dy_coord));
+
+                                    s16 btl_dy_coord = btl_s16(s_dy_coord);
+                                    y += btl_dy_coord;
+                                    assert(y >= glyph.ymin);
+                                    assert(y <= glyph.ymax);
+                                    dynarray_append(&y_arr, y);
+                                    y_index += 2;
                                 }
                             }
                         }
-
 
 
                     } else {
