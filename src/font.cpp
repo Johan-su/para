@@ -173,20 +173,21 @@ struct Hmetrics {
     s16 left_side_bearing; // in font design units.
 };
 
-enum Glyph_Flags: u8 {
-    GLYPH_FLAGS_ON_CURVE_POINT = 0x01, // Bit 0: If set, the point is on the curve; otherwise, it is off the curve.
-    GLYPH_FLAGS_X_SHORT_VECTOR = 0x02, // Bit 1: If set, the corresponding x-coordinate is 1 byte long, and the sign is determined by the X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR flag. If not set, its interpretation depends on the X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR flag: If that other flag is set, the x-coordinate is the same as the previous x-coordinate, and no element is added to the xCoordinates array. If both flags are not set, the corresponding element in the xCoordinates array is two bytes and interpreted as a signed integer. See the description of the X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR flag for additional information.
-    GLYPH_FLAGS_Y_SHORT_VECTOR = 0x04, // Bit 2: If set, the corresponding y-coordinate is 1 byte long, and the sign is determined by the Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR flag. If not set, its interpretation depends on the Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR flag: If that other flag is set, the y-coordinate is the same as the previous y-coordinate, and no element is added to the yCoordinates array. If both flags are not set, the corresponding element in the yCoordinates array is two bytes and interpreted as a signed integer. See the description of the Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR flag for additional information.
-    GLYPH_FLAGS_REPEAT_FLAG = 0x08, // Bit 3: If set, the next byte (read as unsigned) specifies the number of additional times this flag byte is to be repeated in the logical flags array — that is, the number of additional logical flag entries inserted after this entry. (In the expanded logical array, this bit is ignored.) In this way, the number of flags listed can be smaller than the number of points in the glyph description.
-    GLYPH_FLAGS_X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR = 0x10, // Bit 4: This flag has two meanings, depending on how the X_SHORT_VECTOR flag is set. If X_SHORT_VECTOR is set, this bit describes the sign of the value, with 1 equaling positive and 0 negative. If X_SHORT_VECTOR is not set and this bit is set, then the current x-coordinate is the same as the previous x-coordinate. If X_SHORT_VECTOR is not set and this bit is also not set, the current x-coordinate is a signed 16-bit delta vector.
-    GLYPH_FLAGS_Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR = 0x20, // Bit 5: This flag has two meanings, depending on how the Y_SHORT_VECTOR flag is set. If Y_SHORT_VECTOR is set, this bit describes the sign of the value, with 1 equaling positive and 0 negative. If Y_SHORT_VECTOR is not set and this bit is set, then the current y-coordinate is the same as the previous y-coordinate. If Y_SHORT_VECTOR is not set and this bit is also not set, the current y-coordinate is a signed 16-bit delta vector.
-    GLYPH_FLAGS_OVERLAP_SIMPLE = 0x40, // Bit 6: If set, contours in the glyph description could overlap. Use of this flag is not required — that is, contours may overlap without having this flag set. When used, it must be set on the first flag byte for the glyph. See additional details below.
-    GLYPH_FLAGS_Reserved = 0x80, // Bit 7 is reserved: set to zero.
+enum Contour_Flags: u8 {
+    CONTOUR_FLAGS_ON_CURVE_POINT = 0x01, // Bit 0: If set, the point is on the curve; otherwise, it is off the curve.
+    CONTOUR_FLAGS_X_SHORT_VECTOR = 0x02, // Bit 1: If set, the corresponding x-coordinate is 1 byte long, and the sign is determined by the X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR flag. If not set, its interpretation depends on the X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR flag: If that other flag is set, the x-coordinate is the same as the previous x-coordinate, and no element is added to the xCoordinates array. If both flags are not set, the corresponding element in the xCoordinates array is two bytes and interpreted as a signed integer. See the description of the X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR flag for additional information.
+    CONTOUR_FLAGS_Y_SHORT_VECTOR = 0x04, // Bit 2: If set, the corresponding y-coordinate is 1 byte long, and the sign is determined by the Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR flag. If not set, its interpretation depends on the Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR flag: If that other flag is set, the y-coordinate is the same as the previous y-coordinate, and no element is added to the yCoordinates array. If both flags are not set, the corresponding element in the yCoordinates array is two bytes and interpreted as a signed integer. See the description of the Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR flag for additional information.
+    CONTOUR_FLAGS_REPEAT_FLAG = 0x08, // Bit 3: If set, the next byte (read as unsigned) specifies the number of additional times this flag byte is to be repeated in the logical flags array — that is, the number of additional logical flag entries inserted after this entry. (In the expanded logical array, this bit is ignored.) In this way, the number of flags listed can be smaller than the number of points in the glyph description.
+    CONTOUR_FLAGS_X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR = 0x10, // Bit 4: This flag has two meanings, depending on how the X_SHORT_VECTOR flag is set. If X_SHORT_VECTOR is set, this bit describes the sign of the value, with 1 equaling positive and 0 negative. If X_SHORT_VECTOR is not set and this bit is set, then the current x-coordinate is the same as the previous x-coordinate. If X_SHORT_VECTOR is not set and this bit is also not set, the current x-coordinate is a signed 16-bit delta vector.
+    CONTOUR_FLAGS_Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR = 0x20, // Bit 5: This flag has two meanings, depending on how the Y_SHORT_VECTOR flag is set. If Y_SHORT_VECTOR is set, this bit describes the sign of the value, with 1 equaling positive and 0 negative. If Y_SHORT_VECTOR is not set and this bit is set, then the current y-coordinate is the same as the previous y-coordinate. If Y_SHORT_VECTOR is not set and this bit is also not set, the current y-coordinate is a signed 16-bit delta vector.
+    CONTOUR_FLAGS_OVERLAP_SIMPLE = 0x40, // Bit 6: If set, contours in the glyph description could overlap. Use of this flag is not required — that is, contours may overlap without having this flag set. When used, it must be set on the first flag byte for the glyph. See additional details below.
+    CONTOUR_FLAGS_Reserved = 0x80, // Bit 7 is reserved: set to zero.
 };
 
-union ContourCoord {
-    u8 u;
-    s16 s;
+struct ContourPoint {
+    bool point_on_curve;
+    s16 x_coord;
+    s16 y_coord;
 };
 
 struct Glyph {
@@ -201,12 +202,7 @@ struct Glyph {
 
     // u16 instruction_length; // Total number of bytes for instructions. If instructionLength is zero, no instructions are present for this glyph, and this field is followed directly by the flags field.
     // DynArray<u8> instructions; // Array of instruction byte code for the glyph.
-
-    DynArray<Glyph_Flags> glyph_flags; // Array of flag elements. See below for details regarding the number of flag array elements.
-    DynArray<ContourCoord> x_coords; // Contour point x-coordinates. See below for details regarding the number of coordinate array elements. Coordinate for the first point is relative to (0,0); others are relative to previous point.
-    DynArray<ContourCoord> y_coords; // Contour point y-coordinates. See below for details regarding the number of coordinate array elements. Coordinate for the first point is relative to (0,0); others are relative to previous point.
-
-
+    DynArray<ContourPoint> contour_points;
 };
 
 
@@ -724,7 +720,7 @@ int main(void) {
             } else if (is_tabletag(str_lit("glyf"), tr_tableTag)) {
                 u8 *glyf_table = table_directory + tr_offset_from_start_of_file;
 
-                for (u64 j = 0; j < font.num_glyphs; ++j) {
+                for (u64 i2 = 0; i2 < font.num_glyphs; ++i2) {
 
 
                     s16 *numberOfContours = (s16 *)glyf_table;
@@ -746,22 +742,82 @@ int main(void) {
                         u16 *endPtsOfContours = (u16 *)(yMax + 1);
                         u16 *instruction_length = endPtsOfContours + 1 + glyph.number_of_contours;
                         u16 btl_instruction_length = btl_u16(*instruction_length);
-                        assert(btl_instruction_length == 0);
+                        // assert(btl_instruction_length == 0);
 
                         u8 *instructions = (u8 *)(instruction_length + 1);
                         u8 *flags = instructions + 1 + btl_instruction_length;
 
                         
                         u16 number_of_contours = (u16)glyph.number_of_contours; 
-                        for (u64 k = 0; k < number_of_contours; ++k) {
-                            dynarray_append(&glyph.end_pts_of_contour, btl_u16(endPtsOfContours[k]));
+                        for (u64 i3 = 0; i3 < number_of_contours; ++i3) {
+                            dynarray_append(&glyph.end_pts_of_contour, btl_u16(endPtsOfContours[i3]));
                         }
-                        // TODO repeating bit
-                        u64 flag_count = 0;
-                        for (;; ++flag_count) {
-                            dynarray_append(&glyph.glyph_flags, (Glyph_Flags)flags[flag_count]);
+                        u64 number_of_points = glyph.end_pts_of_contour.dat[glyph.end_pts_of_contour.count - 1];
+                        DynArray<u8> flag_arr = {};
+                        u64 flag_iter = 0;
+                        for (u64 i3 = 0; i3 < number_of_points; ++i3) {
+                            u8 f = flags[flag_iter];
+                            dynarray_append(&flag_arr, f);
+                            
+                            if (f & CONTOUR_FLAGS_REPEAT_FLAG) {
+                                u8 repeat = flags[flag_iter + 1];
+                                for (u64 i4 = 0; i4 < repeat; ++i4) {
+                                    dynarray_append(&flag_arr, f);
+                                }
+                                i3 += repeat;
+                                flag_iter += 2;
+                            } else {
+                                flag_iter += 1;
+                            }
                         }
-                        u8 *xCoordinates = flags + 1 + flag_count;
+                        u64 real_flag_len = flag_iter;
+                        u8 *xCoordinates = flags + 1 + real_flag_len;
+
+                        DynArray<s16> x_arr = {};
+                        DynArray<s16> y_arr = {};
+
+
+                        for (u64 i3 = 0; x_arr.count < flag_arr.count; ++i3) {
+                            u8 f = flag_arr.dat[i3];
+                            
+                            if (f & CONTOUR_FLAGS_X_SHORT_VECTOR) {
+
+                                s16 val = (f & CONTOUR_FLAGS_X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR) ? xCoordinates[i3] : -xCoordinates[i3];
+
+                                dynarray_append(&x_arr, val);
+                            } else {
+                                if (f & CONTOUR_FLAGS_X_IS_SAME_OR_POSITIVE_X_SHORT_VECTOR) {
+                                    s16 prev_val = x_arr.dat[x_arr.count - 1];
+                                    dynarray_append(&x_arr, prev_val); 
+                                } else {
+                                    s16 *x_coord = (s16 *)xCoordinates + i3;
+                                    s16 btl_x_coord = btl_s16(*x_coord);
+                                    dynarray_append(&x_arr, btl_x_coord);
+                                }
+                            }
+                        }
+
+                        u8 *yCoordinates = xCoordinates + 1 + x_arr.count;
+
+                        for (u64 i3 = 0; y_arr.count < flag_arr.count; ++i3) {
+                            u8 f = flag_arr.dat[i3];
+                            
+                            if (f & CONTOUR_FLAGS_Y_SHORT_VECTOR) {
+
+                                s16 val = (f & CONTOUR_FLAGS_Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR) ? yCoordinates[i3] : -yCoordinates[i3];
+
+                                dynarray_append(&y_arr, val);
+                            } else {
+                                if (f & CONTOUR_FLAGS_Y_IS_SAME_OR_POSITIVE_Y_SHORT_VECTOR) {
+                                    s16 prev_val = y_arr.dat[y_arr.count - 1];
+                                    dynarray_append(&y_arr, prev_val); 
+                                } else {
+                                    s16 *y_coord = (s16 *)yCoordinates + i3;
+                                    s16 btl_y_coord = btl_s16(*y_coord);
+                                    dynarray_append(&y_arr, btl_y_coord);
+                                }
+                            }
+                        }
 
 
 
