@@ -1,10 +1,10 @@
 #include "arena.cpp"
-#include "meta.cpp"
+#include "./gen/gen.cpp"
 #include "common.cpp"
 #include "string.cpp"
-// #include "main.cpp"
+#include "main.cpp"
 #include "window.cpp"
-#include "font.cpp"
+// #include "font.cpp"
 
 
 #pragma clang diagnostic push

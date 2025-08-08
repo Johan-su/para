@@ -6,7 +6,7 @@
 
 #include "common.h"
 #include "arena.h"
-#include "meta.h"
+#include "gen/gen.h"
 #include "string.h"
 
 #include "window.h"
@@ -15,24 +15,6 @@
 
 
 Window g_window = {};
-
-
-
-
-
-struct NodeTableData {
-    s64 precedence;
-    bool left_associative;
-    bool is_expr;
-};
-
-NodeTableData node_table_data[] = {
-    #define X(type, precedence, is_left_associative, is_expr) {precedence, is_left_associative, is_expr},
-    NodeDataTable(X)
-    #undef X
-};
-
-
 
 
 
@@ -207,7 +189,7 @@ void tokenize(Interpreter *inter, String src) {
             if (is_alpha(src.dat[lex->iter])) {
                 
                 Error err = {};
-                err.err_string = str_lit("Non digits in number");
+                err.err_string = S("Non digits in number");
                 err.char_id = lex->iter;
                 err.has_char = true;
                 dynarray_append(&inter->errors, err);
@@ -271,7 +253,7 @@ void tokenize(Interpreter *inter, String src) {
             Error err = {};
             err.has_char = true;
             err.char_id = lex->iter;
-            err.err_string = str_lit("Unexpected character");
+            err.err_string = S("Unexpected character");
             dynarray_append(&inter->errors, err);
             return;
         }
@@ -337,12 +319,11 @@ Node *make_node_from_stacks(Interpreter *inter) {
             Error err = {};
             err.token_id = top->token_index;
             err.has_token = true;
-            err.err_string = str_lit("Mismatched opening parenthesis with no closing parenthesis");
+            err.err_string = S("Mismatched opening parenthesis with no closing parenthesis");
             dynarray_append(&inter->errors, err);
             return nullptr;
         } break;
         case NODE_INVALID:
-        case NodeType_COUNT:
         case NODE_PROGRAM:
         case NODE_STATEMENT:
         case NODE_NUMBER:
@@ -355,7 +336,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
         case NODE_ADD: {
             if (inter->ctx.node_stack.count < 2) {
                 Error err = {};
-                err.err_string = str_lit("Expected 2 operands for + operator");
+                err.err_string = S("Expected 2 operands for + operator");
                 dynarray_append(&inter->errors, err);
                 return nullptr;
             }
@@ -364,7 +345,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
         case NODE_SUB: {
             if (inter->ctx.node_stack.count < 2) {
                 Error err = {};
-                err.err_string = str_lit("Expected 2 operands for - operator");
+                err.err_string = S("Expected 2 operands for - operator");
                 dynarray_append(&inter->errors, err);
                 return nullptr;
             }
@@ -374,7 +355,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
         case NODE_MUL: {
             if (inter->ctx.node_stack.count < 2) {
                 Error err = {};
-                err.err_string = str_lit("Expected 2 operands for * operator");
+                err.err_string = S("Expected 2 operands for * operator");
                 dynarray_append(&inter->errors, err);
                 return nullptr;
             }
@@ -384,7 +365,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
         case NODE_DIV: {
             if (inter->ctx.node_stack.count < 2) {
                 Error err = {};
-                err.err_string = str_lit("Expected 2 operands for / operator");
+                err.err_string = S("Expected 2 operands for / operator");
                 dynarray_append(&inter->errors, err);
                 return nullptr;
             }
@@ -394,7 +375,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
         case NODE_UNARYADD: {
             if (inter->ctx.node_stack.count < 1) {
                 Error err = {};
-                err.err_string = str_lit("Expected 1 operands for unary + operator");
+                err.err_string = S("Expected 1 operands for unary + operator");
                 dynarray_append(&inter->errors, err);
                 return nullptr;
             }
@@ -404,7 +385,7 @@ Node *make_node_from_stacks(Interpreter *inter) {
         case NODE_UNARYSUB: {
             if (inter->ctx.node_stack.count < 1) {
                 Error err = {};
-                err.err_string = str_lit("Expected 1 operand for unary - operator");
+                err.err_string = S("Expected 1 operand for unary - operator");
                 dynarray_append(&inter->errors, err);
                 return nullptr;
             }
@@ -452,10 +433,10 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
         DynArray<Node *> *ops = &inter->ctx.op_stack;
 
         if (ops->count >= 2 && ops->dat[ops->count - 1]->type != NODE_OPENPAREN) {
-            s64 p_top = node_table_data[ops->dat[ops->count - 1]->type].precedence;
-            bool left_associative_top = node_table_data[ops->dat[ops->count - 1]->type].left_associative;
+            s64 p_top = node_data_table[ops->dat[ops->count - 1]->type].precedence;
+            bool left_associative_top = node_data_table[ops->dat[ops->count - 1]->type].left_associative;
 
-            s64 p_prev = node_table_data[ops->dat[ops->count - 2]->type].precedence;
+            s64 p_prev = node_data_table[ops->dat[ops->count - 2]->type].precedence;
 
             if (p_top < p_prev || (p_top == p_prev && left_associative_top)) {
 
@@ -494,7 +475,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                         }
                     }
                     Error err = {};
-                    err.err_string = str_lit("Expected closing parenthesis");
+                    err.err_string = S("Expected closing parenthesis");
                     dynarray_append(&inter->errors, err);
                     return;
                 }
@@ -622,7 +603,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                 Error err = {};
                 err.has_token = true;
                 err.token_id = token_id;
-                err.err_string = str_lit("Empty parenthesis pair");
+                err.err_string = S("Empty parenthesis pair");
                 dynarray_append(&inter->errors, err);
                 return;
             }
@@ -632,7 +613,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
                     Error err = {};
                     err.has_token = true;
                     err.token_id = token_id;
-                    err.err_string = str_lit("Mismatched parenthesis");
+                    err.err_string = S("Mismatched parenthesis");
                     dynarray_append(&inter->errors, err);
                     return;
                 }
@@ -648,7 +629,7 @@ void parse_expr(Interpreter *inter, u64 stop_token_types) {
             Error err = {};
             err.token_id = inter->ctx.iter;
             err.has_token = true;
-            err.err_string = str_lit("When parsing expression unexpected token");
+            err.err_string = S("When parsing expression unexpected token");
             dynarray_append(&inter->errors, err);
             return;
         }
@@ -713,7 +694,7 @@ void parse_definition(Interpreter *inter) {
         if (count == 0) {
             // no expr
             Error err = {};
-            err.err_string = str_lit("No expression after definition");
+            err.err_string = S("No expression after definition");
             err.token_id = def->token_index;
             err.has_token = true;
             dynarray_append(&inter->errors, err);
@@ -738,7 +719,7 @@ void parse_definition(Interpreter *inter) {
 
         if (inter->ctx.node_stack.count == 0) {
             Error err = {};
-            err.err_string = str_lit("Cannot have empty expression in variable definition");
+            err.err_string = S("Cannot have empty expression in variable definition");
             dynarray_append(&inter->errors, err);
             return;
         }
@@ -893,7 +874,7 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
             Item *item = find_item_in_scope(name, &n->scope);
             if (!item) {
                 Error err = {};
-                err.err_string = str_lit("Undeclared symbol f");
+                err.err_string = S("Undeclared symbol f");
                 dynarray_append(&inter->errors, err);
                 return;
             }
@@ -905,7 +886,7 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
                 if (n->node_count > item->func_args) {
                     // too many args
                     Error err = {};
-                    err.err_string = str_lit("Too many arguments in function ");
+                    err.err_string = S("Too many arguments in function ");
                     err.token_id = n->token_index;
                     err.has_token = true;
                     dynarray_append(&inter->errors, err);
@@ -914,7 +895,7 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
                 if (n->node_count < item->func_args) {
                     // too few args
                     Error err = {};
-                    err.err_string = str_lit("Too few arguments in function ");
+                    err.err_string = S("Too few arguments in function ");
                     err.token_id = n->token_index;
                     err.has_token = true;
                     dynarray_append(&inter->errors, err);
@@ -947,7 +928,7 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
             Item *item = find_item_in_scope(name, &n->scope);
             if (!item) {
                 Error err = {};
-                err.err_string = str_lit("Undeclared variable");
+                err.err_string = S("Undeclared variable");
                 err.token_id = n->token_index;
                 err.has_token = true;
                 dynarray_append(&inter->errors, err);
@@ -959,7 +940,7 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
                     Error err = {};
                     err.token_id = n->token_index;
                     err.has_token = true;
-                    err.err_string = str_lit("Tried to use non variable as a variable");
+                    err.err_string = S("Tried to use non variable as a variable");
                     dynarray_append(&inter->errors, err);
                     return;
                 }
@@ -982,7 +963,6 @@ void typecheck_tree2(Interpreter *inter, Node *n, Scope *prev_scope) {
             typecheck_tree2(inter, n->nodes[0], &n->scope);
         } break;
         case NODE_OPENPAREN: assert(false && "unreachable"); break;
-        case NodeType_COUNT: assert(false && "unreachable"); break;
     }
 }
 
@@ -1110,7 +1090,6 @@ void bytecode_from_tree2(Interpreter *inter, Node *n) {
             dynarray_append(&inter->bytecode, Bytecode {BYTECODE_NEG, {}});
         } break;
         case NODE_OPENPAREN: assert(false && "unreachable"); break;
-        case NodeType_COUNT: assert(false && "unreachable"); break;
     }
 }
 
@@ -1245,7 +1224,6 @@ bool execute(Interpreter *inter, String func, f64 *args, u64 func_args_count) {
                 inter->program_counter += 1;
 
             } break;
-            case BytecodeType_COUNT: assert(false && "unreachable"); break;
         }
     }
 
@@ -2181,8 +2159,8 @@ void end_ui(UI_State *ui) {
 
 void test() {
     static Interpreter test_inter = {};
-    // String src = str_lit("f(x, y):=x*y;f(1,2);");
-    String src = str_lit("(5+5+5);");
+    // String src = S("f(x, y):=x*y;f(1,2);");
+    String src = S("(5+5+5);");
 
     arena_init(&test_inter.func_arena, 100000);
     arena_init(&test_inter.ctx.node_arena, 100000);
@@ -2201,7 +2179,7 @@ void test() {
         printf("\n");
     }
     print_bytecode(&test_inter.bytecode);
-    bool r = execute(&test_inter, str_lit("_s2"), nullptr, 0);
+    bool r = execute(&test_inter, S("_s2"), nullptr, 0);
     printf("r = %s\n", r ? "true" : "false");
     if (r) {
         printf("Result = %g\n", test_inter.stack.dat[test_inter.stack.count - 1].f);
@@ -2286,7 +2264,7 @@ u32 create_glshader(String vsrc, String fsrc) {
 
 
 
-String quad_vertex_shader = str_lit(R"(
+String quad_vertex_shader = S(R"(
 #version 330 core
 layout(location = 0) in vec2 position;
 layout(location = 1) in vec2 texCoord;
@@ -2299,7 +2277,7 @@ void main() {
 }
 )");
 
-String quad_frag_shader = str_lit(R"(
+String quad_frag_shader = S(R"(
 #version 330 core
 
 layout(location = 0) out vec4 color;
@@ -2314,7 +2292,7 @@ void main() {
 }
 )");
 
-String quadstr_frag_shader = str_lit(R"(
+String quadstr_frag_shader = S(R"(
 #version 330 core
 
 layout(location = 0) out vec4 color;
@@ -2351,7 +2329,7 @@ int main(void) {
     arena_init(&inter.ctx.node_arena, 100000);
 
 
-    if (!create_window((s32)screen_w, (s32)screen_h, str_lit("Para"), &g_window)) return 1;
+    if (!create_window((s32)screen_w, (s32)screen_h, S("Para"), &g_window)) return 1;
     if (!gladLoadGL()) {
         LOG_ERROR("Failed to load newer OpenGl functions\n");
         return 1;
@@ -2448,7 +2426,7 @@ int main(void) {
     String text = {};
     text.dat = (u8 *)tmp_text_buffer;
 
-    init_font_texture(str_lit("c:/windows/fonts/times.ttf"), TEXT_INPUT_FONT_SIZE);
+    init_font_texture(S("c:/windows/fonts/times.ttf"), TEXT_INPUT_FONT_SIZE);
 
     bool running = true;
     while (running) {

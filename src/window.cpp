@@ -468,7 +468,7 @@ void swap_buffers(Window *w) {
 // int main2(void) {
 
 //     Window window;
-//     if (!create_window(500, 500, str_lit("Window title"), &window)) return 1;
+//     if (!create_window(500, 500, S("Window title"), &window)) return 1;
 //     if (!set_window_context(&window)) return 1;
 //     if (!gladLoadGL()) {
 //         LOG_ERROR("Failed to load newer OpenGl functions\n");

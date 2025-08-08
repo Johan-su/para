@@ -8,10 +8,11 @@ struct String {
 };
 
 
-#define str_lit(str) String {(u8 *)(str), sizeof(str) - 1}
+#define S(str) String {(u8 *)(str), sizeof(str) - 1}
 
 #if GCC || CLANG
 __attribute__((__format__ (__printf__, 2, 3)))
 #endif
 String string_printf(Arena *arena, const char *fmt, ...);
 bool string_equal(String a, String b);
+String string_from_cstr(const char *cstr);
