@@ -184,6 +184,24 @@ enum Contour_Flags: u8 {
     CONTOUR_FLAGS_Reserved = 0x80, // Bit 7 is reserved: set to zero.
 };
 
+
+
+enum Composite_Glyph_Flags: u16 {
+COMPOSITE_GLYPH_FLAGS_ARG_1_AND_2_ARE_WORDS = 0x0001, // Bit 0: If this is set, the arguments are 16-bit (uint16 or int16); otherwise, they are bytes (uint8 or int8).
+COMPOSITE_GLYPH_FLAGS_ARGS_ARE_XY_VALUES = 0x0002, // Bit 1: If this is set, the arguments are signed xy values; otherwise, they are unsigned point numbers.
+COMPOSITE_GLYPH_FLAGS_ROUND_XY_TO_GRID = 0x0004, // Bit 2: If set and ARGS_ARE_XY_VALUES is also set, the xy values are rounded to the nearest grid line. Ignored if ARGS_ARE_XY_VALUES is not set.
+COMPOSITE_GLYPH_FLAGS_WE_HAVE_A_SCALE = 0x0008, // Bit 3: This indicates that there is a simple scale for the component. Otherwise, scale = 1.0.
+COMPOSITE_GLYPH_FLAGS_MORE_COMPONENTS = 0x0020, // Bit 5: Indicates at least one more glyph after this one.
+COMPOSITE_GLYPH_FLAGS_WE_HAVE_AN_X_AND_Y_SCALE = 0x0040, // Bit 6: The x direction will use a different scale from the y direction.
+COMPOSITE_GLYPH_FLAGS_WE_HAVE_A_TWO_BY_TWO = 0x0080, // Bit 7: There is a 2 by 2 transformation that will be used to scale the component.
+COMPOSITE_GLYPH_FLAGS_WE_HAVE_INSTRUCTIONS = 0x0100, // Bit 8: Following the last component are instructions for the composite glyph.
+COMPOSITE_GLYPH_FLAGS_USE_MY_METRICS = 0x0200, // Bit 9: If set, this forces the aw and lsb (and rsb) for the composite to be equal to those from this component glyph. This works for hinted and unhinted glyphs.
+COMPOSITE_GLYPH_FLAGS_OVERLAP_COMPOUND = 0x0400, // Bit 10: If set, the components of the compound glyph overlap. Use of this flag is not required — that is, component glyphs may overlap without having this flag set. When used, it must be set on the flag word for the first component. Some rasterizer implementations may require fonts to use this flag to obtain correct behavior — see additional remarks, above, for the similar OVERLAP_SIMPLE flag used in simple-glyph descriptions.
+COMPOSITE_GLYPH_FLAGS_SCALED_COMPONENT_OFFSET = 0x0800, // Bit 11: The composite is designed to have the component offset scaled. Ignored if ARGS_ARE_XY_VALUES is not set.
+COMPOSITE_GLYPH_FLAGS_UNSCALED_COMPONENT_OFFSET = 0x1000, // Bit 12: The composite is designed not to have the component offset scaled. Ignored if ARGS_ARE_XY_VALUES is not set.
+};
+
+
 struct ContourPoint {
     bool point_on_curve;
     s16 x_coord;
@@ -191,6 +209,12 @@ struct ContourPoint {
 };
 
 struct Glyph {
+    bool is_composite;
+
+
+
+
+
     s16 number_of_contours; // If the number of contours is greater than or equal to zero, this is a simple glyph. If negative, this is a composite glyph — the value -1 should be used for composite glyphs.
     s16 xmin; // Minimum x for coordinate data.
     s16 ymin; // Minimum y for coordinate data.
@@ -418,17 +442,17 @@ int main(void) {
         }
         for (u64 i = 0; i < tag_to_table.count; ++i) {
             TagIndex *ti = tag_to_table.dat + i; 
-            if (is_tabletag(str_lit("hhea"), ti->table_tag)) {
+            if (is_tabletag(S("hhea"), ti->table_tag)) {
                 dynarray_swap(&tag_to_table, 0, i);
-            } else if (is_tabletag(str_lit("head"), ti->table_tag)) {
+            } else if (is_tabletag(S("head"), ti->table_tag)) {
                 dynarray_swap(&tag_to_table, 1, i);
-            } else if (is_tabletag(str_lit("maxp"), ti->table_tag)) {
+            } else if (is_tabletag(S("maxp"), ti->table_tag)) {
                 dynarray_swap(&tag_to_table, 2, i);
-            } else if (is_tabletag(str_lit("hmtx"), ti->table_tag)) {
+            } else if (is_tabletag(S("hmtx"), ti->table_tag)) {
                 dynarray_swap(&tag_to_table, 3, i);
-            } else if (is_tabletag(str_lit("loca"), ti->table_tag)) {
+            } else if (is_tabletag(S("loca"), ti->table_tag)) {
                 dynarray_swap(&tag_to_table, 4, i);
-            } else if (is_tabletag(str_lit("glyf"), ti->table_tag)) {
+            } else if (is_tabletag(S("glyf"), ti->table_tag)) {
                 dynarray_swap(&tag_to_table, 5, i);
             }
         }
@@ -442,9 +466,9 @@ int main(void) {
             Offset32 tr_offset_from_start_of_file = btl_u32(bigendian_tableRecords[index].offset_from_start_of_file);
             u32 tr_length = btl_u32(bigendian_tableRecords[index].length);
 
-            if (is_tabletag(str_lit("cmap"), tr_tableTag)) {
+            if (is_tabletag(S("cmap"), tr_tableTag)) {
                 parse_cmap(&font, table_directory, tr_offset_from_start_of_file);
-            } else if (is_tabletag(str_lit("head"), tr_tableTag)) {
+            } else if (is_tabletag(S("head"), tr_tableTag)) {
                 // This table gives global information about the font. 
                 // The bounding box values should be computed using only glyphs that have contours. 
                 // Glyphs with no contours should be ignored for the purposes of these calculations.
@@ -509,7 +533,7 @@ int main(void) {
 
 
 
-            } else if (is_tabletag(str_lit("hhea"), tr_tableTag)) {
+            } else if (is_tabletag(S("hhea"), tr_tableTag)) {
                 // This table contains information for horizontal layout. 
                 // The values in the minRightSidebearing, minLeftSideBearing and xMaxExtent should be computed using only glyphs that have contours. 
                 // Glyphs with no contours should be ignored for the purposes of these calculations. All reserved areas must be set to 0.
@@ -552,7 +576,7 @@ int main(void) {
 
 
                 btl_numberOfHMetrics = btl_u16(*numberOfHMetrics);
-            } else if (is_tabletag(str_lit("hmtx"), tr_tableTag)) {
+            } else if (is_tabletag(S("hmtx"), tr_tableTag)) {
                 u8 *hmtx_table = table_directory + tr_offset_from_start_of_file;
 
                 Hmetrics *metrics_table = (Hmetrics *)hmtx_table;
@@ -573,7 +597,7 @@ int main(void) {
                     s16 *bigendian_lsb = left_side_bearings + j;
                     dynarray_append(&font.glyph_left_side_bearings, btl_s16(*bigendian_lsb));
                 }
-            } else if (is_tabletag(str_lit("maxp"), tr_tableTag)) {
+            } else if (is_tabletag(S("maxp"), tr_tableTag)) {
                 u8 *maxp_table = table_directory + tr_offset_from_start_of_file;
                 
                 Version16Dot16 *version = (Version16Dot16 *)maxp_table;
@@ -594,9 +618,9 @@ int main(void) {
 
                 font.num_glyphs = btl_u16(*numGlyphs);
 
-            } else if (is_tabletag(str_lit("name"), tr_tableTag)) {
+            } else if (is_tabletag(S("name"), tr_tableTag)) {
                 // might be used later
-            } else if (is_tabletag(str_lit("OS/2"), tr_tableTag)) {
+            } else if (is_tabletag(S("OS/2"), tr_tableTag)) {
                 u8 *OS_slash2_table = table_directory + tr_offset_from_start_of_file;
 
                 u16 *version = (u16 *)OS_slash2_table;
@@ -687,7 +711,7 @@ int main(void) {
                 	
 
 
-            } else if (is_tabletag(str_lit("post"), tr_tableTag)) {
+            } else if (is_tabletag(S("post"), tr_tableTag)) {
 
                 // u8 *post_table = table_directory + tr_offset_from_start_of_file;
 
@@ -702,7 +726,7 @@ int main(void) {
                 // u32 *maxMemType1 = (u32 *)(minMemType1 + 1);
 
 
-            } else if (is_tabletag(str_lit("loca"), tr_tableTag)) {
+            } else if (is_tabletag(S("loca"), tr_tableTag)) {
                 u8 *loca_table = table_directory + tr_offset_from_start_of_file;
 
 
@@ -728,7 +752,7 @@ int main(void) {
                 }
 
 
-            } else if (is_tabletag(str_lit("glyf"), tr_tableTag)) {
+            } else if (is_tabletag(S("glyf"), tr_tableTag)) {
                 u8 *glyf_table = table_directory + tr_offset_from_start_of_file;
                 assert((u64)glyf_table % 2 == 0);
 
@@ -853,8 +877,35 @@ int main(void) {
                             }
                         }
 
+                        for (u64 i2 = 0; i2 < x_arr.count; ++i2) {
+                            ContourPoint pt = {};
+                            pt.point_on_curve = flag_arr.dat[i2] & CONTOUR_FLAGS_OVERLAP_SIMPLE;
+                            pt.x_coord = x_arr.dat[i2];
+                            pt.y_coord = y_arr.dat[i2];
+                            dynarray_append(&glyph.contour_points, pt);
+                        }
+
 
                     } else {
+                        Glyph glyph = {};
+                        u8 *component_glyphs_start = (u8 *)(yMax + 1);
+                        u16 *flags = (u16 *)component_glyphs_start;
+                        u16 *glyphIndex = flags + 1;
+                        while (true) {
+                            
+                            u16 f = btl_u16(*flags);
+                            if (f & COMPOSITE_GLYPH_FLAGS_ARG_1_AND_2_ARE_WORDS) {
+
+                            } else {
+
+                            }
+
+                            if (!(f & COMPOSITE_GLYPH_FLAGS_MORE_COMPONENTS)) {
+                                break;
+                            }
+                        }
+
+
                         todo();
                     }
                 }
